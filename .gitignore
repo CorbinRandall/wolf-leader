@@ -1,0 +1,46 @@
+# Local configuration — never commit secrets or host-specific URLs
+.env
+.env.local
+.env.*.local
+docker-compose.local.yml
+
+# Runtime data — your homelab memory stays private
+data/ide-work.db
+data/ide-work.db-*
+data/deployment-mcp.db
+data/transcript*.jsonl
+data/this_chat.json
+data/INDEX.md
+data/AGENTS.md
+data/ONBOARDING.md
+data/IDE_CLIENT_SETUP.md
+data/SAVE_PROJECT.md
+data/*.py
+
+# Personal projects (keep only the shipped example template)
+data/projects/*
+!data/projects/_example/
+!data/projects/_example/**
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Unraid Compose Manager metadata (not part of the app)
+autostart
+name
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Legacy one-off scripts (optional local utilities)
+migrate.py
+save_chat.sh
+store_current_chat.py

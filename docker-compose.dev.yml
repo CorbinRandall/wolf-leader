@@ -1,0 +1,10 @@
+# Development overlay — live-mount source into the container.
+
+services:
+  wolf-leader:
+    volumes:
+      - .:/app
+    command: >
+      bash -c "pip install -r /app/requirements.txt -q 2>/dev/null;
+      python -m ide_storage.mcp_standalone &
+      exec python -m ide_storage.main"

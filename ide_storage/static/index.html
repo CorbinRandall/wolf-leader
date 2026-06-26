@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wolf Leader</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <header class="sidebar-header">
+        <div class="brand">
+          <span class="brand-icon">◫</span>
+          <div>
+            <h1>Wolf Leader</h1>
+            <p class="subtitle">AI Project Storage</p>
+          </div>
+        </div>
+        <nav class="tabs" id="nav-tabs">
+          <button type="button" class="tab" data-tab="projects">Projects</button>
+          <button type="button" class="tab" data-tab="home">Home</button>
+          <button type="button" class="tab" data-tab="setup">Setup</button>
+          <button type="button" class="tab" data-tab="archive">Archive</button>
+        </nav>
+        <input type="search" id="search" placeholder="Search…" autocomplete="off" />
+      </header>
+      <div id="sidebar-list" class="chat-list"></div>
+      <footer class="sidebar-footer">
+        <span id="list-count">—</span>
+        <a href="/health" target="_blank" rel="noopener">API</a>
+      </footer>
+    </aside>
+
+    <main class="main" id="main">
+      <div id="empty-state" class="empty-state">
+        <h2>Wolf Leader</h2>
+        <p>AI project storage — memories, checkpoints, and handoff for agents.</p>
+      </div>
+
+      <div id="home-view" class="view hidden">
+        <header class="view-header">
+          <h2>Index</h2>
+          <button type="button" id="refresh-index-btn" class="btn btn-secondary">Refresh index</button>
+        </header>
+        <div id="index-content" class="md-content"></div>
+      </div>
+
+      <div id="setup-view" class="view hidden">
+        <header class="view-header">
+          <h2>Device &amp; agent setup</h2>
+          <div class="chat-actions">
+            <button type="button" id="copy-onboarding-prompt-btn" class="btn btn-primary">Copy agent prompt</button>
+            <button type="button" id="copy-onboarding-url-btn" class="btn btn-secondary">Copy API URL</button>
+          </div>
+        </header>
+        <p class="setup-lead">Single onboarding doc for new devices, IDEs, and zero-context agents.</p>
+        <div id="setup-content" class="md-content"></div>
+      </div>
+
+      <div id="project-view" class="view hidden">
+        <header class="chat-header">
+          <div class="chat-header-text">
+            <h2 id="project-title">—</h2>
+            <div id="project-meta" class="chat-meta"></div>
+          </div>
+          <div class="chat-actions">
+            <button type="button" id="copy-agent-start-btn" class="btn btn-primary">Copy pickup prompt</button>
+            <button type="button" id="copy-full-brief-btn" class="btn btn-secondary">Copy full brief</button>
+            <button type="button" id="refresh-brief-btn" class="btn btn-secondary">Refresh brief</button>
+            <button type="button" id="copy-project-context-btn" class="btn btn-secondary">Copy project context</button>
+            <button type="button" id="edit-project-btn" class="btn btn-secondary">Edit</button>
+            <button type="button" id="delete-project-btn" class="btn btn-danger">Delete</button>
+          </div>
+        </header>
+        <p id="project-purpose" class="project-purpose hidden"></p>
+        <p id="brief-meta" class="setup-lead muted"></p>
+        <section class="panel">
+          <h3>Agent brief (distilled)</h3>
+          <div id="agent-brief-preview" class="md-content"></div>
+        </section>
+        <section class="panel">
+          <h3>Memories <button type="button" id="add-memory-btn" class="btn btn-small btn-secondary">+ Add</button></h3>
+          <div id="memories-list"></div>
+        </section>
+        <section class="split-pane">
+          <div>
+            <h3>PROJECT.md <button type="button" id="save-md-btn" class="btn btn-small btn-primary">Save</button></h3>
+            <textarea id="project-md" class="edit-area" rows="14"></textarea>
+          </div>
+          <div>
+            <h3>Preview</h3>
+            <div id="project-md-preview" class="md-content"></div>
+          </div>
+        </section>
+        <section class="panel">
+          <h3>
+            <button type="button" id="toggle-archived-btn" class="btn-link">Archived sessions</button>
+            <span id="archived-count-label" class="muted"></span>
+          </h3>
+          <div id="project-chats-list" class="hidden"></div>
+        </section>
+      </div>
+
+      <div id="chat-view" class="view hidden">
+        <header class="chat-header">
+          <div class="chat-header-text">
+            <h2 id="chat-title">—</h2>
+            <div id="chat-meta" class="chat-meta"></div>
+          </div>
+          <div class="chat-actions">
+            <button type="button" id="edit-chat-btn" class="btn btn-secondary">Edit</button>
+            <button type="button" id="delete-chat-btn" class="btn btn-danger">Delete</button>
+            <button type="button" id="export-md-btn" class="btn btn-secondary">Export .md</button>
+            <button type="button" id="copy-link-btn" class="btn btn-secondary">Copy link</button>
+            <button type="button" id="copy-context-btn" class="btn btn-primary">Copy agent context</button>
+          </div>
+        </header>
+        <section id="summary-section" class="summary-section hidden">
+          <h3>Summary</h3>
+          <div id="chat-summary" class="md-content"></div>
+        </section>
+        <section class="messages-section">
+          <h3>Messages <span id="message-count" class="badge">0</span></h3>
+          <div id="messages" class="messages"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="modal" class="modal">
+    <form id="modal-form" method="dialog">
+      <h3 id="modal-title">Edit</h3>
+      <div id="modal-body"></div>
+      <div class="modal-actions">
+        <button type="button" id="modal-cancel" class="btn btn-secondary">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

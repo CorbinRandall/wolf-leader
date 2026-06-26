@@ -1,0 +1,28 @@
+# Wolf Leader — AI Project Storage. Runs on any Docker host (Pi, Windows, Linux, macOS).
+# Copy .env.example → .env and set IDE_STORAGE_PUBLIC_URL to your LAN IP or hostname.
+#
+# Unraid: use the overlay for Compose Manager paths and extra mounts:
+#   docker compose -f docker-compose.yml -f docker-compose.unraid.yml up -d
+#
+# Live code mount (development):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+services:
+  wolf-leader:
+    container_name: wolf-leader
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      IDE_STORAGE_DB_PATH: /data/ide-work.db
+      IDE_STORAGE_PROJECTS_DIR: /data/projects
+      HOST: 0.0.0.0
+      MCP_HOST: 0.0.0.0
+    ports:
+      - "${PORT:-6971}:6971"
+      - "${MCP_PORT:-6972}:6972"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped

@@ -88,6 +88,31 @@ def relink_for_session(
         conn.close()
         return None
 
+
+    # Manual overrides win over transcript keyword matching.
+    manual_id = MANUAL_LINKS.get(row["id"])
+    if manual_id is None:
+        manual_id = resolve_manual_slug(cur, row["id"])
+    if manual_id is not None:
+        if manual_id == row["project_id"]:
+            conn.close()
+            return None
+        now = datetime.utcnow().isoformat()
+        cur.execute(
+            "UPDATE chats SET project_id = ?, updated_at = ? WHERE id = ?",
+            (manual_id, now, row["id"]),
+        )
+        conn.commit()
+        conn.close()
+        return {
+            "chat_id": row["id"],
+            "from": row["project_id"],
+            "to": manual_id,
+            "title": row["title"],
+            "match_reason": "manual_link",
+            "full_transcript": False,
+        }
+
     transcript = root / session_id / f"{session_id}.jsonl"
     project_id = None
     match_reason = None

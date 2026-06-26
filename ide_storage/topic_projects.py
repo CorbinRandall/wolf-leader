@@ -21,7 +21,15 @@ TOPIC_PATH = "/root"
 
 # Add topic specs here to split catch-all chats into dedicated projects.
 # Each entry: slug, name, description, relink pattern, optional chat_ids to migrate.
-TOPIC_SPECS: list[dict[str, Any]] = []
+TOPIC_SPECS: list[dict[str, Any]] = [
+    {
+        "slug": "unraid-hang-bug",
+        "name": "Unraid Hang Bug",
+        "description": "Investigate Unraid wedged/hung state: ping OK, SSH banner timeout, WebUI dead.",
+        "pattern": r"unraid.?hang|hang bug|banner exchange|wedged.*unraid|ssh/webui dead",
+        "chat_ids": [],
+    },
+]
 
 MANUAL_SLUG_LINKS: dict[int, str] = {
     cid: spec["slug"] for spec in TOPIC_SPECS for cid in spec.get("chat_ids", [])
@@ -59,6 +67,12 @@ def ensure_topic_project(cur: sqlite3.Cursor, spec: dict[str, Any], now: str) ->
             {"metadata": json.dumps(meta)},
             continue_mode="compose_deploy",
             deploy_state=spec.get("deploy_state", "partial"),
+        )
+    elif spec["slug"] == "unraid-hang-bug":
+        meta = metadata_patch(
+            {"metadata": json.dumps(meta)},
+            continue_mode="investigation",
+            deploy_state="removed",
         )
     metadata = json.dumps(meta)
 

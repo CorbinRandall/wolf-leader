@@ -70,6 +70,21 @@ docker compose -f docker-compose.yml -f docker-compose.unraid.yml up -d --build
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
+## Run natively (no Docker)
+
+For a single host without Docker — e.g. a Mac without Docker Desktop — you can run
+Wolf Leader directly with Python. It's lighter (no container, no VM) and the Docker
+workflow above is unchanged; this is an optional alternative.
+
+```bash
+./run-local.sh     # first run bootstraps ./.venv, then starts REST :6971 + MCP :6972 on 127.0.0.1
+./stop-local.sh    # stop both
+```
+
+Requires Python 3.11+ (uses [`uv`](https://github.com/astral-sh/uv) if present, else
+`python3 -m venv`). Binds to `127.0.0.1` by default; override `HOST` / `MCP_HOST` /
+`IDE_STORAGE_PUBLIC_URL` / `IDE_STORAGE_MCP_URL` to expose on a LAN or Tailscale.
+
 ## Environment variables
 
 See [`.env.example`](.env.example). Minimum:

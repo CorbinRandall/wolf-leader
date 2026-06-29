@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# On-demand Wolf Leader checkpoint (local transcript or remote hub upload).
+# On-demand Wolf Leader checkpoint (existing project only).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

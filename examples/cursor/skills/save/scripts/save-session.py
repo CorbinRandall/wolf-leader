@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Save current Cursor session to Wolf Leader when hub is remote (no shared transcript mount)."""
+"""Save current Cursor session to Wolf Leader (local hub or remote client upload)."""
 from __future__ import annotations
 
 import json
@@ -31,6 +31,18 @@ def load_env() -> tuple[str, Path | None]:
     custom = os.environ.get("CURSOR_TRANSCRIPTS_ROOT")
     root = Path(custom) if custom else None
     return api.rstrip("/"), root
+
+
+def api_json(method: str, url: str, payload: dict | None = None, *, timeout: int = 120) -> dict:
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json"} if data else {},
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
 
 
 def extract_text(entry: dict) -> str:
@@ -135,16 +147,104 @@ def title_from_messages(messages: list[dict[str, str]]) -> str:
     return "Cursor session"
 
 
-def post_save(api: str, payload: dict) -> dict:
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        f"{api}/api/save-project",
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+def guess_project_id(api: str, text: str, slug: str | None) -> int | None:
+    if slug:
+        projects = api_json("GET", f"{api}/api/projects")
+        for p in projects.get("projects") or []:
+            if p.get("slug") == slug:
+                return int(p["id"])
+    lowered = text.lower()
+    rules = [
+        ("ide-storage", ("wolf leader", "ide-storage", "/save", "agent-brief")),
+        ("docker-dashboard", ("docker-dashboard", "docker dashboard", "8888")),
+        ("ssh-passwordless", ("ssh-passwordless", "authorized_keys")),
+        ("s3-sleep", ("s3-sleep", "s3 sleep", "dynamix.s3.sleep")),
+        ("nextcloud", ("nextcloud", "8081")),
+    ]
+    projects = api_json("GET", f"{api}/api/projects")
+    slug_to_id = {p.get("slug"): p["id"] for p in projects.get("projects") or [] if p.get("slug")}
+    for target_slug, needles in rules:
+        if any(n in lowered for n in needles) and target_slug in slug_to_id:
+            return int(slug_to_id[target_slug])
+    return None
+
+
+def save_via_hub_transcript(api: str, slug: str | None, session_id: str | None) -> dict | None:
+    body: dict = {}
+    if slug:
+        body["slug"] = slug
+    if session_id:
+        body["session_id"] = session_id
+    try:
+        return api_json("POST", f"{api}/api/save-project", body)
+    except urllib.error.HTTPError as exc:
+        if exc.code != 400:
+            raise
+        detail = exc.read().decode("utf-8", errors="replace")
+        if "No Cursor transcript" not in detail:
+            raise
+    return None
+
+
+def save_via_remote_upload(
+    api: str,
+    *,
+    slug: str | None,
+    session_id: str | None,
+    root_hint: Path | None,
+) -> dict:
+    sid, path = find_transcript(session_id, root_hint=root_hint)
+    if not path:
+        raise RuntimeError("No local Cursor transcript found under ~/.cursor/projects")
+
+    messages = parse_transcript(path)
+    if not messages:
+        raise RuntimeError(f"Transcript empty: {path}")
+
+    title = title_from_messages(messages)
+    workspace = os.environ.get("CURSOR_WORKSPACE") or str(Path.cwd())
+    text = "\n".join(m.get("content", "") for m in messages)
+
+    created = api_json(
+        "POST",
+        f"{api}/api/chats",
+        {
+            "title": title,
+            "workspace_path": workspace,
+            "device_name": os.environ.get("WOLF_LEADER_DEVICE") or "cursor-client",
+            "session_id": sid,
+            "content": f"Synced {len(messages)} messages from local Cursor transcript",
+            "messages": messages,
+        },
     )
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    chat_id = int(created["id"])
+    project_id = guess_project_id(api, text, slug)
+    if project_id is not None:
+        api_json("PUT", f"{api}/api/chats/{chat_id}", {"project_id": project_id})
+    distill = api_json("POST", f"{api}/api/projects/{project_id}/distill", {}) if project_id else None
+    api_json("PUT", f"{api}/api/chats/{chat_id}", {"status": "archived"})
+
+    slug_out = (distill or {}).get("slug") or slug
+    brief_url = f"{api}/api/projects/{slug_out}/agent-brief" if slug_out else None
+    pickup = None
+    if distill and isinstance(distill.get("spec"), dict):
+        pickup = distill["spec"].get("pickup")
+
+    return {
+        "ok": True,
+        "source": "remote_transcript_upload",
+        "session_id": sid,
+        "chat_id": chat_id,
+        "project_id": project_id,
+        "project_slug": slug_out,
+        "project_name": (distill or {}).get("name"),
+        "brief_url": brief_url,
+        "pickup_prompt": pickup,
+        "summary": (
+            f"Saved to **{(distill or {}).get('name') or slug_out or 'hub'}** "
+            f"from local transcript ({len(messages)} messages). Session archived."
+        ),
+    }
 
 
 def main() -> int:
@@ -152,52 +252,19 @@ def main() -> int:
     session_id = os.environ.get("CURSOR_SESSION_ID")
     api, root_hint = load_env()
 
-    # Path A: hub has local transcript mount (same host as Cursor SSH)
     try:
-        body: dict = {}
-        if slug:
-            body["slug"] = slug
-        if session_id:
-            body["session_id"] = session_id
-        result = post_save(api, body)
-        print(json.dumps(result, indent=2))
-        return 0 if result.get("ok") else 1
-    except urllib.error.HTTPError as exc:
-        if exc.code != 400:
-            print(exc.read().decode("utf-8", errors="replace"), file=sys.stderr)
-            return 1
-        detail = exc.read().decode("utf-8", errors="replace")
-        if "No Cursor transcript" not in detail and "transcript" not in detail.lower():
-            print(detail, file=sys.stderr)
-            return 1
-
-    # Path B: read local transcript and upload messages
-    sid, path = find_transcript(session_id, root_hint=root_hint)
-    if not path:
-        print("No local Cursor transcript found under ~/.cursor/projects", file=sys.stderr)
-        return 1
-
-    messages = parse_transcript(path)
-    if not messages:
-        print(f"Transcript empty: {path}", file=sys.stderr)
-        return 1
-
-    payload = {
-        "title": title_from_messages(messages),
-        "content": f"Synced from local transcript {sid}",
-        "messages": messages,
-        "session_id": sid,
-        "workspace_path": os.environ.get("CURSOR_WORKSPACE") or str(Path.cwd()),
-    }
-    if slug:
-        payload["slug"] = slug
-
-    try:
-        result = post_save(api, payload)
+        result = save_via_hub_transcript(api, slug, session_id)
+        if result is None:
+            result = save_via_remote_upload(
+                api, slug=slug, session_id=session_id, root_hint=root_hint
+            )
         print(json.dumps(result, indent=2))
         return 0 if result.get("ok") else 1
     except urllib.error.HTTPError as exc:
         print(exc.read().decode("utf-8", errors="replace"), file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(str(exc), file=sys.stderr)
         return 1
 
 

@@ -59,6 +59,8 @@ Use `best` only if confidence is **high** or **medium** and reasons fit the main
 
 ## Step 4 — Execute
 
+Before saving, write a **semantic descriptor** for this checkpoint (1–3 sentences): what the project is *about* in plain language, synonyms, and intent — not just keywords. Use it when creating memories via API (`semantic_descriptor` on `POST /api/memories`) or enrich the project `metadata.semantic_descriptor` when the whole project's purpose became clearer.
+
 **Bundled script** with your chosen slug:
 
 ```bash

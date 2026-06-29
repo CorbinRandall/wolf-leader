@@ -87,6 +87,8 @@ This is a **new** project — do **not** rely on auto-detect. Do **not** use `/s
 
 ### Execute
 
+Before saving, write a **semantic descriptor** for the new project (2–4 sentences): purpose, scope, synonyms, and how you'd describe it to someone who forgot the name. Include it in `POST /api/projects` as `metadata.semantic_descriptor` and/or a strong `description` field.
+
 **Bundled script** (creates project if needed, uploads transcript, distills):
 
 ```bash

@@ -194,6 +194,13 @@ def post_save_pipeline(
         "spec_warnings": spec_validation.get("warnings"),
         "honest_summary": _checkpoint_summary(spec_result, spec_validation),
     }
+
+    from ide_storage.embed_index import sync_dirty
+
+    report["embeddings"] = sync_dirty(
+        project_id=project_id,
+        chat_ids=[chat["id"]],
+    )
     return report
 
 

@@ -322,10 +322,17 @@ def remember(
     type: str,
     content: str,
     source_chat_id: Optional[int] = None,
+    semantic_descriptor: Optional[str] = None,
 ) -> Dict[str, Any]:
     from .memory_ops import remember_and_refresh
 
-    return remember_and_refresh(project_id, type, content, source_chat_id=source_chat_id)
+    return remember_and_refresh(
+        project_id,
+        type,
+        content,
+        source_chat_id=source_chat_id,
+        semantic_descriptor=semantic_descriptor,
+    )
 
 
 def list_projects_hub(limit: int = 100) -> List[Dict[str, Any]]:
@@ -438,36 +445,6 @@ def save_session_with_pipeline(
 
 
 def hub_search(query: str, limit: int = 20, include_archived: bool = False) -> Dict[str, Any]:
-    pattern = f"%{query}%"
-    results = []
-    with db_conn() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT m.id, printf('[%s] %s', m.type, substr(m.content, 1, 80)) AS title,
-                   'memory' AS kind, m.project_id, m.type AS memory_type, 1 AS rank
-            FROM memories m
-            WHERE m.content LIKE ? AND COALESCE(m.status, 'active') = 'active' LIMIT ?
-            """,
-            (pattern, limit),
-        )
-        results.extend(dict(r) for r in cur.fetchall())
-        cur.execute(
-            """
-            SELECT p.id, p.name AS title, 'project' AS kind, 2 AS rank FROM projects p
-            WHERE p.name LIKE ? OR p.slug LIKE ? LIMIT ?
-            """,
-            (pattern, pattern, limit),
-        )
-        results.extend(dict(r) for r in cur.fetchall())
-        chat_filter = "" if include_archived else " AND COALESCE(status, 'active') = 'active'"
-        cur.execute(
-            f"""
-            SELECT id, title, 'chat' AS kind, 3 AS rank FROM chats
-            WHERE (title LIKE ? OR content LIKE ?){chat_filter} LIMIT ?
-            """,
-            (pattern, pattern, limit),
-        )
-        results.extend(dict(r) for r in cur.fetchall())
-    results.sort(key=lambda r: r.get("rank", 99))
-    return {"query": query, "results": results[:limit]}
+    from ide_storage.search_ops import hybrid_search
+
+    return hybrid_search(query, limit=limit, include_archived=include_archived, hub_mode=True)

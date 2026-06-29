@@ -387,6 +387,7 @@ def insert_memory(
     content: str,
     *,
     source_chat_id: Optional[int] = None,
+    semantic_descriptor: Optional[str] = None,
     existing: Optional[list[dict]] = None,
     auto_extracted: bool = False,
 ) -> dict:
@@ -425,14 +426,18 @@ def insert_memory(
 
         cur.execute(
             """
-            INSERT INTO memories (project_id, type, content, source_chat_id, created_at, updated_at, status)
-            VALUES (?, ?, ?, ?, ?, ?, 'active')
+            INSERT INTO memories (project_id, type, content, source_chat_id, created_at, updated_at, status, semantic_descriptor)
+            VALUES (?, ?, ?, ?, ?, ?, 'active', ?)
             """,
-            (project_id, typ, content, source_chat_id, now, now),
+            (project_id, typ, content, source_chat_id, now, now, semantic_descriptor),
         )
         mid = cur.lastrowid
         superseded_count = _mark_superseded(cur, superseded_ids, now)
         conn.commit()
+
+    from ide_storage.embed_index import sync_dirty
+
+    sync_dirty(project_id=project_id, memory_ids=[mid])
 
     return {
         "id": mid,
@@ -534,9 +539,11 @@ def extract_memories_for_project(
 def refresh_project_after_memory_change(project_id: int) -> dict:
     """Regenerate agent brief and search index after memory changes."""
     from ide_storage.distill_project import distill_project
+    from ide_storage.embed_index import sync_dirty
 
     distill = distill_project(project_id)
     regenerate_index()
+    sync_dirty(project_id=project_id)
     return distill
 
 
@@ -545,8 +552,15 @@ def remember_and_refresh(
     typ: str,
     content: str,
     source_chat_id: Optional[int] = None,
+    semantic_descriptor: Optional[str] = None,
 ) -> dict:
-    result = insert_memory(project_id, typ, content, source_chat_id=source_chat_id)
+    result = insert_memory(
+        project_id,
+        typ,
+        content,
+        source_chat_id=source_chat_id,
+        semantic_descriptor=semantic_descriptor,
+    )
     if result.get("action") == "created":
         result["distill"] = refresh_project_after_memory_change(project_id)
     return result

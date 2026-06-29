@@ -34,6 +34,40 @@ def _add_column(cur, table: str, column: str, col_type: str) -> None:
         pass
 
 
+_vec_extension_loaded = False
+
+
+def load_vec_extension(conn: sqlite3.Connection) -> bool:
+    """Load sqlite-vec on this connection; return False if unavailable."""
+    global _vec_extension_loaded
+    if not _vec_extension_loaded:
+        try:
+            import sqlite_vec
+
+            sqlite_vec.load(conn)
+            _vec_extension_loaded = True
+            return True
+        except Exception:
+            return False
+    try:
+        import sqlite_vec
+
+        sqlite_vec.load(conn)
+        return True
+    except Exception:
+        return False
+
+
+def vec_extension_available() -> bool:
+    try:
+        conn = sqlite3.connect(":memory:")
+        ok = load_vec_extension(conn)
+        conn.close()
+        return ok
+    except Exception:
+        return False
+
+
 def init_db() -> None:
     path = get_db_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -137,6 +171,30 @@ def init_db() -> None:
         cur.execute("CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type)")
         _add_column(cur, "memories", "status", "TEXT DEFAULT 'active'")
+        _add_column(cur, "memories", "semantic_descriptor", "TEXT")
+
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS embeddings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind TEXT NOT NULL,
+                ref_id INTEGER NOT NULL,
+                model TEXT NOT NULL,
+                dim INTEGER NOT NULL,
+                text_hash TEXT NOT NULL,
+                embed_text TEXT NOT NULL,
+                vector BLOB NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(kind, ref_id, model)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_embeddings_kind ON embeddings(kind)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_embeddings_hash ON embeddings(text_hash)"
+        )
 
         conn.commit()
 
@@ -146,6 +204,7 @@ def db_conn():
     path = get_db_path()
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
+    load_vec_extension(conn)
     try:
         yield conn
     finally:

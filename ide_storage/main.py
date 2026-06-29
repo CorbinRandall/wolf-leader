@@ -169,11 +169,13 @@ class MemoryCreate(BaseModel):
     type: str
     content: str
     source_chat_id: Optional[int] = None
+    semantic_descriptor: Optional[str] = None
 
 
 class MemoryUpdate(BaseModel):
     type: Optional[str] = None
     content: Optional[str] = None
+    semantic_descriptor: Optional[str] = None
 
 
 class SnippetCreate(BaseModel):
@@ -376,61 +378,10 @@ async def create_chat(chat: ChatCreate):
 
 @app.get("/api/search")
 async def global_search(q: str, limit: int = 50, include_archived: bool = False):
-    """Search memories, projects, chats, and messages (ranked)."""
-    if not q.strip():
-        return {"results": [], "count": 0}
-    pattern = f"%{q}%"
-    results = []
-    with db_conn() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT m.id, printf('[%s] %s', m.type, substr(m.content, 1, 120)) AS title,
-                   m.content, m.project_id, 'memory' AS kind, 1 AS rank
-            FROM memories m
-            WHERE m.content LIKE ? AND COALESCE(m.status, 'active') = 'active'
-            ORDER BY m.updated_at DESC LIMIT ?
-            """,
-            (pattern, limit),
-        )
-        results.extend(dict(r) for r in cur.fetchall())
-        cur.execute(
-            """
-            SELECT p.id, p.name AS title, p.description AS content, p.slug,
-                   'project' AS kind, 2 AS rank
-            FROM projects p
-            WHERE p.name LIKE ? OR p.slug LIKE ? OR p.description LIKE ?
-            ORDER BY p.updated_at DESC LIMIT ?
-            """,
-            (pattern, pattern, pattern, limit),
-        )
-        results.extend(dict(r) for r in cur.fetchall())
-        chat_filter = "" if include_archived else " AND COALESCE(c.status, 'active') = 'active'"
-        cur.execute(
-            f"""
-            SELECT c.id, c.title, substr(c.content, 1, 200) AS content, c.updated_at,
-                   'chat' AS kind, 3 AS rank
-            FROM chats c
-            WHERE (c.title LIKE ? OR c.content LIKE ?){chat_filter}
-            ORDER BY c.updated_at DESC LIMIT ?
-            """,
-            (pattern, pattern, limit),
-        )
-        results.extend(dict(r) for r in cur.fetchall())
-        cur.execute(
-            f"""
-            SELECT m.id, m.chat_id, m.role, substr(m.content, 1, 200) AS content,
-                   m.created_at, c.title AS chat_title, 'message' AS kind, 4 AS rank
-            FROM messages m
-            JOIN chats c ON c.id = m.chat_id
-            WHERE m.content LIKE ?{chat_filter}
-            ORDER BY m.created_at DESC LIMIT ?
-            """,
-            (pattern, limit),
-        )
-        results.extend(dict(r) for r in cur.fetchall())
-    results.sort(key=lambda r: r.get("rank", 99))
-    return {"query": q, "results": results[:limit], "count": len(results[:limit])}
+    """Search memories, projects, chats, and messages (hybrid keyword + vector when enabled)."""
+    from ide_storage.search_ops import hybrid_search
+
+    return hybrid_search(q, limit=limit, include_archived=include_archived, hub_mode=False)
 
 
 @app.get("/api/chats")
@@ -869,7 +820,14 @@ async def create_project(project: ProjectCreate):
 
     ensure_project_md_from_db(row)
     regenerate_index()
-    return {"id": project_id, "message": "Project created successfully"}
+    from ide_storage.embed_index import sync_dirty
+
+    embed_report = sync_dirty(project_id=project_id)
+    return {
+        "id": project_id,
+        "message": "Project created successfully",
+        "embeddings": embed_report,
+    }
 
 
 @app.get("/api/projects")
@@ -972,7 +930,13 @@ async def update_project(project_id: int, project: ProjectUpdate):
             raise HTTPException(status_code=404, detail="Project not found")
 
     regenerate_index()
-    return {"message": "Project updated successfully"}
+    from ide_storage.embed_index import sync_dirty
+
+    embed_report = sync_dirty(project_id=project_id)
+    return {
+        "message": "Project updated successfully",
+        "embeddings": embed_report,
+    }
 
 
 @app.delete("/api/projects/{project_id}")
@@ -1227,6 +1191,7 @@ async def create_memory(body: MemoryCreate):
             body.type,
             body.content,
             source_chat_id=body.source_chat_id,
+            semantic_descriptor=body.semantic_descriptor,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1276,6 +1241,9 @@ async def update_memory(memory_id: int, body: MemoryUpdate):
     if body.content is not None:
         updates.append("content = ?")
         params.append(body.content)
+    if body.semantic_descriptor is not None:
+        updates.append("semantic_descriptor = ?")
+        params.append(body.semantic_descriptor)
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
     updates.append("updated_at = ?")
@@ -1292,6 +1260,9 @@ async def update_memory(memory_id: int, body: MemoryUpdate):
         cur.execute(f"UPDATE memories SET {', '.join(updates)} WHERE id = ?", params)
         conn.commit()
     refresh_project_after_memory_change(project_id)
+    from ide_storage.embed_index import sync_dirty
+
+    sync_dirty(project_id=project_id, memory_ids=[memory_id])
     return {"message": "Memory updated", "project_id": project_id}
 
 

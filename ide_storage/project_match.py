@@ -249,6 +249,25 @@ def score_project_matches(
             if hits:
                 add(pid, 8 * min(hits, 2), f"description term '{term}' x{hits}")
 
+    # Bounded semantic tie-breaker — keyword/path/slug stay authoritative.
+    try:
+        from ide_storage.embeddings import embeddings_available
+        from ide_storage.embed_index import project_vector_similarities
+
+        if embeddings_available():
+            sims = project_vector_similarities(text)
+            for pid, sim in sims.items():
+                if sim < 0.38:
+                    continue
+                existing = scores.get(pid, {}).get("score", 0)
+                if existing >= 80:
+                    continue
+                pts = int(min(25, max(0.0, (sim - 0.35) * 40)))
+                if pts > 0:
+                    add(pid, pts, f"semantic similarity {sim:.2f}")
+    except Exception:
+        pass
+
     ranked = sorted(scores.values(), key=lambda x: x["score"], reverse=True)
     for item in ranked:
         row = next((r for r in rows if r["id"] == item["project_id"]), None)

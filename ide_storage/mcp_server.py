@@ -108,6 +108,7 @@ def remember(
     type: str = "note",
     project_id: Optional[int] = None,
     source_chat_id: Optional[int] = None,
+    semantic_descriptor: Optional[str] = None,
     ctx: Context = None,
 ) -> dict:
     """Store a typed memory (decision, constraint, active_work, problem, goal, note, caveat)."""
@@ -115,7 +116,9 @@ def remember(
     if not pid:
         return {"ok": False, "error": "No project set — call set_project or resolve_project first"}
     try:
-        result = hub.remember(pid, type, content, source_chat_id=source_chat_id)
+        result = hub.remember(
+            pid, type, content, source_chat_id=source_chat_id, semantic_descriptor=semantic_descriptor
+        )
         return {"ok": True, **result}
     except ValueError as e:
         return {"ok": False, "error": str(e)}
@@ -129,7 +132,7 @@ def list_projects() -> dict:
 
 @mcp.tool
 def search(query: str, limit: int = 15) -> dict:
-    """Search projects and chats by keyword."""
+    """Search projects, memories, and chats (hybrid keyword + vector when enabled)."""
     return hub.hub_search(query, limit)
 
 

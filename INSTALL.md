@@ -8,6 +8,28 @@
 - ~512 MB RAM, ~500 MB disk for the image + your `data/` growth
 - Ports **6971** (REST/Web UI) and **6972** (MCP) available on the host
 
+### Optional semantic search
+
+Hybrid keyword + vector search is available but **disabled by default** so Wolf Leader stays lightweight on small hardware.
+
+| Mode | Extra image size | Extra RAM (while embedding) | Pi 4/5 |
+|------|------------------|-----------------------------|--------|
+| Default (keyword only) | — | — | Yes |
+| `IDE_STORAGE_EMBEDDINGS_ENABLED=1` | ~150–250 MB | ~150–250 MB peak | Yes (4 GB+ recommended) |
+| Tiny Pi / tight RAM | leave disabled | — | Yes |
+
+When enabled, the container bundles **all-MiniLM-L6-v2** (CPU ONNX, no PyTorch). Vectors live in SQLite via `sqlite-vec`; search merges keyword `LIKE` hits with semantic matches (Reciprocal Rank Fusion). Keyword search still handles IPs, paths, and slugs exactly.
+
+```bash
+# In .env or compose environment:
+IDE_STORAGE_EMBEDDINGS_ENABLED=1
+
+# After first deploy with embeddings on, backfill existing data once:
+docker compose exec wolf-leader python -m ide_storage.backfill_embeddings
+```
+
+Leave `IDE_STORAGE_EMBEDDINGS_ENABLED` unset (or `0`) on Pi Zero / 1 GB hosts.
+
 ## Quick start (any platform)
 
 ```bash

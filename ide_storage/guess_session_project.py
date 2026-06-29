@@ -6,14 +6,15 @@ import argparse
 import json
 from pathlib import Path
 
-from ide_storage.import_all_transcripts import DB_PATH, TRANSCRIPTS_ROOT
+from ide_storage.db import db_file
+from ide_storage.import_all_transcripts import TRANSCRIPTS_ROOT
 from ide_storage.project_match import guess_project_from_transcript
 
 
 def guess_slug_for_session(
     session_id: str,
     *,
-    db_path: Path = DB_PATH,
+    db_path: Path | None = None,
     root: Path = TRANSCRIPTS_ROOT,
     workspace_path: str | None = None,
 ) -> dict:
@@ -27,7 +28,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("session_id")
     parser.add_argument("--root", type=Path, default=TRANSCRIPTS_ROOT)
-    parser.add_argument("--db", type=Path, default=DB_PATH)
+    parser.add_argument("--db", type=Path, default=None)
     args = parser.parse_args()
     print(json.dumps(guess_slug_for_session(args.session_id, db_path=args.db, root=args.root)))
 

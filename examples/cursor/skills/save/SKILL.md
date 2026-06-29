@@ -1,6 +1,6 @@
 ---
 name: save
-description: Save the current Cursor session to Wolf Leader (existing project only — auto-detect, checkpoint, archive).
+description: Save the current Cursor session to Wolf Leader (existing project — agent picks match, then checkpoint).
 disable-model-invocation: true
 ---
 
@@ -25,8 +25,6 @@ API="${WOLF_LEADER_API_LOCAL:-${WOLF_LEADER_API:-http://127.0.0.1:6971}}"
 
 ## Step 2 — Fetch the guide (mandatory)
 
-**On shell** (WebFetch often blocks LAN IPs):
-
 ```bash
 curl -s "${API}/api/save-project-guide"
 ```
@@ -37,28 +35,49 @@ Canonical prompt:
 Save this conversation to Wolf Leader on corbox. Fetch and follow every step: ${API}/api/save-project-guide
 ```
 
-## Step 3 — Execute
+## Step 3 — Pick the existing project (mandatory)
 
-**Bundled script** (auto-detect existing project; remote transcript upload when needed):
+Do **not** match on a single stray keyword (e.g. one mention of "sleep" ≠ s3-sleep). Read the **full conversation** and decide the **primary** project.
+
+1. List projects:
+
+```bash
+curl -s "${API}/api/projects"
+```
+
+2. Optional hub hint (ranked by phrase frequency, not one-word hits):
+
+```bash
+curl -s -X POST "${API}/api/projects/match" \
+  -H 'Content-Type: application/json' \
+  -d '{"messages":[...]}'   # or {"text":"..."} from this chat
+```
+
+Use `best` only if confidence is **high** or **medium** and reasons fit the main topic. If `ambiguous` is true or top candidates are close, **you** choose — do not blindly take rank #1.
+
+3. State your pick in one line: slug + why (main task of this chat).
+
+## Step 4 — Execute
+
+**Bundled script** with your chosen slug:
+
+```bash
+~/.cursor/skills/save/scripts/save-session.sh CHOSEN-SLUG
+```
+
+Without a slug (hub auto-match only when confident):
 
 ```bash
 ~/.cursor/skills/save/scripts/save-session.sh
 ```
 
-Optional slug **only** when auto-detect is wrong but the project already exists:
-
-```bash
-~/.cursor/skills/save/scripts/save-session.sh existing-slug
-```
-
 **Manual API:**
 
-- **Cursor with local transcript:** `POST /api/save-project` with `{}`
-- **No transcript:** `POST /api/save-project` with `title` + `messages` from this conversation
-- **MCP:** `save_session()` per the guide
+- `POST /api/save-project` with `{"slug":"CHOSEN-SLUG"}` or `title` + `messages`
+- **MCP:** `set_project({ slug })` then `save_session` per the guide
 
-Do **not** create a new project. If nothing matches, tell the user to use `/new`.
+Do **not** create a new project. If nothing fits, tell the user to use `/new`.
 
-## Step 4 — Report
+## Step 5 — Report
 
-Project slug, brief URL, pickup prompt, and `summary` from the API response.
+Project slug, brief URL, pickup prompt, and `summary`.

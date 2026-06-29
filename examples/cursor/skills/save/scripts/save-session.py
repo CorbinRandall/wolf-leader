@@ -153,20 +153,33 @@ def guess_project_id(api: str, text: str, slug: str | None) -> int | None:
         for p in projects.get("projects") or []:
             if p.get("slug") == slug:
                 return int(p["id"])
-    lowered = text.lower()
-    rules = [
-        ("ide-storage", ("wolf leader", "ide-storage", "/save", "agent-brief")),
-        ("docker-dashboard", ("docker-dashboard", "docker dashboard", "8888")),
-        ("ssh-passwordless", ("ssh-passwordless", "authorized_keys")),
-        ("s3-sleep", ("s3-sleep", "s3 sleep", "dynamix.s3.sleep")),
-        ("nextcloud", ("nextcloud", "8081")),
-    ]
-    projects = api_json("GET", f"{api}/api/projects")
-    slug_to_id = {p.get("slug"): p["id"] for p in projects.get("projects") or [] if p.get("slug")}
-    for target_slug, needles in rules:
-        if any(n in lowered for n in needles) and target_slug in slug_to_id:
-            return int(slug_to_id[target_slug])
-    return None
+    workspace = os.environ.get("CURSOR_WORKSPACE") or str(Path.cwd())
+    try:
+        result = api_json(
+            "POST",
+            f"{api}/api/projects/match",
+            {"text": text[:80_000], "workspace_path": workspace},
+        )
+    except urllib.error.HTTPError:
+        return None
+    best = result.get("best")
+    if not best:
+        return None
+    if best.get("confidence") not in ("high", "medium"):
+        return None
+    return int(best["project_id"])
+
+
+def match_hint(api: str, text: str) -> dict:
+    workspace = os.environ.get("CURSOR_WORKSPACE") or str(Path.cwd())
+    try:
+        return api_json(
+            "POST",
+            f"{api}/api/projects/match",
+            {"text": text[:80_000], "workspace_path": workspace},
+        )
+    except urllib.error.HTTPError as exc:
+        return {"error": exc.read().decode("utf-8", errors="replace")}
 
 
 def save_via_hub_transcript(api: str, slug: str | None, session_id: str | None) -> dict | None:
@@ -220,8 +233,11 @@ def save_via_remote_upload(
     chat_id = int(created["id"])
     project_id = guess_project_id(api, text, slug)
     if project_id is None:
+        hint = match_hint(api, text)
+        detail = json.dumps(hint, indent=2)
         raise RuntimeError(
-            "No existing project matched this conversation. Use /new to create a project and save."
+            "No confident existing project match. Read the full chat, pick a slug, "
+            f"and re-run with: save-session.sh SLUG\n\nHub match hint:\n{detail}"
         )
     api_json("PUT", f"{api}/api/chats/{chat_id}", {"project_id": project_id})
     distill = api_json("POST", f"{api}/api/projects/{project_id}/distill", {})

@@ -14,7 +14,6 @@ from pathlib import Path
 
 from ide_storage.import_transcript import API_URL, clean_user, extract_text, parse_transcript
 from ide_storage.db import get_db_path
-from ide_storage.topic_projects import topic_project_rules
 
 TRANSCRIPTS_ROOT = Path(
     os.environ.get("CURSOR_TRANSCRIPTS_ROOT", "/root/.cursor/projects/root/agent-transcripts")
@@ -45,6 +44,16 @@ GENERIC_DB_TOKENS = {
     "centralized",
     "project",
     "hub",
+    "sleep",
+    "file",
+    "port",
+    "config",
+    "plugin",
+    "manager",
+    "storage",
+    "cursor",
+    "agent",
+    "chat",
 }
 
 
@@ -142,7 +151,7 @@ def load_db_project_rules(db_path: Path) -> list[tuple[int, re.Pattern[str]]]:
                 continue
             tokens: list[str] = []
             if slug:
-                tokens.extend(part for part in re.split(r"[-_]+", slug) if len(part) > 2)
+                tokens.extend(part for part in re.split(r"[-_]+", slug) if len(part) >= 4)
             if name:
                 tokens.extend(part for part in re.split(r"\W+", name) if len(part) > 2)
             if description:
@@ -158,41 +167,18 @@ def load_db_project_rules(db_path: Path) -> list[tuple[int, re.Pattern[str]]]:
 
 
 def guess_project_id(text: str, db_path: Path | None = None) -> int | None:
+    """Pick one project from transcript text using scored full-text matching."""
     explicit = _explicit_project_id(text, db_path)
     if explicit is not None:
         return explicit
 
     text = _strip_hub_paste(text)
+    path = db_path if db_path is not None else DB_PATH
 
-    topic_matches = [
-        project_id for project_id, pattern in topic_project_rules(db_path) if pattern.search(text)
-    ]
-    if len(topic_matches) == 1:
-        return topic_matches[0]
-    if len(topic_matches) > 1:
-        return topic_matches[0]
+    from ide_storage.project_match import best_project_match
 
-    matches = [project_id for project_id, pattern in PROJECT_RULES if pattern.search(text)]
-    if len(matches) == 1:
-        return matches[0]
-    if len(matches) > 1:
-        specific = [pid for pid in matches if pid != CATCH_ALL_PROJECT_ID]
-        if len(specific) == 1:
-            return specific[0]
-        # Prefer earlier rules (more specific stacks before catch-all)
-        for project_id, _ in PROJECT_RULES:
-            if project_id in specific:
-                return project_id
-        return None
-
-    if db_path is not None:
-        db_matches = [pid for pid, pattern in load_db_project_rules(db_path) if pattern.search(text)]
-        if len(db_matches) == 1:
-            return db_matches[0]
-
-    if PROJECT_RULES[-1][1].search(text):
-        return CATCH_ALL_PROJECT_ID
-    return None
+    hit = best_project_match(text, db_path=path)
+    return int(hit["project_id"]) if hit else None
 
 
 def api_request(method: str, url: str, payload: dict | None = None) -> dict:

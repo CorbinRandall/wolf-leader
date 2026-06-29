@@ -155,6 +155,15 @@ class SaveProjectBody(BaseModel):
     messages: Optional[List[SaveMessage]] = None
 
 
+class ProjectMatchBody(BaseModel):
+    text: Optional[str] = None
+    messages: Optional[List[SaveMessage]] = None
+    workspace_path: Optional[str] = None
+    min_score: Optional[int] = None
+    min_lead: Optional[int] = None
+    limit: Optional[int] = 5
+
+
 class MemoryCreate(BaseModel):
     project_id: int
     type: str
@@ -221,6 +230,25 @@ async def api_resolve_project(path: str):
     if not project:
         raise HTTPException(status_code=404, detail="No matching project")
     return project
+
+
+@app.post("/api/projects/match")
+async def api_match_projects(body: ProjectMatchBody = ProjectMatchBody()):
+    """Rank existing projects against conversation text (for /save auto-detect)."""
+    from ide_storage.project_match import match_projects_payload
+
+    messages = None
+    if body.messages:
+        messages = [{"role": m.role, "content": m.content} for m in body.messages]
+
+    return match_projects_payload(
+        messages=messages,
+        text=body.text,
+        workspace_path=body.workspace_path,
+        min_score=body.min_score or 45,
+        min_lead=body.min_lead or 12,
+        limit=body.limit or 5,
+    )
 
 
 @app.post("/api/projects/sync-stubs")

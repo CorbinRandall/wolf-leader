@@ -1,6 +1,8 @@
 # Wolf Leader
 
 **AI Project Storage** for agents — typed memories, `SPEC.yaml` checkpoints, session handoff, and MCP tools for Cursor, Claude Code, CLI workflows, and any client that speaks HTTP or MCP.
+
+
 The idea is simple. With all your different AI apps (chats, IDE's, etc.), it can be really hard to keep track of everything. So rather than trying to keep it all within each AI, you'll just save a project for whatever you're working on into this application, it will distill it down to all the needed information. That way you can hand off to other AI tools and even if you lose an important chat- you can have all the context you need! 
 
 Runs on **any Docker host**: Raspberry Pi, Windows, Linux, macOS, Unraid, cloud VM.

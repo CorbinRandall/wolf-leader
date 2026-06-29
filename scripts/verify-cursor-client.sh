@@ -23,9 +23,6 @@ check "save skill" "$CURSOR_DIR/skills/save/SKILL.md"
 check "save script" "$CURSOR_DIR/skills/save/scripts/save-session.sh"
 check "save uploader" "$CURSOR_DIR/skills/save/scripts/save-session.py"
 check "new skill" "$CURSOR_DIR/skills/new/SKILL.md"
-check "save-new skill" "$CURSOR_DIR/skills/save-new/SKILL.md"
-check "save-new script" "$CURSOR_DIR/skills/save-new/scripts/save-new-session.sh"
-check "save-new uploader" "$CURSOR_DIR/skills/save-new/scripts/save-new-session.py"
 check "mcp.json" "$CURSOR_DIR/mcp.json"
 check "hooks.json" "$CURSOR_DIR/hooks.json"
 check "recall hook" "$CURSOR_DIR/hooks/wolf-leader-recall.sh"
@@ -33,7 +30,7 @@ check "save hook" "$CURSOR_DIR/hooks/wolf-leader-save.sh"
 check "hub rule" "$CURSOR_DIR/rules/wolf-leader-hub.mdc"
 check "env file" "$CURSOR_DIR/wolf-leader.env"
 
-for skill_name in save new save-new; do
+for skill_name in save new; do
   skill_md="$CURSOR_DIR/skills/$skill_name/SKILL.md"
   if [[ -f "$skill_md" ]]; then
     if grep -q "^name: $skill_name" "$skill_md" && \
@@ -92,7 +89,7 @@ fi
 
 echo ""
 if [[ "$FAIL" -eq 0 ]]; then
-  echo "All client files present. Reload Cursor window if /new, /save, or /save-new are missing from / menu."
+  echo "All client files present. Reload Cursor window if /new or /save are missing from / menu."
   exit 0
 fi
 echo "Some checks failed — run: WOLF_LEADER_API=... WOLF_LEADER_MCP=... ./scripts/install-cursor-client.sh"

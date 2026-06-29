@@ -1,51 +1,74 @@
 ---
 name: save
-description: Save the current Cursor session to Wolf Leader (transcript sync, memories, brief refresh, archive).
+description: Save the current Cursor session to Wolf Leader — checkpoint existing work or create a new project from a rabbit-hole chat.
 disable-model-invocation: true
 ---
 
 # Save to Wolf Leader
 
-Works in **any** agent (Cursor, Claude, etc.). User may not have `/save` in their slash menu until the skill is installed and the window reloaded.
+One command for **both** cases: checkpointing work on an existing project **and** saving a long tangent as a **new** project.
+
+Works in **any** agent (Cursor, Claude, etc.). Reload the Cursor window after install if `/save` is missing from the `/` menu.
 
 ## Run when invoked
 
-User says: "save this", "save to Wolf Leader", "checkpoint this chat", or `/save`.
+User says: "save this", "save to Wolf Leader", "checkpoint", "save as new project", "rabbit hole save", or `/save`.
 
-## Step 1 — Load hub config
+## Step 1 — Hub URL
 
-Read `~/.cursor/wolf-leader.env` if present for `WOLF_LEADER_API` / `WOLF_LEADER_API_LOCAL`.
-
-Default API: `http://127.0.0.1:6971` (same host as Cursor SSH). Use the LAN URL from env when the hub runs elsewhere.
+```bash
+source ~/.cursor/wolf-leader.env 2>/dev/null || true
+API="${WOLF_LEADER_API_LOCAL:-${WOLF_LEADER_API:-http://127.0.0.1:6971}}"
+```
 
 ## Step 2 — Fetch the guide (mandatory)
 
 **On shell** (WebFetch often blocks LAN IPs):
 
 ```bash
-source ~/.cursor/wolf-leader.env 2>/dev/null || true
-API="${WOLF_LEADER_API_LOCAL:-${WOLF_LEADER_API:-http://127.0.0.1:6971}}"
 curl -s "${API}/api/save-project-guide"
 ```
 
-Read `content` and follow the path that matches this environment (Cursor transcript vs in-context messages).
+Canonical user prompt (works for both existing and new):
 
-Or run the bundled script (handles remote hubs — uploads local transcript when needed):
+```
+Save this conversation to Wolf Leader on corbox. Fetch and follow every step: ${API}/api/save-project-guide
+```
+
+## Step 3 — Decide: existing project or new?
+
+Read the **full conversation**:
+
+| Situation | What to do |
+|-----------|------------|
+| Clear match to an existing project | Auto-detect — no slug needed |
+| New topic, rabbit hole, or no match | Derive a **name + slug**, or pass slug to the script |
+| Ambiguous | Ask user once for name/slug |
+
+## Step 4 — Execute
+
+**Bundled script** (preferred — auto-detect, remote upload, or create project):
 
 ```bash
 ~/.cursor/skills/save/scripts/save-session.sh
 ```
 
-When Wolf Leader runs on a **different host** than Cursor SSH, the script reads your local `~/.cursor/projects/.../agent-transcripts` JSONL and POSTs messages to the hub.
+Force a specific / new project:
 
-## Step 3 — Execute
+```bash
+~/.cursor/skills/save/scripts/save-session.sh my-project-slug "My Project Name"
+```
 
-- **Cursor with local transcript:** `POST /api/save-project` with `{}`
-- **Claude / no transcript:** `POST /api/save-project` with `title` + `messages` from this conversation
-- **MCP connected:** `save_session()` per the guide
+**Manual API** (when not using the script):
 
-Do **not** ask for project slug unless auto-detection fails.
+- **Existing project, local transcript:** `POST /api/save-project` with `{}`
+- **Existing or new with slug:** `POST /api/save-project` with `{"slug":"SLUG"}`
+- **No transcript:** `POST /api/save-project` with `slug`, `title`, and full `messages`
+- **New project first:** `POST /api/projects` then save with that `slug`
+- **MCP:** `set_project({ slug })` then `save_session` per the guide
 
-## Step 4 — Report
+When no slug is given and auto-detect finds nothing, the script **creates a new project** from the conversation title.
 
-Project slug, brief URL, pickup prompt, and `summary` from the API response.
+## Step 5 — Report
+
+Project name + slug, whether the project was created, brief URL, pickup prompt, and `summary`.

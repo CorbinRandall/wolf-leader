@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Save current Cursor session to Wolf Leader (auto-detect or create project)."""
+"""Save current Cursor session to Wolf Leader (existing project only)."""
 from __future__ import annotations
 
 import json
@@ -61,17 +61,6 @@ def truncate(text: str, limit: int = MAX_MSG_CHARS) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 80] + "\n\n[... truncated for storage ...]"
-
-
-def slugify(text: str) -> str:
-    s = text.lower().strip()
-    s = re.sub(r"[^\w\s-]", "", s)
-    s = re.sub(r"[\s_]+", "-", s).strip("-")
-    return (s[:64] or "new-project")
-
-
-def title_from_slug(slug: str) -> str:
-    return " ".join(word.capitalize() for word in slug.split("-") if word)
 
 
 def parse_transcript(path: Path) -> list[dict[str, str]]:
@@ -180,26 +169,6 @@ def guess_project_id(api: str, text: str, slug: str | None) -> int | None:
     return None
 
 
-def ensure_project(
-    api: str,
-    *,
-    slug: str,
-    name: str,
-    description: str | None = None,
-) -> tuple[int, bool]:
-    projects = api_json("GET", f"{api}/api/projects")
-    for project in projects.get("projects") or []:
-        if project.get("slug") == slug:
-            return int(project["id"]), False
-
-    workspace = os.environ.get("CURSOR_WORKSPACE") or str(Path.cwd())
-    body: dict[str, str] = {"name": name, "slug": slug, "path": workspace}
-    if description:
-        body["description"] = description
-    created = api_json("POST", f"{api}/api/projects", body)
-    return int(created["id"]), True
-
-
 def save_via_hub_transcript(api: str, slug: str | None, session_id: str | None) -> dict | None:
     body: dict = {}
     if slug:
@@ -217,91 +186,12 @@ def save_via_hub_transcript(api: str, slug: str | None, session_id: str | None) 
     return None
 
 
-def save_to_forced_project(
-    api: str,
-    *,
-    project_id: int,
-    slug: str,
-    session_id: str | None,
-    root_hint: Path | None,
-) -> dict:
-    sid, path = find_transcript(session_id, root_hint=root_hint)
-    if not path:
-        raise RuntimeError("No local Cursor transcript found under ~/.cursor/projects")
-
-    messages = parse_transcript(path)
-    if not messages:
-        raise RuntimeError(f"Transcript empty: {path}")
-
-    title = title_from_messages(messages)
-    workspace = os.environ.get("CURSOR_WORKSPACE") or str(Path.cwd())
-
-    try:
-        report = api_json(
-            "POST",
-            f"{api}/api/save-project",
-            {
-                "slug": slug,
-                "title": title,
-                "workspace_path": workspace,
-                "session_id": sid,
-                "messages": messages,
-            },
-            timeout=180,
-        )
-        if report.get("ok"):
-            report["source"] = report.get("source") or "save_project_messages"
-            report["project_slug"] = report.get("project_slug") or slug
-            return report
-    except urllib.error.HTTPError:
-        pass
-
-    created = api_json(
-        "POST",
-        f"{api}/api/chats",
-        {
-            "title": title,
-            "workspace_path": workspace,
-            "device_name": os.environ.get("WOLF_LEADER_DEVICE") or "cursor-client",
-            "session_id": sid,
-            "content": f"Saved {len(messages)} messages from local Cursor transcript",
-            "messages": messages,
-        },
-    )
-    chat_id = int(created["id"])
-    api_json("PUT", f"{api}/api/chats/{chat_id}", {"project_id": project_id})
-    distill = api_json("POST", f"{api}/api/projects/{project_id}/distill", {})
-    api_json("PUT", f"{api}/api/chats/{chat_id}", {"status": "archived"})
-
-    brief_url = f"{api}/api/projects/{slug}/agent-brief"
-    pickup = None
-    if isinstance(distill.get("spec"), dict):
-        pickup = distill["spec"].get("pickup")
-
-    return {
-        "ok": True,
-        "source": "remote_transcript_forced_project",
-        "session_id": sid,
-        "chat_id": chat_id,
-        "project_id": project_id,
-        "project_slug": slug,
-        "project_name": distill.get("name") or title,
-        "brief_url": brief_url,
-        "pickup_prompt": pickup,
-        "summary": (
-            f"Saved to **{distill.get('name') or slug}** "
-            f"from local transcript ({len(messages)} messages). Session archived."
-        ),
-    }
-
-
 def save_via_remote_upload(
     api: str,
     *,
     slug: str | None,
     session_id: str | None,
     root_hint: Path | None,
-    force_new: bool = False,
 ) -> dict:
     sid, path = find_transcript(session_id, root_hint=root_hint)
     if not path:
@@ -314,21 +204,6 @@ def save_via_remote_upload(
     title = title_from_messages(messages)
     workspace = os.environ.get("CURSOR_WORKSPACE") or str(Path.cwd())
     text = "\n".join(m.get("content", "") for m in messages)
-
-    project_created = False
-    project_id: int | None = None
-    slug_out = slugify(slug) if slug else None
-
-    if slug_out and not force_new:
-        project_id = guess_project_id(api, text, slug_out)
-    elif not force_new:
-        project_id = guess_project_id(api, text, None)
-
-    if project_id is None:
-        name = title_from_slug(slug_out) if slug_out else title
-        if not slug_out:
-            slug_out = slugify(name)
-        project_id, project_created = ensure_project(api, slug=slug_out, name=name)
 
     created = api_json(
         "POST",
@@ -343,17 +218,21 @@ def save_via_remote_upload(
         },
     )
     chat_id = int(created["id"])
+    project_id = guess_project_id(api, text, slug)
+    if project_id is None:
+        raise RuntimeError(
+            "No existing project matched this conversation. Use /new to create a project and save."
+        )
     api_json("PUT", f"{api}/api/chats/{chat_id}", {"project_id": project_id})
     distill = api_json("POST", f"{api}/api/projects/{project_id}/distill", {})
     api_json("PUT", f"{api}/api/chats/{chat_id}", {"status": "archived"})
 
-    slug_out = (distill or {}).get("slug") or slug_out
+    slug_out = (distill or {}).get("slug") or slug
     brief_url = f"{api}/api/projects/{slug_out}/agent-brief" if slug_out else None
     pickup = None
     if distill and isinstance(distill.get("spec"), dict):
         pickup = distill["spec"].get("pickup")
 
-    summary_prefix = "Created project and saved" if project_created else "Saved to"
     return {
         "ok": True,
         "source": "remote_transcript_upload",
@@ -362,48 +241,26 @@ def save_via_remote_upload(
         "project_id": project_id,
         "project_slug": slug_out,
         "project_name": (distill or {}).get("name"),
-        "project_created": project_created,
         "brief_url": brief_url,
         "pickup_prompt": pickup,
         "summary": (
-            f"{summary_prefix} **{(distill or {}).get('name') or slug_out or 'hub'}** "
+            f"Saved to **{(distill or {}).get('name') or slug_out or 'hub'}** "
             f"from local transcript ({len(messages)} messages). Session archived."
         ),
     }
 
 
 def main() -> int:
-    slug_arg = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else None
-    name_arg = sys.argv[2] if len(sys.argv) > 2 else None
+    slug = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else None
     session_id = os.environ.get("CURSOR_SESSION_ID")
     api, root_hint = load_env()
 
     try:
-        if slug_arg:
-            slug = slugify(slug_arg)
-            name = name_arg.strip() if name_arg else title_from_slug(slug)
-            project_id, created = ensure_project(api, slug=slug, name=name)
-            result = save_via_hub_transcript(api, slug, session_id)
-            if result is None:
-                result = save_to_forced_project(
-                    api,
-                    project_id=project_id,
-                    slug=slug,
-                    session_id=session_id,
-                    root_hint=root_hint,
-                )
-            result["project_created"] = created
-            if created:
-                result["summary"] = (
-                    f"Created project **{name}** (`{slug}`). "
-                    + (result.get("summary") or "")
-                )
-        else:
-            result = save_via_hub_transcript(api, None, session_id)
-            if result is None:
-                result = save_via_remote_upload(
-                    api, slug=None, session_id=session_id, root_hint=root_hint
-                )
+        result = save_via_hub_transcript(api, slug, session_id)
+        if result is None:
+            result = save_via_remote_upload(
+                api, slug=slug, session_id=session_id, root_hint=root_hint
+            )
         print(json.dumps(result, indent=2))
         return 0 if result.get("ok") else 1
     except urllib.error.HTTPError as exc:

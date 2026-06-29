@@ -15,8 +15,8 @@ usage() {
 Usage: WOLF_LEADER_API=http://HOST:6971 WOLF_LEADER_MCP=http://HOST:6972/mcp $0
 
 Installs:
-  \$CURSOR_DIR/skills/save/       — /save (checkpoint or new project)
-  \$CURSOR_DIR/skills/new/        — /new project setup
+  \$CURSOR_DIR/skills/save/       — /save (existing project checkpoint)
+  \$CURSOR_DIR/skills/new/        — /new (setup or new project + save)
   \$CURSOR_DIR/mcp.json         — wolf-leader MCP (merged)
   \$CURSOR_DIR/hooks.json       — sessionStart + stop hooks
   \$CURSOR_DIR/hooks/           — hook scripts
@@ -41,7 +41,7 @@ fi
 
 mkdir -p \
   "$CURSOR_DIR/skills/save/scripts" \
-  "$CURSOR_DIR/skills/new" \
+  "$CURSOR_DIR/skills/new/scripts" \
   "$CURSOR_DIR/hooks" \
   "$CURSOR_DIR/rules"
 
@@ -56,6 +56,10 @@ install -m 755 "$CURSOR_EXAMPLES/skills/save/scripts/save-session.py" \
   "$CURSOR_DIR/skills/save/scripts/save-session.py"
 
 install -m 644 "$CURSOR_EXAMPLES/skills/new/SKILL.md" "$CURSOR_DIR/skills/new/SKILL.md"
+install -m 755 "$CURSOR_EXAMPLES/skills/new/scripts/new-project-session.sh" \
+  "$CURSOR_DIR/skills/new/scripts/new-project-session.sh"
+install -m 755 "$CURSOR_EXAMPLES/skills/new/scripts/new-project-session.py" \
+  "$CURSOR_DIR/skills/new/scripts/new-project-session.py"
 
 # --- hooks ---
 install -m 644 "$CURSOR_EXAMPLES/hooks.json" "$CURSOR_DIR/hooks.json"
@@ -132,4 +136,4 @@ fi
 echo ""
 echo "Wolf Leader Cursor client installed under $CURSOR_DIR"
 echo "Reload the Cursor window, then verify: ./scripts/verify-cursor-client.sh"
-echo "Slash commands: /new (setup), /save (checkpoint or new project from chat)."
+echo "Slash commands: /new (setup or new project + save), /save (existing project checkpoint)."

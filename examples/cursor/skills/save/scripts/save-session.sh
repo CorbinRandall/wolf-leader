@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# On-demand Wolf Leader checkpoint (auto-detect, new project, or forced slug).
+# On-demand Wolf Leader checkpoint (existing project only).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

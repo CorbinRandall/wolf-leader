@@ -1,39 +1,42 @@
 ---
 name: new
-description: Start a brand-new Wolf Leader project — connect workspace, fetch onboarding, finish client setup.
+description: New Wolf Leader project — workspace setup at chat start, or create project and save at chat end.
 disable-model-invocation: true
 ---
 
 # New Wolf Leader project
 
-Use at the **start** of a completely new project or zero-context agent session.
+Use `/new` at the **beginning** or **end** of a chat. Pick the path that matches.
 
-## Run when invoked
+| When | Goal |
+|------|------|
+| **Start** of chat | Connect workspace, run onboarding |
+| **End** of chat | Create a **new** project from this conversation and save |
 
-User says: "set up Wolf Leader", "new project", "connect to IDE Storage", or `/new`.
+For checkpointing an **existing** project, use `/save` instead.
 
-## Step 1 — Hub URL
-
-Read `~/.cursor/wolf-leader.env` for `WOLF_LEADER_API` / `WOLF_LEADER_API_LOCAL`.
+## Hub URL (both paths)
 
 ```bash
 source ~/.cursor/wolf-leader.env 2>/dev/null || true
 API="${WOLF_LEADER_API_LOCAL:-${WOLF_LEADER_API:-http://127.0.0.1:6971}}"
 ```
 
-## Step 2 — Fetch onboarding (mandatory)
+---
 
-**On shell** (WebFetch often blocks LAN IPs):
+## Path A — Beginning (setup)
+
+Use at the **start** of a completely new project or zero-context session.
+
+User says: "set up Wolf Leader", "connect workspace", or `/new` at chat start.
+
+### Fetch onboarding (mandatory)
 
 ```bash
 curl -s "${API}/api/onboarding"
 ```
 
-Read the full `content` and execute every setup step that applies to this machine (MCP, AGENTS.md, hooks, skills, transcript import).
-
-## Step 3 — User prompt (canonical)
-
-Tell the agent:
+Canonical prompt:
 
 ```
 Connect this workspace to Wolf Leader on corbox and finish setup.
@@ -41,11 +44,9 @@ Connect this workspace to Wolf Leader on corbox and finish setup.
 Fetch and follow: ${API}/api/onboarding
 ```
 
-(Substitute the real `API` value from step 1 — do not hardcode an IP.)
+Read `content` and complete every step (MCP, AGENTS.md, hooks, skills, transcript import).
 
-## Step 4 — If client files are missing
-
-From a wolf-leader checkout:
+If client files are missing:
 
 ```bash
 WOLF_LEADER_API="${API}" WOLF_LEADER_MCP="${API%:6971}:6972/mcp" \
@@ -54,6 +55,54 @@ WOLF_LEADER_API="${API}" WOLF_LEADER_MCP="${API%:6971}:6972/mcp" \
 
 Reload the Cursor window after installing skills.
 
-## Step 5 — Report
+**Report:** MCP connected, `AGENTS.md` present, `/save` and `/new` skills installed, hub reachable.
 
-Confirm: MCP connected, `AGENTS.md` in workspace, `/save` skill present, onboarding checklist items done, hub reachable.
+---
+
+## Path B — End (create project + save)
+
+Use after a **long rabbit-hole** or new-topic chat when this work should become its **own** project.
+
+User says: "save as new project", "new project from this chat", or `/new` at chat end.
+
+### Fetch save guide (mandatory)
+
+```bash
+curl -s "${API}/api/save-project-guide"
+```
+
+Canonical prompt:
+
+```
+Save this conversation to Wolf Leader on corbox. Fetch and follow every step: ${API}/api/save-project-guide
+```
+
+This is a **new** project — do **not** rely on auto-detect. Do **not** use `/save`.
+
+### Choose name + slug
+
+1. From the **full conversation**, pick a short **name** and **slug** (e.g. `Docker Dashboard` → `docker-dashboard`).
+2. `GET ${API}/api/projects` — if slug exists for a different topic, pick a more specific slug.
+3. Only ask the user if the topic is genuinely ambiguous.
+
+### Execute
+
+**Bundled script** (creates project if needed, uploads transcript, distills):
+
+```bash
+~/.cursor/skills/new/scripts/new-project-session.sh
+```
+
+With explicit slug:
+
+```bash
+~/.cursor/skills/new/scripts/new-project-session.sh my-project-slug "My Project Name"
+```
+
+**Manual API:**
+
+- `POST /api/projects` with `name`, `slug`, `path`
+- `POST /api/save-project` with `slug`, `title`, and full `messages`
+- Or MCP: `set_project({ slug })` then `save_session` per the guide
+
+**Report:** Project name + slug, whether created, brief URL, pickup prompt, summary.

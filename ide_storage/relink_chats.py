@@ -8,9 +8,9 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+from ide_storage.db import db_file
 from ide_storage.import_all_transcripts import (
     CATCH_ALL_PROJECT_ID,
-    DB_PATH,
     TRANSCRIPTS_ROOT,
     guess_project_id,
 )
@@ -73,13 +73,13 @@ def relink_chat(
 
 def relink_for_session(
     session_id: str,
-    db_path: Path = DB_PATH,
+    db_path: Path | None = None,
     *,
     force: bool = False,
     root: Path = TRANSCRIPTS_ROOT,
 ) -> dict | None:
     """Relink a single chat by Cursor session_id (full transcript when available)."""
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path or db_file())
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
     cur.execute("SELECT id, project_id, title FROM chats WHERE session_id = ?", (session_id,))
@@ -152,7 +152,7 @@ def relink_for_session(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Link chats to projects by topic")
-    parser.add_argument("--db", type=Path, default=DB_PATH)
+    parser.add_argument("--db", type=Path, default=None)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true", help="Re-guess even if project_id is set")
     parser.add_argument(
@@ -161,9 +161,10 @@ def main() -> None:
         help="After pattern matching, assign any chat still without a project to this id",
     )
     args = parser.parse_args()
+    db_path = args.db or db_file()
 
     now = datetime.utcnow().isoformat()
-    conn = sqlite3.connect(args.db)
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
     cur.execute("SELECT id, title, content, project_id FROM chats ORDER BY id")
@@ -185,7 +186,7 @@ def main() -> None:
             project_id = resolve_manual_slug(cur, chat_id)
         if project_id is None:
             text = chat_text(cur, chat_id, row["title"], row["content"])
-            project_id = guess_project_id(text, db_path=args.db)
+            project_id = guess_project_id(text, db_path=db_path)
 
         if project_id is None or project_id == current:
             continue

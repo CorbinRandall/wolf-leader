@@ -13,13 +13,15 @@ from datetime import datetime
 from pathlib import Path
 
 from ide_storage.import_transcript import API_URL, clean_user, extract_text, parse_transcript
-from ide_storage.db import get_db_path
+from ide_storage.db import db_file, get_db_path
 from ide_storage.topic_projects import topic_project_rules
 
 TRANSCRIPTS_ROOT = Path(
     os.environ.get("CURSOR_TRANSCRIPTS_ROOT", "/root/.cursor/projects/root/agent-transcripts")
 )
-DB_PATH = Path(get_db_path())
+
+# Back-compat alias — prefer db_file() at runtime (env may differ from import time).
+DB_PATH = db_file()
 
 # Catch-all server-admin chats use project 1 (compose root) when present.
 CATCH_ALL_PROJECT_ID = 1

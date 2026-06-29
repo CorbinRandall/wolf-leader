@@ -1,0 +1,17 @@
+---
+description: Wolf Leader project memory — recall before work, remember during, /save at end
+alwaysApply: true
+---
+
+# Wolf Leader
+
+Hub URLs live in `~/.cursor/wolf-leader.env`.
+
+## Every session
+
+1. **Start** — `resolve_project({ path: "<workspace>" })` then `recall()` or `get_brief()`. On corbox without MCP, `curl` the brief URL from the bootstrap response.
+2. **During** — `remember({ type: "decision", content: "..." })` for durable facts.
+3. **Checkpoint** — type **`/save`** (install: `./scripts/install-cursor-client.sh` from wolf-leader repo).
+4. **End** — stop hook auto-syncs; use `/save` before closing for a final checkpoint.
+
+Do not redeploy stacks when `handoff_tier` is `continue`. Read `on_disk` in SPEC when tier is `orient` or `rebuild`.

@@ -111,12 +111,27 @@ On the **server**, MCP can use `http://127.0.0.1:6972/mcp`. On **laptops**, use 
 
 ---
 
-## Phase 2 — Workspace hooks (Cursor, optional)
+## Phase 2 — Cursor client (recommended)
 
-- **sessionStart** — inject bootstrap from `GET /api/bootstrap?path=…`
-- **stop** — run transcript import + `/save` pipeline
+Install skills, MCP, hooks, and rules in one step from a wolf-leader checkout:
 
-See INSTALL.md for hook examples.
+```bash
+WOLF_LEADER_API=http://YOUR_HOST:6971 \
+WOLF_LEADER_MCP=http://YOUR_HOST:6972/mcp \
+./scripts/install-cursor-client.sh
+
+./scripts/verify-cursor-client.sh
+```
+
+This installs:
+
+- **`/save` skill** → `~/.cursor/skills/save/` (reload Cursor window after install)
+- **MCP** → `~/.cursor/mcp.json` (`wolf-leader` server)
+- **Hooks** — `sessionStart` bootstrap recall + `stop` auto-save
+- **Rule** — `wolf-leader-hub.mdc` (recall / remember / save)
+- **`AGENTS.md`** symlink in workspace root (optional `WORKSPACE=/root`)
+
+Source files live in `examples/cursor/`. See INSTALL.md for details.
 
 ---
 

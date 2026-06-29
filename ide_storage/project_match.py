@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from ide_storage.hub import normalize_path, resolve_project
+from ide_storage.db import db_file
 from ide_storage.import_all_transcripts import (
     CATCH_ALL_PROJECT_ID,
-    DB_PATH,
     guess_project_id,
 )
 from ide_storage.import_transcript import extract_text
@@ -85,13 +85,14 @@ def _slug_rows(db_path: Path) -> list[dict[str, Any]]:
 def score_project_matches(
     text: str,
     *,
-    db_path: Path = DB_PATH,
+    db_path: Path | None = None,
     workspace_path: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return project match candidates sorted by score (highest first)."""
     if not text.strip():
         return []
 
+    db = db_path or db_file()
     scores: dict[int, dict[str, Any]] = {}
 
     def add(pid: int, points: int, reason: str) -> None:
@@ -104,7 +105,7 @@ def score_project_matches(
         bucket["score"] += points
         bucket["reasons"].append(reason)
 
-    rows = _slug_rows(db_path)
+    rows = _slug_rows(db)
     slug_to_id = {r["slug"]: r["id"] for r in rows if r.get("slug")}
 
     for slug in set(COMPOSE_SLUG_RE.findall(text)):
@@ -128,14 +129,14 @@ def score_project_matches(
         if project:
             add(project["id"], 90, f"workspace path {workspace_path}")
 
-    guessed = guess_project_id(text, db_path=db_path)
+    guessed = guess_project_id(text, db_path=db)
     if guessed:
         add(guessed, 60, "keyword rules on full transcript")
 
     # Recency: last user messages often name the real topic
     user_chunks = re.split(r"\n+", text)
     tail = "\n".join(user_chunks[-8:])
-    tail_guess = guess_project_id(tail, db_path=db_path)
+    tail_guess = guess_project_id(tail, db_path=db)
     if tail_guess:
         add(tail_guess, 25, "keyword rules on recent messages")
 
@@ -154,7 +155,7 @@ def score_project_matches(
 def best_project_match(
     text: str,
     *,
-    db_path: Path = DB_PATH,
+    db_path: Path | None = None,
     workspace_path: str | None = None,
     min_score: int = 50,
 ) -> dict[str, Any] | None:
@@ -172,7 +173,7 @@ def best_project_match(
 def guess_project_from_transcript(
     path: Path,
     *,
-    db_path: Path = DB_PATH,
+    db_path: Path | None = None,
     workspace_path: str | None = None,
 ) -> dict[str, Any]:
     """Infer project from a transcript file path."""

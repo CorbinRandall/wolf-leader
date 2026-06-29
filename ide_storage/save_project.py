@@ -11,9 +11,10 @@ from pathlib import Path
 from typing import Any
 
 from ide_storage.branding import PRODUCT_NAME
-from ide_storage.import_all_transcripts import CATCH_ALL_PROJECT_ID, DB_PATH, TRANSCRIPTS_ROOT
+from ide_storage.db import db_file
+from ide_storage.import_all_transcripts import CATCH_ALL_PROJECT_ID, TRANSCRIPTS_ROOT
 from ide_storage.post_save_pipeline import _sync_session, post_save_pipeline
-from ide_storage.hub import resolve_project, save_session_with_pipeline
+from ide_storage.hub import resolve_project, save_session
 from ide_storage.project_match import (
     best_project_match,
     guess_project_from_transcript,
@@ -58,11 +59,11 @@ def link_chat_to_project(
     session_id: str,
     project_id: int,
     *,
-    db_path: Path = DB_PATH,
+    db_path: Path | None = None,
     force: bool = False,
 ) -> dict[str, Any] | None:
     """Assign project_id to chat for session before distill."""
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path or db_file())
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
     cur.execute("SELECT id, project_id, title FROM chats WHERE session_id = ?", (session_id,))
@@ -102,7 +103,7 @@ def save_from_conversation(
     project_slug: str | None = None,
     workspace_path: str | None = None,
     session_id: str | None = None,
-    db_path: Path = DB_PATH,
+    db_path: Path | None = None,
 ) -> dict[str, Any]:
     """Save an in-context agent conversation (Claude, etc.) — no Cursor transcript."""
     import uuid
@@ -136,7 +137,7 @@ def save_from_conversation(
             "reasons": [f"user specified slug {project_slug}"],
         }
     else:
-        hit = best_project_match(text, db_path=db_path, workspace_path=workspace or None)
+        hit = best_project_match(text, db_path=db_path or db_file(), workspace_path=workspace or None)
         if hit:
             project_id = hit["project_id"]
             match = {
@@ -156,7 +157,7 @@ def save_from_conversation(
     sid = session_id or str(uuid.uuid4())
     report["session_id"] = sid
 
-    saved = save_session_with_pipeline(
+    saved = save_session(
         title=title.strip() or "Agent conversation",
         content=content or f"Saved {len(messages)} messages from agent conversation",
         session_id=sid,
@@ -171,7 +172,12 @@ def save_from_conversation(
     # re-runs guess_project_id on just title + first messages, which lets a
     # keyword magnet (e.g. SSH) override the correct project. A None project is
     # still relinked downstream because relink_for_session self-forces when unset.
-    pipeline = post_save_pipeline(chat_id=saved["id"], sync=False, force_relink=False)
+    pipeline = post_save_pipeline(
+        session_id=sid,
+        chat_id=saved["id"],
+        sync=False,
+        force_relink=False,
+    )
     report["steps"].append({"pipeline": {k: pipeline.get(k) for k in (
         "ok", "error", "project_linked", "project_slug", "project_name",
         "brief_url", "pickup_prompt", "checkpoint_review", "archived",
@@ -199,7 +205,7 @@ def save_project(
     content: str | None = None,
     messages: list[dict[str, str]] | None = None,
     root: Path = TRANSCRIPTS_ROOT,
-    db_path: Path = DB_PATH,
+    db_path: Path | None = None,
     force_relink: bool = True,
 ) -> dict[str, Any]:
     """
@@ -249,7 +255,7 @@ def save_project(
         }
     else:
         match = guess_project_from_transcript(
-            transcript, db_path=db_path, workspace_path=workspace
+            transcript, db_path=db_path or db_file(), workspace_path=workspace
         )
 
     report["project_match"] = match
@@ -270,7 +276,7 @@ def save_project(
         link = link_chat_to_project(
             sid,
             match["project_id"],
-            db_path=db_path,
+            db_path=db_path or db_file(),
             force=relink_force or bool(project_slug),
         )
         if link:

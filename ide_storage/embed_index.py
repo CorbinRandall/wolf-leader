@@ -41,6 +41,14 @@ def _project_semantic_descriptor(metadata: Any) -> str:
 def memory_embed_text(row: sqlite3.Row | dict[str, Any]) -> str:
     data = dict(row)
     parts: list[str] = []
+    # Project context anchors the vector so memories from different projects
+    # don't collapse into undifferentiated soup.
+    project_name = (data.get("project_name") or "").strip()
+    project_slug = (data.get("project_slug") or "").strip()
+    if project_name:
+        parts.append(f"Project: {project_name}")
+    elif project_slug:
+        parts.append(f"Project: {project_slug}")
     descriptor = (data.get("semantic_descriptor") or "").strip()
     if descriptor:
         parts.append(descriptor)
@@ -137,18 +145,20 @@ def sync_dirty(
 
         pending: list[tuple[str, int, str]] = []
 
-        # Memories
+        # Memories — JOIN projects so embed text includes project name for better clustering
         mem_query = """
-            SELECT id, type, content, semantic_descriptor
-            FROM memories
-            WHERE COALESCE(status, 'active') = 'active'
+            SELECT m.id, m.type, m.content, m.semantic_descriptor,
+                   p.name AS project_name, p.slug AS project_slug
+            FROM memories m
+            LEFT JOIN projects p ON p.id = m.project_id
+            WHERE COALESCE(m.status, 'active') = 'active'
         """
         mem_params: list[Any] = []
         if project_id is not None:
-            mem_query += " AND project_id = ?"
+            mem_query += " AND m.project_id = ?"
             mem_params.append(project_id)
         if memory_ids:
-            mem_query += f" AND id IN ({','.join('?' * len(memory_ids))})"
+            mem_query += f" AND m.id IN ({','.join('?' * len(memory_ids))})"
             mem_params.extend(memory_ids)
         cur.execute(mem_query, mem_params)
         mem_rows = cur.fetchall()
@@ -230,12 +240,16 @@ def sync_dirty(
     return report
 
 
+MIN_SIMILARITY = 0.25  # cosine distance > 0.75 → noise, discard
+
+
 def knn(
     query_vector: list[float],
     *,
     kinds: tuple[str, ...] = ("memory", "project", "chat"),
     limit: int = 50,
     project_id: int | None = None,
+    min_similarity: float = MIN_SIMILARITY,
 ) -> list[dict[str, Any]]:
     """Cosine-distance KNN over the embeddings table."""
     if not embeddings_available():
@@ -269,8 +283,9 @@ def knn(
             """
             params.append(project_id)
 
-        sql += " ORDER BY distance ASC LIMIT ?"
-        params.append(limit)
+        max_distance = 1.0 - min_similarity
+        sql += " AND vec_distance_cosine(e.vector, ?) <= ? ORDER BY distance ASC LIMIT ?"
+        params.extend([blob, max_distance, limit])
 
         cur.execute(sql, params)
         rows = [dict(r) for r in cur.fetchall()]
@@ -364,5 +379,5 @@ def project_vector_similarities(query_text: str) -> dict[int, float]:
     if not query_vec:
         return {}
 
-    hits = knn(query_vec, kinds=("project",), limit=20)
+    hits = knn(query_vec, kinds=("project",), limit=20, min_similarity=0.20)
     return {int(h["id"]): float(h.get("similarity") or 0.0) for h in hits}

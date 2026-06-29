@@ -8,6 +8,9 @@ from ide_storage.embed_index import knn
 from ide_storage.embeddings import embed_one, embeddings_available
 
 RRF_K = 60
+# Vector results get 1.5x weight so semantic matches can surface over
+# pure substring hits when the query is clearly a description, not a keyword.
+VECTOR_WEIGHT = 1.5
 
 
 def result_key(item: dict[str, Any]) -> str:
@@ -20,24 +23,30 @@ def result_key(item: dict[str, Any]) -> str:
 
 
 def reciprocal_rank_fusion(
-    ranked_lists: list[list[dict[str, Any]]],
+    keyword_results: list[dict[str, Any]],
+    vector_results: list[dict[str, Any]],
     *,
     k: int = RRF_K,
+    vector_weight: float = VECTOR_WEIGHT,
 ) -> list[dict[str, Any]]:
     scores: dict[str, float] = {}
     items: dict[str, dict[str, Any]] = {}
 
-    for ranking in ranked_lists:
-        for rank, item in enumerate(ranking):
-            key = result_key(item)
-            scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank + 1)
-            if key not in items:
-                items[key] = dict(item)
+    for rank, item in enumerate(keyword_results):
+        key = result_key(item)
+        scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank + 1)
+        if key not in items:
+            items[key] = dict(item)
+
+    for rank, item in enumerate(vector_results):
+        key = result_key(item)
+        scores[key] = scores.get(key, 0.0) + vector_weight / (k + rank + 1)
+        if key not in items:
+            items[key] = dict(item)
 
     merged = []
     for key, score in sorted(scores.items(), key=lambda x: x[1], reverse=True):
-        row = items[key]
-        row = dict(row)
+        row = dict(items[key])
         row["rank"] = score
         row["rrf_score"] = score
         merged.append(row)
@@ -159,7 +168,7 @@ def hybrid_search(
     vector_hits = vector_search(q, limit=limit)
 
     if vector_hits:
-        merged = reciprocal_rank_fusion([keyword_hits, vector_hits])[:limit]
+        merged = reciprocal_rank_fusion(keyword_hits, vector_hits)[:limit]
         mode = "hybrid"
     else:
         merged = keyword_hits[:limit]

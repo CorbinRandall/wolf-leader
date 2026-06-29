@@ -8,7 +8,7 @@ def test_reciprocal_rank_fusion_boosts_overlap():
         {"kind": "memory", "id": 1, "title": "a"},
         {"kind": "project", "id": 2, "title": "b"},
     ]
-    merged = reciprocal_rank_fusion([keyword, vector])
+    merged = reciprocal_rank_fusion(keyword, vector)
     assert merged[0]["kind"] == "memory"
     assert merged[0]["id"] == 1
     assert merged[0]["rrf_score"] > merged[1]["rrf_score"]

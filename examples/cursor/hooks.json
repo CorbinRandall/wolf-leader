@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "./hooks/wolf-leader-recall.sh"
+      }
+    ],
+    "stop": [
+      {
+        "command": "./hooks/wolf-leader-save.sh"
+      }
+    ]
+  }
+}

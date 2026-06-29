@@ -117,10 +117,34 @@ Create `docker-compose.local.yml` for personal overrides without editing committ
 
 ## Client setup (each agent / device)
 
+**One-command install (recommended):**
+
+```bash
+git clone git@github.com:CorbinRandall/wolf-leader.git
+cd wolf-leader
+WOLF_LEADER_API=http://YOUR_HOST:6971 \
+WOLF_LEADER_MCP=http://YOUR_HOST:6972/mcp \
+./scripts/install-cursor-client.sh
+./scripts/verify-cursor-client.sh
+```
+
+This installs into `~/.cursor/`:
+
+| Piece | Path |
+|-------|------|
+| `/save` skill | `skills/save/SKILL.md` |
+| MCP | `mcp.json` (`wolf-leader` + legacy `ide-storage` key) |
+| Hooks | `hooks.json`, `hooks/wolf-leader-*.sh` |
+| Rule | `rules/wolf-leader-hub.mdc` |
+| Hub URLs | `wolf-leader.env` |
+
+Reload the Cursor window so `/save` appears in the `/` menu.
+
+**Manual / partial setup:**
+
 1. **MCP** — add `wolf-leader` → `http://YOUR_HOST:6972/mcp`
-2. **AGENTS.md** — copy/symlink `data/AGENTS.md` into workspace roots
-3. **`/save` skill** — optional Cursor skill for on-demand checkpoints
-4. **Hooks** — optional sessionStart/stop for auto-import + save
+2. **AGENTS.md** — copy/symlink `examples/AGENTS.md` into workspace roots
+3. **Cursor files** — copy from `examples/cursor/` or re-run `install-cursor-client.sh`
 
 See `examples/ONBOARDING.md` (copied to `data/ONBOARDING.md` on setup) for the full agent workflow.
 

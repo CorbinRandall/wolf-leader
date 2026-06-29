@@ -87,9 +87,15 @@ File: `~/.cursor/mcp.json` (or project `.cursor/mcp.json`)
 claude mcp add wolf-leader --url http://YOUR_HOST:6972/mcp
 ```
 
-## Phase 2 — `/save` skill (Cursor, optional)
+## Phase 2 — Cursor client (recommended)
 
-Copy the save skill into `~/.cursor/skills/save/` so typing `/save` runs the checkpoint pipeline.
+```bash
+WOLF_LEADER_API=http://YOUR_HOST:6971 \
+WOLF_LEADER_MCP=http://YOUR_HOST:6972/mcp \
+./scripts/install-cursor-client.sh
+```
+
+Installs `/save` at `~/.cursor/skills/save/`, MCP, hooks, and rules. Reload Cursor after install.
 
 ## Phase 3 — Project work
 

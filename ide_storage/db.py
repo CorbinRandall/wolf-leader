@@ -1,6 +1,7 @@
 import os
 import sqlite3
 from contextlib import contextmanager
+from pathlib import Path
 
 MEMORY_TYPES = (
     "active_work",
@@ -15,6 +16,11 @@ MEMORY_TYPES = (
 
 def get_db_path() -> str:
     return os.environ.get("IDE_STORAGE_DB_PATH", "/data/ide-work.db")
+
+
+def db_file() -> Path:
+    """Resolved SQLite path — always read env at call time (not import time)."""
+    return Path(get_db_path())
 
 
 def get_projects_dir() -> str:

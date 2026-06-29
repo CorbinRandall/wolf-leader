@@ -1089,14 +1089,19 @@ async def save_project_checkpoint(body: SaveProjectBody = SaveProjectBody()):
     if body.messages:
         messages = [{"role": m.role, "content": m.content} for m in body.messages]
 
-    report = save_project(
-        body.session_id,
-        project_slug=body.slug,
-        workspace_path=body.workspace_path,
-        title=body.title,
-        content=body.content,
-        messages=messages,
-    )
+    try:
+        report = save_project(
+            body.session_id,
+            project_slug=body.slug,
+            workspace_path=body.workspace_path,
+            title=body.title,
+            content=body.content,
+            messages=messages,
+        )
+    except Exception as exc:
+        logger.exception("save-project failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     report["summary"] = format_save_summary(report)
     if not report.get("ok"):
         raise HTTPException(

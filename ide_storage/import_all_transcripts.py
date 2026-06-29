@@ -13,12 +13,11 @@ from datetime import datetime
 from pathlib import Path
 
 from ide_storage.import_transcript import API_URL, clean_user, extract_text, parse_transcript
-from ide_storage.db import get_db_path
+from ide_storage.db import db_file, get_db_path
 
 TRANSCRIPTS_ROOT = Path(
     os.environ.get("CURSOR_TRANSCRIPTS_ROOT", "/root/.cursor/projects/root/agent-transcripts")
 )
-DB_PATH = Path(get_db_path())
 
 # Catch-all server-admin chats use project 1 (compose root) when present.
 CATCH_ALL_PROJECT_ID = 1
@@ -173,7 +172,7 @@ def guess_project_id(text: str, db_path: Path | None = None) -> int | None:
         return explicit
 
     text = _strip_hub_paste(text)
-    path = db_path if db_path is not None else DB_PATH
+    path = db_path if db_path is not None else db_file()
 
     from ide_storage.project_match import best_project_match
 
@@ -198,12 +197,13 @@ def import_transcript(
     *,
     api_url: str,
     skip_ids: set[str],
-    db_path: Path = DB_PATH,
+    db_path: Path | None = None,
     dry_run: bool = False,
     device_name: str = "unraid-server",
     workspace_path: str = "/root",
 ) -> dict:
     session_id = path.parent.name if path.parent.name != "subagents" else path.stem
+    db = db_path or db_file()
     if session_id in skip_ids:
         return {"session_id": session_id, "action": "skipped", "reason": "already in db"}
 
@@ -213,7 +213,7 @@ def import_transcript(
 
     first_text = first_user_text(path)
     title = make_title(first_text, session_id)
-    project_id = guess_project_id(first_text, db_path=db_path)
+    project_id = guess_project_id(first_text, db_path=db)
     summary = f"Imported {len(messages)} messages from Cursor transcript"
 
     result = {
@@ -342,7 +342,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Bulk import Cursor transcripts")
     parser.add_argument("--root", type=Path, default=TRANSCRIPTS_ROOT)
     parser.add_argument("--api", default=API_URL)
-    parser.add_argument("--db", type=Path, default=DB_PATH)
+    parser.add_argument("--db", type=Path, default=None)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--sync", action="store_true", help="Re-sync full messages for chats already in DB")
     parser.add_argument("--session-id", help="Only import/sync this session UUID")
@@ -350,14 +350,15 @@ def main() -> None:
     parser.add_argument("--workspace", default="/root")
     parser.add_argument("--skip-pipeline", action="store_true", help="Do not run relink/distill after import")
     args = parser.parse_args()
+    db_path = args.db or db_file()
 
-    skip_ids = existing_session_ids(args.db)
+    skip_ids = existing_session_ids(db_path)
     results = []
     for path in discover_transcripts(args.root, session_id=args.session_id):
         try:
             session_id = path.parent.name
             if session_id in skip_ids and args.sync:
-                result = sync_transcript(path, db_path=args.db, dry_run=args.dry_run)
+                result = sync_transcript(path, db_path=db_path, dry_run=args.dry_run)
                 results.append(result)
                 if not args.dry_run and not args.skip_pipeline and result.get("action") == "synced":
                     from ide_storage.post_save_pipeline import post_save_pipeline
@@ -377,7 +378,7 @@ def main() -> None:
                 path,
                 api_url=args.api,
                 skip_ids=skip_ids,
-                db_path=args.db,
+                db_path=db_path,
                 dry_run=args.dry_run,
                 device_name=args.device_name,
                 workspace_path=args.workspace,

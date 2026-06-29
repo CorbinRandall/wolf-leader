@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Any
 
 from ide_storage.hub import normalize_path, resolve_project
+from ide_storage.db import db_file
 from ide_storage.import_all_transcripts import (
     CATCH_ALL_PROJECT_ID,
-    DB_PATH,
     _explicit_project_id,
     _strip_hub_paste,
 )
@@ -169,7 +169,7 @@ def _description_terms(description: str) -> list[str]:
 def score_project_matches(
     text: str,
     *,
-    db_path: Path = DB_PATH,
+    db_path: Path | None = None,
     workspace_path: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return project match candidates sorted by score (highest first)."""
@@ -177,6 +177,7 @@ def score_project_matches(
     if not text.strip():
         return []
 
+    db = db_path or db_file()
     scores: dict[int, dict[str, Any]] = {}
 
     def add(pid: int, points: int, reason: str) -> None:
@@ -191,10 +192,10 @@ def score_project_matches(
         bucket["score"] += points
         bucket["reasons"].append(reason)
 
-    rows = _slug_rows(db_path)
+    rows = _slug_rows(db)
     slug_to_id = {r["slug"]: r["id"] for r in rows if r.get("slug")}
 
-    explicit = _explicit_project_id(text, db_path)
+    explicit = _explicit_project_id(text, db)
     if explicit is not None:
         add(explicit, 120, "pasted hub project context")
 
@@ -264,7 +265,7 @@ def score_project_matches(
 def best_project_match(
     text: str,
     *,
-    db_path: Path = DB_PATH,
+    db_path: Path | None = None,
     workspace_path: str | None = None,
     min_score: int = MIN_SCORE_DEFAULT,
     min_lead: int = MIN_LEAD_DEFAULT,
@@ -289,17 +290,18 @@ def match_projects_payload(
     messages: list[dict[str, str]] | None = None,
     text: str | None = None,
     workspace_path: str | None = None,
-    db_path: Path = DB_PATH,
+    db_path: Path | None = None,
     min_score: int = MIN_SCORE_DEFAULT,
     min_lead: int = MIN_LEAD_DEFAULT,
     limit: int = 5,
 ) -> dict[str, Any]:
     """API-friendly ranked match result."""
     body = conversation_text(messages, text=text)
-    matches = score_project_matches(body, db_path=db_path, workspace_path=workspace_path)
+    db = db_path or db_file()
+    matches = score_project_matches(body, db_path=db, workspace_path=workspace_path)
     best = best_project_match(
         body,
-        db_path=db_path,
+        db_path=db,
         workspace_path=workspace_path,
         min_score=min_score,
         min_lead=min_lead,
@@ -316,7 +318,7 @@ def match_projects_payload(
 def guess_project_from_transcript(
     path: Path,
     *,
-    db_path: Path = DB_PATH,
+    db_path: Path | None = None,
     workspace_path: str | None = None,
 ) -> dict[str, Any]:
     """Infer project from a transcript file path."""

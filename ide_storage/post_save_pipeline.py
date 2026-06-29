@@ -16,7 +16,8 @@ from ide_storage.spec_validation import validate_spec
 from ide_storage.project_archetypes import get_continue_mode, get_deploy_state, pickup_prompt
 from ide_storage.memory_ops import archive_chat, extract_memories_for_project
 from ide_storage.markdown_sync import read_agent_brief, regenerate_index
-from ide_storage.relink_chats import DB_PATH, relink_for_session
+from ide_storage.db import db_file, get_db_path
+from ide_storage.relink_chats import relink_for_session
 
 TRANSCRIPTS_ROOT = Path("/root/.cursor/projects/root/agent-transcripts")
 
@@ -32,7 +33,7 @@ def _agent_prompt(name: str, slug: str, compose_path: str = "") -> str:
 
 
 def _get_chat(session_id: str | None = None, chat_id: int | None = None) -> dict | None:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(db_file())
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
     if chat_id:
@@ -48,7 +49,7 @@ def _get_chat(session_id: str | None = None, chat_id: int | None = None) -> dict
 
 
 def _get_project(project_id: int) -> dict | None:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(db_file())
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
     cur.execute("SELECT * FROM projects WHERE id = ?", (project_id,))
@@ -69,7 +70,7 @@ def _sync_session(session_id: str, root: Path = TRANSCRIPTS_ROOT) -> dict:
         "--root",
         str(root),
         "--db",
-        str(DB_PATH),
+        get_db_path(),
         "--skip-pipeline",
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -215,7 +216,7 @@ def _checkpoint_summary(spec_result: dict, validation: dict) -> str:
 
 
 def _message_count(chat_id: int) -> int:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(db_file())
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM messages WHERE chat_id = ?", (chat_id,))
     n = cur.fetchone()[0]

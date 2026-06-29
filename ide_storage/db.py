@@ -75,6 +75,8 @@ def init_db() -> None:
 
     with sqlite3.connect(path) as conn:
         cur = conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA synchronous=NORMAL")
 
         cur.execute(
             """
@@ -202,8 +204,10 @@ def init_db() -> None:
 @contextmanager
 def db_conn():
     path = get_db_path()
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=10000")
     load_vec_extension(conn)
     try:
         yield conn

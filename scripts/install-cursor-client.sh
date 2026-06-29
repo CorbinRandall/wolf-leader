@@ -47,6 +47,8 @@ mkdir -p \
 install -m 644 "$CURSOR_EXAMPLES/skills/save/SKILL.md" "$CURSOR_DIR/skills/save/SKILL.md"
 install -m 755 "$CURSOR_EXAMPLES/skills/save/scripts/save-session.sh" \
   "$CURSOR_DIR/skills/save/scripts/save-session.sh"
+install -m 755 "$CURSOR_EXAMPLES/skills/save/scripts/save-session.py" \
+  "$CURSOR_DIR/skills/save/scripts/save-session.py"
 
 # --- hooks ---
 install -m 644 "$CURSOR_EXAMPLES/hooks.json" "$CURSOR_DIR/hooks.json"

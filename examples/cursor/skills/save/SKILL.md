@@ -30,11 +30,13 @@ curl -s "${API}/api/save-project-guide"
 
 Read `content` and follow the path that matches this environment (Cursor transcript vs in-context messages).
 
-Or run the bundled script:
+Or run the bundled script (handles remote hubs — uploads local transcript when needed):
 
 ```bash
 ~/.cursor/skills/save/scripts/save-session.sh
 ```
+
+When Wolf Leader runs on a **different host** than Cursor SSH, the script reads your local `~/.cursor/projects/.../agent-transcripts` JSONL and POSTs messages to the hub.
 
 ## Step 3 — Execute
 

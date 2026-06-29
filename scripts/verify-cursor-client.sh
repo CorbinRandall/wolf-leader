@@ -21,6 +21,7 @@ echo ""
 
 check "save skill" "$CURSOR_DIR/skills/save/SKILL.md"
 check "save script" "$CURSOR_DIR/skills/save/scripts/save-session.sh"
+check "save uploader" "$CURSOR_DIR/skills/save/scripts/save-session.py"
 check "mcp.json" "$CURSOR_DIR/mcp.json"
 check "hooks.json" "$CURSOR_DIR/hooks.json"
 check "recall hook" "$CURSOR_DIR/hooks/wolf-leader-recall.sh"
@@ -42,6 +43,13 @@ if [[ -x "$CURSOR_DIR/skills/save/scripts/save-session.sh" ]]; then
   echo "OK  save-session.sh executable"
 else
   echo "BAD  save-session.sh not executable"
+  FAIL=1
+fi
+
+if [[ -x "$CURSOR_DIR/skills/save/scripts/save-session.py" ]]; then
+  echo "OK  save-session.py executable"
+else
+  echo "BAD  save-session.py not executable"
   FAIL=1
 fi
 

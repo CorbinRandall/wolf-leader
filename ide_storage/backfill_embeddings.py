@@ -48,11 +48,17 @@ def run_backfill(project_id=None, batch_size=DEFAULT_BATCH) -> dict:
     with db_conn() as conn:
         cur = conn.cursor()
 
-        # -- memories --
-        q = "SELECT id, type, content, semantic_descriptor FROM memories WHERE COALESCE(status,'active')='active'"
+        # -- memories — JOIN projects so embed text includes project name prefix --
+        q = """
+            SELECT m.id, m.type, m.content, m.semantic_descriptor,
+                   p.name AS project_name, p.slug AS project_slug
+            FROM memories m
+            LEFT JOIN projects p ON p.id = m.project_id
+            WHERE COALESCE(m.status, 'active') = 'active'
+        """
         params = []
         if project_id is not None:
-            q += " AND project_id=?"
+            q += " AND m.project_id=?"
             params.append(project_id)
         cur.execute(q, params)
         mem_rows = [dict(r) for r in cur.fetchall()]

@@ -11,6 +11,8 @@ let state = {
   activeProject: null,
   agentContextCache: {},
   onboardingCache: null,
+  searchResults: null,
+  searchMode: "keyword",
 };
 
 const $ = (s) => document.querySelector(s);
@@ -93,15 +95,97 @@ function hideViews() {
 // --- Navigation ---
 function switchTab(tab) {
   state.tab = tab;
+  state.searchResults = null;
+  $("#search").value = "";
   $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab));
   renderSidebar();
   if (tab === "home") showHome();
   else if (tab === "setup") showSetup();
 }
 
+async function runGlobalSearch(q) {
+  const list = $("#sidebar-list");
+  list.innerHTML = `<div class="loading">Searching…</div>`;
+  try {
+    const data = await api(`/api/search?q=${encodeURIComponent(q)}`);
+    state.searchResults = data.results || [];
+    state.searchMode = data.mode || "keyword";
+    renderSidebar();
+  } catch (err) {
+    list.innerHTML = `<div class="loading">Search failed: ${escapeHtml(String(err))}</div>`;
+  }
+}
+
+const KIND_ICON = { memory: "◈", project: "◫", chat: "▤", message: "◎" };
+
+function renderSearchResults() {
+  const list = $("#sidebar-list");
+  const results = state.searchResults || [];
+  const mode = state.searchMode || "keyword";
+  const modeLabel = mode === "hybrid" ? "⊕ hybrid" : "keyword";
+  if (!results.length) {
+    list.innerHTML = `<div class="sidebar-hint">No results — try different words.</div>`;
+    $("#list-count").textContent = `0 results · ${modeLabel}`;
+    return;
+  }
+  list.innerHTML = results.map((r) => {
+    const icon = KIND_ICON[r.kind] || "•";
+    const title = escapeHtml(r.title || r.content || `#${r.id}`).slice(0, 72);
+    const sim = r.similarity != null ? `${(r.similarity * 100).toFixed(0)}%` : "";
+    const sub = escapeHtml(
+      r.kind === "memory" ? (r.memory_type || "memory") :
+      r.kind === "project" ? (r.slug || r.kind) :
+      r.kind === "chat" ? "session" : r.kind
+    );
+    return `<button type="button" class="chat-item" data-sr-kind="${escapeHtml(r.kind)}" data-sr-id="${r.id}" data-sr-pid="${r.project_id || ""}" data-sr-cid="${r.chat_id || ""}">
+      <div class="chat-item-title">${icon} ${title}</div>
+      <div class="chat-item-meta"><span>${sub}</span>${sim ? `<span class="muted">${sim} match</span>` : ""}</div>
+    </button>`;
+  }).join("");
+  list.querySelectorAll("[data-sr-kind]").forEach((b) => {
+    b.addEventListener("click", async () => {
+      const kind = b.dataset.srKind;
+      const id = +b.dataset.srId;
+      const pid = +b.dataset.srPid;
+      if (kind === "project") {
+        switchTab("projects");
+        state.searchResults = null;
+        $("#search").value = "";
+        renderSidebar();
+        await selectProject(id);
+      } else if (kind === "chat") {
+        switchTab("archive");
+        state.searchResults = null;
+        $("#search").value = "";
+        renderSidebar();
+        await selectChat(id);
+      } else if (kind === "memory" && pid) {
+        switchTab("projects");
+        state.searchResults = null;
+        $("#search").value = "";
+        renderSidebar();
+        await selectProject(pid);
+      } else if (kind === "message" && b.dataset.srCid) {
+        const chatId = +b.dataset.srCid;
+        switchTab("archive");
+        state.searchResults = null;
+        $("#search").value = "";
+        renderSidebar();
+        await selectChat(chatId);
+      }
+    });
+  });
+  $("#list-count").textContent = `${results.length} results · ${modeLabel}`;
+}
+
 function renderSidebar() {
   const list = $("#sidebar-list");
   const q = ($("#search").value || "").toLowerCase().trim();
+
+  if (state.searchResults !== null && state.searchResults !== undefined) {
+    renderSearchResults();
+    return;
+  }
 
   if (state.tab === "home") {
     list.innerHTML = `<div class="sidebar-hint">Auto-generated index of projects and recent sessions.</div>`;
@@ -561,7 +645,24 @@ $("#copy-onboarding-url-btn").addEventListener("click", async () => {
 });
 
 $$(".tab").forEach((t) => t.addEventListener("click", () => switchTab(t.dataset.tab)));
-$("#search").addEventListener("input", () => renderSidebar());
+let _searchTimer = null;
+$("#search").addEventListener("input", () => {
+  clearTimeout(_searchTimer);
+  const q = ($("#search").value || "").trim();
+  if (q.length >= 3) {
+    _searchTimer = setTimeout(() => runGlobalSearch(q), 350);
+  } else {
+    state.searchResults = null;
+    renderSidebar();
+  }
+});
+$("#search").addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    $("#search").value = "";
+    state.searchResults = null;
+    renderSidebar();
+  }
+});
 
 // --- Init ---
 (async function init() {

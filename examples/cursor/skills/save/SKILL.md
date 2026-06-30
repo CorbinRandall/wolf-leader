@@ -57,9 +57,26 @@ Use `best` only if confidence is **high** or **medium** and reasons fit the main
 
 3. State your pick in one line: slug + why (main task of this chat).
 
-## Step 4 — Execute
+## Step 4 — Write semantic descriptors (required for vector search)
 
-Before saving, write a **semantic descriptor** for this checkpoint (1–3 sentences): what the project is *about* in plain language, synonyms, and intent — not just keywords. Use it when creating memories via API (`semantic_descriptor` on `POST /api/memories`) or enrich the project `metadata.semantic_descriptor` when the whole project's purpose became clearer.
+{PRODUCT_NAME} embeds your descriptors so search works by description, not just keywords.
+
+**Per memory** — include `semantic_descriptor` on every `POST /api/memories`:
+```json
+{
+  "project_id": 7,
+  "type": "decision",
+  "content": "Use WAL mode for SQLite.",
+  "semantic_descriptor": "SQLite concurrency fix: WAL journal mode and busy_timeout let readers continue while writes happen, preventing API timeouts."
+}
+```
+Write 1–2 sentences: what this fact *means*, what problem it solves, any synonyms.
+
+**Per project** — if this session clarified the project's purpose, update it:
+`PUT /api/projects/<id>` with `metadata.semantic_descriptor` — 2–4 sentences on
+what this project does, its scope, and how you'd describe it to a fresh agent.
+
+## Step 5 — Execute
 
 **Bundled script** with your chosen slug:
 
@@ -80,6 +97,6 @@ Without a slug (hub auto-match only when confident):
 
 Do **not** create a new project. If nothing fits, tell the user to use `/new`.
 
-## Step 5 — Report
+## Step 6 — Report
 
 Project slug, brief URL, pickup prompt, and `summary`.

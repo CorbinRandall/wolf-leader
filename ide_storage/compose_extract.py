@@ -13,10 +13,6 @@ ENV_NAME_RE = re.compile(
     r"ANTHROPIC_API_KEY|CLAUDE_[A-Z_]+|BOT_TOKEN|API_KEY|[A-Z][A-Z0-9_]{3,})\b"
 )
 ENV_FILE_RE = re.compile(r"(/mnt/user/appdata/[a-z0-9._/-]+(?:\.env|/config\.yaml)?)", re.I)
-PORT_MAP_RE = re.compile(r"(?<!\d\.)(?<!\d)([1-9]\d{1,4})\s*:\s*(\d{2,5})(?!\d)")
-SERVICE_NAME_RE = re.compile(
-    r"(?i)\b(?:service|container)\s+[`'\"]?([a-z][a-z0-9-]{2,})[`'\"]?"
-)
 _SKIP_SERVICE_NAMES = frozenset(
     {
         "the", "and", "for", "with", "via", "names", "name", "image", "port", "this", "that",
@@ -26,7 +22,6 @@ _SKIP_SERVICE_NAMES = frozenset(
 )
 
 COMPOSE_FILENAMES = ("docker-compose.yml", "compose.yml", "docker-compose.yaml", "compose.yaml")
-IMAGE_RE = re.compile(r"(?i)(?:image|ghcr\.io|docker\.io)[/:][\w./:@-]+")
 CONFIG_FILE_RE = re.compile(
     r"(?i)(?:config\.yaml|\.env|CLAUDE-SETUP\.md|docker-compose\.yml)"
 )
@@ -318,54 +313,6 @@ def extract_env_from_compose(compose_path: str) -> list[dict[str, Any]]:
     return list(found.values())[:12]
 
 
-def _extract_services_regex(text: str) -> list[dict[str, Any]]:
-    services: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for match in SERVICE_NAME_RE.finditer(text):
-        name = match.group(1).lower()
-        if name in seen or name in _SKIP_SERVICE_NAMES:
-            continue
-        seen.add(name)
-        entry: dict[str, Any] = {"name": name}
-        ports = [f"{a}:{b}" for a, b in PORT_MAP_RE.findall(text)]
-        if ports:
-            entry["ports"] = ports[:3]
-        services.append(entry)
-        if len(services) >= 6:
-            break
-    return services
-
-
-def extract_services_from_text(texts: list[str], slug: str = "") -> list[dict[str, Any]]:
-    blob = "\n".join(texts)
-    services: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    ports = list(dict.fromkeys(f"{a}:{b}" for a, b in PORT_MAP_RE.findall(blob)))[:4]
-
-    # Explicit service names common in homelab chats
-    for name in (slug, f"{slug}-dashboard" if slug else "", "gateway", "dashboard"):
-        if not name or name in seen or name in _SKIP_SERVICE_NAMES:
-            continue
-        if re.search(rf"(?i)\b{re.escape(name)}\b", blob):
-            seen.add(name)
-            entry: dict[str, Any] = {"name": name}
-            if ports:
-                entry["ports"] = ports[:2]
-            img = IMAGE_RE.search(blob)
-            if img:
-                entry["image"] = img.group(0)[:100]
-            services.append(entry)
-
-    for extra in _extract_services_regex(blob):
-        if extra["name"] not in seen and extra["name"] not in _SKIP_SERVICE_NAMES:
-            seen.add(extra["name"])
-            if ports and "ports" not in extra:
-                extra["ports"] = ports[:2]
-            services.append(extra)
-
-    return services[:6]
-
-
 def extract_config_files(
     texts: list[str],
     appdata_path: str | None,
@@ -444,4 +391,8 @@ def merge_services(
         from_seed = extract_services_from_seed(seed_text)
         if from_seed:
             return from_seed
-    return extract_services_from_text(texts, slug)
+    # No compose file on disk and no structured seed table: do NOT mine prose for
+    # "services". Free-text extraction produced garbage (chat timestamps parsed as
+    # ports, words like "might"/"recreated" as service names, "image/RAM" as an
+    # image). An empty list is honest; fabricated topology misleads the next agent.
+    return []

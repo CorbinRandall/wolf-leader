@@ -44,6 +44,11 @@ def compute_handoff_tier(
         # Maintain = do not redeploy; compose folder present is enough to continue
         if compose == "present" or running:
             return "continue"
+        # Unobservable from inside this container (e.g. the hub introspecting its
+        # own stack with no docker socket). A maintain project was checkpointed as
+        # live; the safe default is to keep maintaining, never to redeploy blind.
+        if observed == "unknown":
+            return "continue"
         return "orient"
 
     if continue_mode == "compose_deploy":
@@ -150,6 +155,8 @@ def pickup_for_tier(
     if continue_mode in ("compose_deploy", "compose_maintain"):
         if pf.get("compose") == "missing":
             gap_parts.append("compose folder missing")
+        elif pf.get("compose") == "unknown" or pf.get("observed_deploy_state") == "unknown":
+            gap_parts.append("deployment not observable from hub container")
         if pf.get("appdata") == "missing":
             gap_parts.append("appdata missing")
         if not pf.get("containers_running") and pf.get("docker_check") == "ok":
@@ -211,6 +218,12 @@ def pickup_for_tier(
                 f"maintain remotely, do NOT redeploy locally. Load: {brief_url}"
             )
         if continue_mode == "compose_maintain":
+            if pf.get("observed_deploy_state") == "unknown" or pf.get("docker_check") == "unavailable":
+                return (
+                    f"Continue {name}{on_host} — deployment not observable from inside the hub "
+                    f"container (no docker socket); assume live, maintain only, do NOT redeploy. "
+                    f"Load: {brief_url}"
+                )
             return (
                 f"Continue {name}{on_host} — stack is running; fix/maintain only, do not redeploy. "
                 f"Load: {brief_url}"

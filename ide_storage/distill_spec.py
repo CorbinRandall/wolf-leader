@@ -459,7 +459,19 @@ def distill_spec(project_id: int) -> dict[str, Any]:
     brief_url = f"{public}/api/projects/{slug}/agent-brief"
 
     observed_deploy = preflight.get("observed_deploy_state") or stored_deploy_state
-    deploy_state = observed_deploy if observed_deploy in ("deployed", "removed", "partial") else stored_deploy_state
+    if observed_deploy in ("deployed", "removed", "partial"):
+        deploy_state = observed_deploy
+    elif observed_deploy == "unknown":
+        # Hub cannot observe its own stack from inside the container; preserve
+        # documented live state instead of inheriting a stale "removed".
+        if stored_deploy_state in ("deployed", "partial"):
+            deploy_state = stored_deploy_state
+        elif mode == "compose_maintain":
+            deploy_state = "deployed"
+        else:
+            deploy_state = stored_deploy_state
+    else:
+        deploy_state = stored_deploy_state
 
     appdata_path = preflight.get("appdata_path")
     seed = _load_seed_sections(slug)
@@ -547,7 +559,9 @@ def distill_spec(project_id: int) -> dict[str, Any]:
 
     effective_compose = preflight.get("compose_path") or compose
     if effective_compose and mode.startswith("compose"):
-        lines.append(f"compose: {_yaml_quote(effective_compose)}")
+        # Skip baking a host path we could not verify (stale migration paths).
+        if preflight.get("compose") != "unknown" or os.path.isdir(effective_compose):
+            lines.append(f"compose: {_yaml_quote(effective_compose)}")
     ctx_path = _compose_context_path(effective_compose or "", slug) if mode.startswith("compose") else None
     if ctx_path:
         lines.append(f"compose_context: {_yaml_quote(ctx_path)}")

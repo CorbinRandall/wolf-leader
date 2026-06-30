@@ -32,6 +32,7 @@ SLUG_ARCHETYPES: dict[str, tuple[str, str]] = {
     "custom-server-url": ("integration", "partial"),
     "google-sso": ("integration", "partial"),
     "wolf-leader": ("compose_maintain", "deployed"),
+    "ide-storage": ("compose_maintain", "deployed"),
     "docker-dashboard": ("external_host", "deployed"),
     "memos": ("compose_deploy", "n/a"),
     "timemachine": ("compose_deploy", "n/a"),

@@ -180,9 +180,161 @@ def read_onboarding_md() -> str:
     return f"# {PRODUCT_NAME} onboarding\n\nONBOARDING.md not found on hub.\n"
 
 
+def _build_save_guide() -> str:
+    return f"""\
+# Save this conversation to {PRODUCT_NAME}
+
+**Use at the end of any agent chat** — Claude, Cursor, Codex, etc.
+
+---
+
+## Your job
+
+1. Sync the full conversation into the hub
+2. **Auto-detect** which project it belongs to (do not ask unless detection fails)
+3. Write a **semantic descriptor** for the project and for each key memory (see below)
+4. Extract typed memories, refresh agent brief, archive the session
+5. Report: project slug, brief URL, pickup prompt for the next agent
+
+---
+
+## Semantic descriptors — required for vector search
+
+{PRODUCT_NAME} uses vector embeddings so agents can find projects and memories by
+description, not just keywords. Your words here directly power that search.
+
+### For the project (update whenever its purpose became clearer this session)
+
+`PUT /api/projects/<id>` with `metadata.semantic_descriptor`:
+
+Write 2–4 sentences: what this project does, its purpose, synonyms for its name,
+and how you'd describe it to someone who forgot the name.
+
+Example:
+> "Wolf Leader is a self-hosted AI project memory hub. It stores typed memories,
+> SPEC checkpoints, and session archives so agents can resume work with full
+> context. Also called ide-storage or the memory hub."
+
+### For every memory you POST — semantic_descriptor is required
+
+Add `semantic_descriptor` to **each** `POST /api/memories` call:
+
+```json
+{{
+  "project_id": 7,
+  "type": "decision",
+  "content": "Use WAL mode for SQLite to prevent lock contention.",
+  "semantic_descriptor": "SQLite concurrency fix: WAL journal mode and busy_timeout=10000 let readers continue while the embedding backfill writes, preventing API timeouts."
+}}
+```
+
+Write 1–2 sentences per memory: what this fact *means* in plain language, what
+problem it solves, and any synonyms. This is the text the vector index embeds —
+richer text = better search.
+
+---
+
+## Pick one path
+
+### Path A — Cursor on corbox (local transcript exists)
+
+```bash
+curl -s -X POST http://127.0.0.1:6971/api/save-project \\
+  -H 'Content-Type: application/json' \\
+  -d '{{}}'
+```
+
+Optional: `"session_id": "<uuid>"` or `"slug": "my-project"` to force project.
+
+### Path B — Any other agent (conversation is in your context)
+
+```bash
+curl -s -X POST http://127.0.0.1:6971/api/save-project \\
+  -H 'Content-Type: application/json' \\
+  -d '{{
+    "title": "Short topic title",
+    "content": "One-line summary of what was accomplished",
+    "slug": "my-project",
+    "messages": [
+      {{"role": "user", "content": "..."}},
+      {{"role": "assistant", "content": "..."}}
+    ]
+  }}'
+```
+
+### Path C — MCP connected
+
+```
+save_session(title="...", content="...", messages_json="[...]")
+```
+
+---
+
+## Project detection (do not ask unless ambiguous)
+
+Scan the conversation for compose paths, explicit slugs, topic phrases, port
+numbers. List projects if unsure: `GET /api/projects` or MCP `list_projects`.
+
+---
+
+## After save — report to user
+
+- **Project** linked (name + slug)
+- **Brief URL** — `<hub>/api/projects/<slug>/agent-brief`
+- **Pickup prompt** from the API response
+- Session is **archived**; future agents load the brief, not this chat
+
+---
+
+## Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| `No Cursor transcript found` | Use Path B with `messages` array |
+| Wrong project linked | Re-run with `"slug": "correct-slug"` |
+| Cannot reach LAN IP | On corbox: use `http://127.0.0.1:6971` |
+"""
+
+
+_SEMANTIC_DESCRIPTOR_ADDENDUM = f"""
+
+---
+
+## Semantic descriptors — required for vector search
+
+{PRODUCT_NAME} uses vector embeddings so agents can find things by description,
+not just keywords. Add these for every save to keep the search index sharp.
+
+### For the project
+
+`PUT /api/projects/<id>` — set `metadata.semantic_descriptor` to 2–4 sentences:
+what this project does, synonyms for its name, and how you'd explain it from scratch.
+
+### For every memory you POST
+
+Add `semantic_descriptor` to each `POST /api/memories`:
+
+```json
+{{
+  "project_id": 7,
+  "type": "decision",
+  "content": "Use WAL mode for SQLite.",
+  "semantic_descriptor": "SQLite concurrency fix: WAL mode lets readers proceed while the embedding backfill writes, preventing API timeouts."
+}}
+```
+
+1–2 sentences per memory: what this fact means, what problem it solves, any synonyms.
+"""
+
+
 def read_save_project_md() -> str:
     path = os.path.join(get_data_dir(), "SAVE_PROJECT.md")
     if os.path.isfile(path):
         with open(path, encoding="utf-8", errors="replace") as f:
-            return f.read()
-    return f"# Save to {PRODUCT_NAME}\n\nSAVE_PROJECT.md not found on hub.\n"
+            content = f.read()
+        # Transparently upgrade files that predate vector search.
+        if "semantic descriptor" not in content.lower():
+            content += _SEMANTIC_DESCRIPTOR_ADDENDUM
+        return content
+    # No file yet (fresh install) — return the full built-in guide.
+    return _build_save_guide()

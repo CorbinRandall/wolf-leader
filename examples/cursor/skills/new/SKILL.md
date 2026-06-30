@@ -85,9 +85,33 @@ This is a **new** project — do **not** rely on auto-detect. Do **not** use `/s
 2. `GET ${API}/api/projects` — if slug exists for a different topic, pick a more specific slug.
 3. Only ask the user if the topic is genuinely ambiguous.
 
-### Execute
+### Write semantic descriptors (required for vector search)
 
-Before saving, write a **semantic descriptor** for the new project (2–4 sentences): purpose, scope, synonyms, and how you'd describe it to someone who forgot the name. Include it in `POST /api/projects` as `metadata.semantic_descriptor` and/or a strong `description` field.
+{PRODUCT_NAME} embeds these so search works by description, not just keywords.
+
+**For the new project** — include in `POST /api/projects`:
+```json
+{
+  "name": "My Project",
+  "slug": "my-project",
+  "description": "One-line summary shown in the UI.",
+  "metadata": {
+    "semantic_descriptor": "2–4 sentences: what this project does, its purpose, synonyms for its name, and how you'd explain it to a fresh agent who never saw the name."
+  }
+}
+```
+
+**For every memory** — include `semantic_descriptor` on each `POST /api/memories`:
+```json
+{
+  "project_id": 7,
+  "type": "decision",
+  "content": "Short raw fact.",
+  "semantic_descriptor": "1–2 sentences: what this fact means, what problem it solves, any synonyms."
+}
+```
+
+### Execute
 
 **Bundled script** (creates project if needed, uploads transcript, distills):
 

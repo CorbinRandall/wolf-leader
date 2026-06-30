@@ -218,6 +218,31 @@ def save_via_remote_upload(
     workspace = os.environ.get("CURSOR_WORKSPACE") or str(Path.cwd())
     text = "\n".join(m.get("content", "") for m in messages)
 
+    # Preferred fallback: drive the FULL save pipeline by uploading the parsed
+    # transcript to /api/save-project. This runs memory extraction + embedding +
+    # distill + archive server-side (the manual chat/distill steps below skipped
+    # those). Works with or without embeddings enabled on the hub.
+    body: dict = {
+        "title": title,
+        "workspace_path": workspace,
+        "session_id": sid,
+        "messages": messages,
+    }
+    if slug:
+        body["slug"] = slug
+    try:
+        report = api_json("POST", f"{api}/api/save-project", body, timeout=180)
+        if report.get("ok"):
+            report.setdefault("source", "remote_save_project_upload")
+            report.setdefault("project_slug", slug)
+            return report
+    except urllib.error.HTTPError as exc:
+        # Fall through to the legacy manual path only on 4xx (e.g. older hub
+        # without messages support); re-raise anything unexpected.
+        if exc.code >= 500:
+            raise
+
+    # --- Legacy manual fallback (older hub / no /api/save-project messages) -----
     created = api_json(
         "POST",
         f"{api}/api/chats",

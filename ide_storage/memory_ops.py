@@ -397,12 +397,31 @@ def insert_memory(
     if not content:
         raise ValueError("content empty after cleanup")
 
+    from ide_storage.embeddings import embeddings_enabled
+
     now = datetime.utcnow().isoformat()
+    descriptor_source = "agent" if (semantic_descriptor and semantic_descriptor.strip()) else "none"
     with db_conn() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT id FROM projects WHERE id = ?", (project_id,))
-        if not cur.fetchone():
+        cur.execute("SELECT id, name, slug FROM projects WHERE id = ?", (project_id,))
+        proj = cur.fetchone()
+        if not proj:
             raise ValueError("Project not found")
+
+        # A1/A2/A5: never let the vector index go silently content-only. When
+        # embeddings are on but the agent gave no descriptor, synthesize a cheap
+        # fallback so memory_embed_text always has a descriptor to prepend.
+        if descriptor_source != "agent" and embeddings_enabled():
+            from ide_storage.embed_index import synthesize_descriptor
+
+            semantic_descriptor = synthesize_descriptor(
+                kind="memory",
+                type=typ,
+                content=content,
+                project_name=proj["name"],
+                slug=proj["slug"],
+            )
+            descriptor_source = "synthesized"
 
         if existing is None:
             existing = _load_existing_memories(cur, project_id)
@@ -416,6 +435,7 @@ def insert_memory(
                 "content": dup["content"],
                 "action": "skipped_duplicate",
                 "source_chat_id": dup.get("source_chat_id"),
+                "descriptor_source": descriptor_source,
             }
 
         superseded_ids: list[int] = []
@@ -435,7 +455,12 @@ def insert_memory(
         superseded_count = _mark_superseded(cur, superseded_ids, now)
         conn.commit()
 
-    from ide_storage.embed_index import sync_dirty
+    from ide_storage.embed_index import delete_embeddings, sync_dirty
+
+    # D4: drop stale vectors for memories we just superseded so they no longer
+    # surface in semantic search.
+    if superseded_ids:
+        delete_embeddings([("memory", i) for i in superseded_ids])
 
     sync_dirty(project_id=project_id, memory_ids=[mid])
 
@@ -449,6 +474,7 @@ def insert_memory(
         "auto_extracted": auto_extracted,
         "superseded_count": superseded_count,
         "superseded_ids": superseded_ids,
+        "descriptor_source": descriptor_source,
     }
 
 
@@ -527,13 +553,23 @@ def extract_memories_for_project(
                 else:
                     skipped += 1
 
-    return {
+    synthesized = sum(1 for m in created if m.get("descriptor_source") == "synthesized")
+    result = {
         "project_id": project_id,
         "created": len(created),
         "skipped_duplicates": skipped,
         "scanned_chats": scanned_chats,
         "memories": created,
+        "descriptors_synthesized": synthesized,
     }
+    # A4: make it observable (not silent) when embeddings are on yet memories were
+    # saved without an agent-provided descriptor and we had to synthesize one.
+    if synthesized:
+        result["warnings"] = [
+            f"{synthesized} memory descriptor(s) auto-synthesized "
+            "(no agent semantic_descriptor provided); vector quality may be lower."
+        ]
+    return result
 
 
 def refresh_project_after_memory_change(project_id: int) -> dict:
@@ -615,6 +651,10 @@ def prune_low_quality_memories(*, dry_run: bool = False) -> dict:
                 kept += 1
         if not dry_run:
             conn.commit()
+    if not dry_run and removed:
+        from ide_storage.embed_index import delete_embeddings
+
+        delete_embeddings([("memory", r["id"]) for r in removed])
     return {"removed": len(removed), "kept": kept, "samples": removed[:8]}
 
 
@@ -632,6 +672,11 @@ def archive_chat(chat_id: int) -> dict:
         )
         archived = cur.rowcount > 0
         conn.commit()
+    if archived:
+        # D4: archived chats are excluded from search, so drop their stale vector.
+        from ide_storage.embed_index import delete_embeddings
+
+        delete_embeddings([("chat", chat_id)])
     return {"chat_id": chat_id, "archived": archived, "status": "archived"}
 
 

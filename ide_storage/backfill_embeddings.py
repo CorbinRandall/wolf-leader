@@ -88,7 +88,7 @@ def run_backfill(project_id=None, batch_size=DEFAULT_BATCH) -> dict:
 
     for batch_start in range(0, len(all_work), batch_size):
         batch = all_work[batch_start:batch_start + batch_size]
-        texts = [item[2] for _, item in batch]
+        texts = [item[1] for _, item in batch]
         t0 = time.time()
         vectors = embed_texts(texts)
         elapsed = round(time.time() - t0, 1)

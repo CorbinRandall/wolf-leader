@@ -65,6 +65,12 @@ STRONG_PHRASES: list[tuple[str, str, int]] = [
 
 MIN_SCORE_DEFAULT = 45
 MIN_LEAD_DEFAULT = 12
+# The winner must also lead by a meaningful fraction of its own score, not just
+# an absolute margin. Repeated mentions inflate scores and amplify small,
+# arbitrary per-phrase point differences (e.g. a 5pt STRONG_PHRASES gap becomes
+# 20pt at 4x hits); without a relative guard, two projects mentioned equally
+# would still auto-pick one instead of reading as ambiguous.
+MIN_LEAD_RATIO_DEFAULT = 0.15
 
 
 def transcript_text(path: Path, *, max_chars: int = 80_000) -> str:
@@ -288,6 +294,7 @@ def best_project_match(
     workspace_path: str | None = None,
     min_score: int = MIN_SCORE_DEFAULT,
     min_lead: int = MIN_LEAD_DEFAULT,
+    min_lead_ratio: float = MIN_LEAD_RATIO_DEFAULT,
 ) -> dict[str, Any] | None:
     matches = score_project_matches(text, db_path=db_path, workspace_path=workspace_path)
     if not matches:
@@ -297,7 +304,12 @@ def best_project_match(
         return None
     if len(matches) > 1:
         second = matches[1]["score"]
-        if top["score"] - second < min_lead:
+        lead = top["score"] - second
+        if lead < min_lead:
+            return None
+        # Relative guard: a small lead on a large score (two projects mentioned
+        # roughly equally) is ambiguous, not a confident win.
+        if lead < top["score"] * min_lead_ratio:
             return None
         if top["score"] == second:
             return None

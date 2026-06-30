@@ -7,9 +7,11 @@ alwaysApply: true
 
 Hub URLs live in `~/.cursor/wolf-leader.env`.
 
+**MCP server name:** use **`wolf-leader`** (canonical). `ide-storage` is a legacy alias pointing at the same URL — ignore it for new work.
+
 ## Every session
 
-1. **Start** — `resolve_project({ path: "<workspace>" })` then `recall()` or `get_brief()`. On corbox without MCP, `curl` the brief URL from the bootstrap response.
+1. **Start** — MCP `resolve_project({ path: "<workspace>" })` then `recall()` or `get_brief()`. Without MCP: `curl` the brief URL from `GET /api/bootstrap?path=<workspace>`.
 2. **During** — `remember({ type: "decision", content: "..." })` for durable facts.
 3. **Checkpoint** — type **`/save`** (install: `./scripts/install-cursor-client.sh` from wolf-leader repo).
 4. **End** — stop hook auto-syncs; use `/save` before closing for a final checkpoint.

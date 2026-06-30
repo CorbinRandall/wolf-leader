@@ -1,139 +1,214 @@
 #!/usr/bin/env bash
 # Install Wolf Leader Cursor client files into ~/.cursor/ (skills, MCP, hooks, rule).
-set -euo pipefail
+# No Python required for install — jq/node/template used for mcp.json merge.
+set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=lib/wolf-leader-client.sh
+source "${ROOT}/scripts/lib/wolf-leader-client.sh"
+
 CURSOR_DIR="${CURSOR_DIR:-$HOME/.cursor}"
 CURSOR_EXAMPLES="${ROOT}/examples/cursor"
 WORKSPACE="${WORKSPACE:-$HOME}"
+DRY_RUN=0
+JSON_OUT=0
+FORCE=0
+RECONFIGURE=0
+INSTALL_FAIL=0
 
 WOLF_LEADER_API="${WOLF_LEADER_API:-}"
 WOLF_LEADER_MCP="${WOLF_LEADER_MCP:-}"
 
 usage() {
   cat <<EOF
-Usage: WOLF_LEADER_API=http://HOST:6971 WOLF_LEADER_MCP=http://HOST:6972/mcp $0
+Usage: WOLF_LEADER_API=http://HOST:6971 WOLF_LEADER_MCP=http://HOST:6972/mcp $0 [options]
 
-Installs:
-  \$CURSOR_DIR/skills/save/       — /save (existing project checkpoint)
-  \$CURSOR_DIR/skills/new/        — /new (setup or new project + save)
-  \$CURSOR_DIR/mcp.json         — wolf-leader MCP (merged)
-  \$CURSOR_DIR/hooks.json       — sessionStart + stop hooks
-  \$CURSOR_DIR/hooks/           — hook scripts
-  \$CURSOR_DIR/rules/           — wolf-leader-hub.mdc
-  \$CURSOR_DIR/wolf-leader.env  — hub URLs (created if missing)
+Options:
+  --dry-run       Print actions without writing files
+  --json          Machine-readable summary on stdout (last line)
+  --force         Run install even if preflight warns on hub reachability
+  --reconfigure   Update wolf-leader.env from WOLF_LEADER_* env vars
+  -h, --help      This help
 
-Optional:
-  WORKSPACE=/root   — symlink AGENTS.md into workspace root
-  CURSOR_DIR=...    — override ~/.cursor
+Installs under \$CURSOR_DIR:
+  skills/save, skills/new, mcp.json, hooks, rules, wolf-leader.env, AGENTS.md in WORKSPACE
 EOF
 }
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  usage
-  exit 0
-fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run) DRY_RUN=1; shift ;;
+    --json) JSON_OUT=1; shift ;;
+    --force) FORCE=1; shift ;;
+    --reconfigure) RECONFIGURE=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage; exit 2 ;;
+  esac
+done
 
 if [[ ! -d "$CURSOR_EXAMPLES" ]]; then
-  echo "ERROR: missing $CURSOR_EXAMPLES — run from wolf-leader repo root" >&2
+  echo "ERROR: missing $CURSOR_EXAMPLES — run from wolf-leader bundle root" >&2
   exit 1
 fi
 
-mkdir -p \
-  "$CURSOR_DIR/skills/save/scripts" \
-  "$CURSOR_DIR/skills/new/scripts" \
-  "$CURSOR_DIR/hooks" \
-  "$CURSOR_DIR/rules"
+REQUESTED_API="${WOLF_LEADER_API:-}"
+REQUESTED_MCP="${WOLF_LEADER_MCP:-}"
+wl_resolve_hub_urls
 
-# Remove legacy split save command
-rm -rf "$CURSOR_DIR/skills/save-new"
+echo "Wolf Leader client install"
+echo "  Hub API:   $WOLF_LEADER_API"
+echo "  Hub MCP:   $WOLF_LEADER_MCP"
+echo "  Workspace: $WORKSPACE"
+echo ""
 
-# --- skills ---
-install -m 644 "$CURSOR_EXAMPLES/skills/save/SKILL.md" "$CURSOR_DIR/skills/save/SKILL.md"
-install -m 755 "$CURSOR_EXAMPLES/skills/save/scripts/save-session.sh" \
-  "$CURSOR_DIR/skills/save/scripts/save-session.sh"
-install -m 755 "$CURSOR_EXAMPLES/skills/save/scripts/save-session.py" \
-  "$CURSOR_DIR/skills/save/scripts/save-session.py"
+if ! wl_preflight "$CURSOR_DIR" "$WORKSPACE" "$WOLF_LEADER_API" "$FORCE" "$REQUESTED_API"; then
+  [[ "$FORCE" == 1 ]] || exit 1
+fi
+echo ""
 
-install -m 644 "$CURSOR_EXAMPLES/skills/new/SKILL.md" "$CURSOR_DIR/skills/new/SKILL.md"
-install -m 755 "$CURSOR_EXAMPLES/skills/new/scripts/new-project-session.sh" \
-  "$CURSOR_DIR/skills/new/scripts/new-project-session.sh"
-install -m 755 "$CURSOR_EXAMPLES/skills/new/scripts/new-project-session.py" \
-  "$CURSOR_DIR/skills/new/scripts/new-project-session.py"
+run_step() {
+  local label="$1"
+  shift
+  if [[ "$DRY_RUN" == 1 ]]; then
+    echo "  [dry-run] $label"
+    return 0
+  fi
+  if "$@"; then
+    return 0
+  fi
+  INSTALL_FAIL=1
+  return 0
+}
 
-# --- hooks ---
-install -m 644 "$CURSOR_EXAMPLES/hooks.json" "$CURSOR_DIR/hooks.json"
-install -m 755 "$CURSOR_EXAMPLES/hooks/wolf-leader-recall.sh" "$CURSOR_DIR/hooks/wolf-leader-recall.sh"
-install -m 755 "$CURSOR_EXAMPLES/hooks/wolf-leader-save.sh" "$CURSOR_DIR/hooks/wolf-leader-save.sh"
+install_file() {
+  install -m "$1" "$2" "$3"
+  wl_step_ok "$(basename "$3")"
+}
 
-# --- rule ---
-install -m 644 "$CURSOR_EXAMPLES/rules/wolf-leader-hub.mdc" "$CURSOR_DIR/rules/wolf-leader-hub.mdc"
+if [[ "$DRY_RUN" == 0 ]]; then
+  mkdir -p \
+    "$CURSOR_DIR/skills/save/scripts" \
+    "$CURSOR_DIR/skills/new/scripts" \
+    "$CURSOR_DIR/hooks" \
+    "$CURSOR_DIR/rules"
+  rm -rf "$CURSOR_DIR/skills/save-new"
+fi
 
-# --- env file (do not overwrite existing) ---
+run_step "skills/save" install_file 644 \
+  "$CURSOR_EXAMPLES/skills/save/SKILL.md" "$CURSOR_DIR/skills/save/SKILL.md"
+run_step "save-session.sh" install_file 755 \
+  "$CURSOR_EXAMPLES/skills/save/scripts/save-session.sh" "$CURSOR_DIR/skills/save/scripts/save-session.sh"
+run_step "save-session.py" install_file 755 \
+  "$CURSOR_EXAMPLES/skills/save/scripts/save-session.py" "$CURSOR_DIR/skills/save/scripts/save-session.py"
+run_step "save-session-curl.sh" install_file 755 \
+  "$CURSOR_EXAMPLES/skills/save/scripts/save-session-curl.sh" "$CURSOR_DIR/skills/save/scripts/save-session-curl.sh"
+
+run_step "skills/new" install_file 644 \
+  "$CURSOR_EXAMPLES/skills/new/SKILL.md" "$CURSOR_DIR/skills/new/SKILL.md"
+run_step "new-project-session.sh" install_file 755 \
+  "$CURSOR_EXAMPLES/skills/new/scripts/new-project-session.sh" "$CURSOR_DIR/skills/new/scripts/new-project-session.sh"
+run_step "new-project-session.py" install_file 755 \
+  "$CURSOR_EXAMPLES/skills/new/scripts/new-project-session.py" "$CURSOR_DIR/skills/new/scripts/new-project-session.py"
+run_step "new-project-session-curl.sh" install_file 755 \
+  "$CURSOR_EXAMPLES/skills/new/scripts/new-project-session-curl.sh" "$CURSOR_DIR/skills/new/scripts/new-project-session-curl.sh"
+
+if [[ "$DRY_RUN" == 1 ]]; then
+  echo "  [dry-run] hooks.json merge"
+elif ! wl_merge_hooks_json "$CURSOR_DIR/hooks.json" "$CURSOR_EXAMPLES/hooks.json"; then
+  INSTALL_FAIL=1
+fi
+run_step "recall hook" install_file 755 \
+  "$CURSOR_EXAMPLES/hooks/wolf-leader-recall.sh" "$CURSOR_DIR/hooks/wolf-leader-recall.sh"
+run_step "save hook" install_file 755 \
+  "$CURSOR_EXAMPLES/hooks/wolf-leader-save.sh" "$CURSOR_DIR/hooks/wolf-leader-save.sh"
+
+run_step "wolf-leader-hub rule" install_file 644 \
+  "$CURSOR_EXAMPLES/rules/wolf-leader-hub.mdc" "$CURSOR_DIR/rules/wolf-leader-hub.mdc"
+
+if [[ "$DRY_RUN" == 0 ]]; then
+  mkdir -p "$CURSOR_DIR/lib"
+  install -m 644 "${ROOT}/scripts/lib/wolf-leader-client.sh" "$CURSOR_DIR/lib/wolf-leader-client.sh"
+  wl_step_ok "lib/wolf-leader-client.sh"
+else
+  echo "  [dry-run] lib/wolf-leader-client.sh"
+fi
+
+# --- env file ---
 ENV_FILE="$CURSOR_DIR/wolf-leader.env"
-if [[ ! -f "$ENV_FILE" ]]; then
-  if [[ -z "$WOLF_LEADER_API" ]]; then
-    WOLF_LEADER_API="http://127.0.0.1:6971"
-  fi
-  if [[ -z "$WOLF_LEADER_MCP" ]]; then
-    WOLF_LEADER_MCP="${WOLF_LEADER_API%:6971}:6972/mcp"
-    WOLF_LEADER_MCP="${WOLF_LEADER_MCP/http:/http:}"
-    if [[ "$WOLF_LEADER_MCP" != http* ]]; then
-      WOLF_LEADER_MCP="http://127.0.0.1:6972/mcp"
-    fi
-  fi
+if [[ "$DRY_RUN" == 1 ]]; then
+  echo "  [dry-run] wolf-leader.env"
+elif [[ -f "$ENV_FILE" && "$RECONFIGURE" != 1 ]]; then
+  wl_step_skip "wolf-leader.env (kept existing — use --reconfigure to update URLs)"
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+else
   cat >"$ENV_FILE" <<EOF
 # Wolf Leader hub URLs — edit if your hub moves
 WOLF_LEADER_API=${WOLF_LEADER_API}
 WOLF_LEADER_MCP=${WOLF_LEADER_MCP}
 EOF
-  echo "  + wolf-leader.env"
-else
-  echo "  = wolf-leader.env (kept existing)"
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
+  if [[ "$RECONFIGURE" == 1 ]]; then
+    wl_step_ok "wolf-leader.env (reconfigured)"
+  else
+    wl_step_ok "wolf-leader.env"
+  fi
 fi
 
-# --- mcp.json (merge wolf-leader entry) ---
 MCP_URL="${WOLF_LEADER_MCP:-}"
 if [[ -z "$MCP_URL" && -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   source "$ENV_FILE"
   MCP_URL="${WOLF_LEADER_MCP:-}"
 fi
-if [[ -z "$MCP_URL" ]]; then
-  MCP_URL="http://127.0.0.1:6972/mcp"
+[[ -n "$MCP_URL" ]] || MCP_URL="http://127.0.0.1:6972/mcp"
+
+if [[ "$DRY_RUN" == 1 ]]; then
+  echo "  [dry-run] mcp.json merge → $MCP_URL"
+else
+  wl_merge_mcp_json "$CURSOR_DIR/mcp.json" "$MCP_URL" "$CURSOR_EXAMPLES/mcp.json.template" || INSTALL_FAIL=1
 fi
 
-python3 - "$CURSOR_DIR/mcp.json" "$MCP_URL" <<'PY'
-import json, sys
-from pathlib import Path
-
-dest, mcp_url = sys.argv[1], sys.argv[2]
-data = {"mcpServers": {}}
-p = Path(dest)
-if p.is_file():
-    try:
-        data = json.loads(p.read_text())
-    except json.JSONDecodeError:
-        pass
-servers = data.setdefault("mcpServers", {})
-servers["wolf-leader"] = {"url": mcp_url}
-# Legacy key used on corbox — keep both pointing at same URL
-servers["ide-storage"] = {"url": mcp_url}
-p.write_text(json.dumps(data, indent=2) + "\n")
-print(f"  + mcp.json (wolf-leader → {mcp_url})")
-PY
-
-# --- AGENTS.md symlink ---
 AGENTS_SRC="${ROOT}/examples/AGENTS.md"
+AGENTS_CANON="$CURSOR_DIR/AGENTS.md"
 AGENTS_DEST="${WORKSPACE}/AGENTS.md"
-if [[ -f "$AGENTS_SRC" ]]; then
-  ln -sfn "$AGENTS_SRC" "$AGENTS_DEST"
-  echo "  + AGENTS.md → $AGENTS_SRC"
+if [[ -f "$AGENTS_SRC" && -d "$WORKSPACE" && -w "$WORKSPACE" ]]; then
+  if [[ "$DRY_RUN" == 1 ]]; then
+    echo "  [dry-run] AGENTS.md → $AGENTS_DEST"
+  else
+    wl_install_agents_md "$AGENTS_SRC" "$AGENTS_CANON" "$AGENTS_DEST" || INSTALL_FAIL=1
+  fi
+elif [[ -f "$AGENTS_SRC" ]]; then
+  wl_step_warn "AGENTS.md skipped — workspace not writable: $WORKSPACE"
+fi
+
+LINK_SLUG="${WOLF_LEADER_LINK_SLUG:-}"
+LINK_NAME="${WOLF_LEADER_LINK_NAME:-}"
+if [[ "$DRY_RUN" == 0 && -n "$LINK_SLUG" ]]; then
+  wl_link_workspace_project "$WOLF_LEADER_API" "$WORKSPACE" "$LINK_SLUG" "${LINK_NAME:-$LINK_SLUG}" || true
+elif [[ "$DRY_RUN" == 1 && -n "$LINK_SLUG" ]]; then
+  echo "  [dry-run] link workspace → project ${LINK_SLUG}"
 fi
 
 echo ""
-echo "Wolf Leader Cursor client installed under $CURSOR_DIR"
-echo "Reload the Cursor window, then verify: ./scripts/verify-cursor-client.sh"
-echo "Slash commands: /new (setup or new project + save), /save (existing project checkpoint)."
+if [[ "$INSTALL_FAIL" -eq 1 ]]; then
+  echo "Install finished with errors — fix FAIL items above, then re-run this script (safe to re-run)."
+else
+  echo "Wolf Leader Cursor client installed under $CURSOR_DIR"
+fi
+
+VERIFY="${ROOT}/scripts/verify-cursor-client.sh"
+if [[ "$DRY_RUN" == 0 && -x "$VERIFY" ]]; then
+  echo ""
+  bash "$VERIFY" || INSTALL_FAIL=1
+fi
+
+if [[ "$JSON_OUT" == 1 ]]; then
+  py_ok=false
+  command -v python3 >/dev/null 2>&1 && py_ok=true
+  printf '{"ok":%s,"cursor_dir":"%s","workspace":"%s","hub_api":"%s","hub_mcp":"%s","python":%s,"linked_slug":"%s"}\n' \
+    "$( [[ "$INSTALL_FAIL" -eq 0 ]] && echo true || echo false )" \
+    "$CURSOR_DIR" "$WORKSPACE" "$WOLF_LEADER_API" "$WOLF_LEADER_MCP" \
+    "$py_ok" "${LINK_SLUG:-}"
+fi
+
+[[ "$INSTALL_FAIL" -eq 0 ]]

@@ -13,6 +13,8 @@ let state = {
   onboardingCache: null,
   searchResults: null,
   searchMode: "keyword",
+  clientSetupCache: null,
+  clientProfileId: null,
 };
 
 const $ = (s) => document.querySelector(s);
@@ -279,12 +281,46 @@ async function showHome() {
   setUrl({ tab: "home" });
 }
 
+async function loadClientSetup() {
+  if (!state.clientSetupCache) {
+    state.clientSetupCache = await api("/api/client-setup");
+  }
+  const sel = $("#client-profile-select");
+  if (!sel.options.length) {
+    for (const p of state.clientSetupCache.profiles) {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.label;
+      sel.appendChild(opt);
+    }
+    state.clientProfileId =
+      state.clientSetupCache.default_profile || state.clientSetupCache.profiles[0]?.id;
+    sel.value = state.clientProfileId;
+  }
+  updateClientProfileUI();
+}
+
+function updateClientProfileUI() {
+  const id = state.clientProfileId || state.clientSetupCache?.default_profile;
+  const meta = state.clientSetupCache?.profiles?.find((p) => p.id === id);
+  if (!meta) return;
+  $("#client-profile-desc").textContent = meta.description || "";
+  $("#client-profile-workspace").textContent = meta.workspace
+    ? `Workspace: ${meta.workspace}`
+    : "";
+}
+
+async function getClientProfilePayload(profileId) {
+  return api(`/api/client-setup/${encodeURIComponent(profileId)}`);
+}
+
 async function showSetup() {
   hideViews();
   $("#setup-view").classList.remove("hidden");
   if (!state.onboardingCache) {
     state.onboardingCache = await api("/api/onboarding");
   }
+  await loadClientSetup();
   $("#setup-content").innerHTML = md(state.onboardingCache.content);
   setUrl({ tab: "setup" });
 }
@@ -636,6 +672,18 @@ $("#refresh-index-btn").addEventListener("click", async () => {
   const data = await api("/api/index?regenerate=true");
   $("#index-content").innerHTML = md(data.content);
   showToast("Index refreshed");
+});
+
+$("#copy-client-setup-prompt-btn").addEventListener("click", async () => {
+  await loadClientSetup();
+  const id = state.clientProfileId || $("#client-profile-select").value;
+  const profile = await getClientProfilePayload(id);
+  await copyText(profile.agent_prompt, `${profile.label} setup prompt`);
+});
+
+$("#client-profile-select").addEventListener("change", (e) => {
+  state.clientProfileId = e.target.value;
+  updateClientProfileUI();
 });
 
 $("#copy-onboarding-prompt-btn").addEventListener("click", async () => {

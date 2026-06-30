@@ -54,11 +54,18 @@
         <header class="view-header">
           <h2>Device &amp; agent setup</h2>
           <div class="chat-actions">
-            <button type="button" id="copy-onboarding-prompt-btn" class="btn btn-primary">Copy agent prompt</button>
+            <button type="button" id="copy-client-setup-prompt-btn" class="btn btn-primary">Copy client setup prompt</button>
+            <button type="button" id="copy-onboarding-prompt-btn" class="btn btn-secondary">Copy generic prompt</button>
             <button type="button" id="copy-onboarding-url-btn" class="btn btn-secondary">Copy API URL</button>
           </div>
         </header>
-        <p class="setup-lead">Single onboarding doc for new devices, IDEs, and zero-context agents.</p>
+        <div class="setup-client-bar">
+          <label for="client-profile-select" class="setup-client-label">Client profile</label>
+          <select id="client-profile-select" class="setup-client-select"></select>
+          <p id="client-profile-desc" class="setup-client-desc muted"></p>
+          <p id="client-profile-workspace" class="setup-client-meta muted"></p>
+        </div>
+        <p class="setup-lead">Paste the client setup prompt into any agentic IDE (Cursor, Claude Code, etc.). The hub serves the install bundle — no git clone on the client.</p>
         <div id="setup-content" class="md-content"></div>
       </div>
 

@@ -10,6 +10,8 @@ Replace `YOUR_HOST` with your server's reachable address (LAN IP, hostname, or T
 | **This doc (API)** | http://YOUR_HOST:6971/api/onboarding |
 | **Web UI** | http://YOUR_HOST:6971 |
 | **MCP** | `http://YOUR_HOST:6972/mcp` |
+| **Client setup (API)** | http://YOUR_HOST:6971/api/client-setup |
+| **Client setup (doc)** | `./data/IDE_CLIENT_SETUP.md` |
 | **Host copy** | `./data/ONBOARDING.md` |
 
 ---
@@ -40,6 +42,42 @@ cp .env.example .env
 Open http://YOUR_HOST:6971 — complete MCP setup on each client device.
 
 Full platform notes: **INSTALL.md**.
+
+---
+
+## Client setup (paste into any IDE)
+
+No git clone on the client — the hub serves the install bundle.
+
+| Step | Action |
+|------|--------|
+| 1 | Open http://YOUR_HOST:6971/?tab=setup |
+| 2 | Choose profile: **Cursor → Unraid**, **Cursor → Corbox**, **Cursor (generic)**, or **Claude Code CLI** |
+| 3 | Click **Copy client setup prompt** and paste into Cursor / Claude Code / etc. |
+| 4 | Agent runs hub install script; reload Cursor; verify `/save` and `/new` |
+
+API:
+
+```bash
+curl -s http://YOUR_HOST:6971/api/client-setup
+curl -s http://YOUR_HOST:6971/api/client-setup/cursor-unraid
+```
+
+Unraid one-liner:
+
+```bash
+WOLF_LEADER_API=http://YOUR_HOST:6971 \
+WOLF_LEADER_MCP=http://YOUR_HOST:6972/mcp \
+WORKSPACE=/boot/config \
+  bash -c "$(curl -fsSL http://YOUR_HOST:6971/api/client-setup/install.sh)"
+```
+
+| Profile | Workspace | Use when |
+|---------|-----------|----------|
+| `cursor-unraid` | `/boot/config` | Cursor SSH to Unraid |
+| `cursor-corbox` | `/root` | Cursor SSH to Proxmox host |
+| `cursor-generic` | `$HOME` | Any Remote-SSH workspace |
+| `claude-code` | `$HOME` | Claude Code CLI (MCP only) |
 
 ---
 

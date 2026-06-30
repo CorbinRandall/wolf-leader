@@ -125,6 +125,14 @@ With explicit slug:
 ~/.cursor/skills/new/scripts/new-project-session.sh my-project-slug "My Project Name"
 ```
 
+**No python3 on this host?** The same script uses a **curl fallback** — you must pass slug + name:
+
+```bash
+~/.cursor/skills/new/scripts/new-project-session-curl.sh my-project-slug "My Project Name"
+```
+
+Creates the project, links workspace path, runs save + distill. Does not upload local `.jsonl` transcript — use MCP `save_session` or install python3 for that.
+
 **Manual API:**
 
 - `POST /api/projects` with `name`, `slug`, `path`

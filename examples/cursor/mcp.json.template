@@ -2,6 +2,9 @@
   "mcpServers": {
     "wolf-leader": {
       "url": "WOLF_LEADER_MCP_PLACEHOLDER"
+    },
+    "ide-storage": {
+      "url": "WOLF_LEADER_MCP_PLACEHOLDER"
     }
   }
 }

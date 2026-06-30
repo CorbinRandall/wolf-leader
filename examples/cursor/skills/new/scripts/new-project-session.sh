@@ -3,4 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-exec python3 "${SCRIPT_DIR}/new-project-session.py" "$@"
+if command -v python3 >/dev/null 2>&1; then
+  exec python3 "${SCRIPT_DIR}/new-project-session.py" "$@"
+fi
+exec bash "${SCRIPT_DIR}/new-project-session-curl.sh" "$@"

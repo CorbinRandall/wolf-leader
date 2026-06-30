@@ -11,12 +11,18 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
 
 from .branding import MCP_SERVER_KEY, PRODUCT_NAME, PRODUCT_TAGLINE, SERVICE_ID
+from .client_setup import (
+    build_client_bundle,
+    list_profiles,
+    profile_payload,
+    read_install_script,
+)
 
 from .context import (
     build_agent_context,
@@ -1264,6 +1270,45 @@ async def get_index(regenerate: bool = False):
     return {"content": content}
 
 
+@app.get("/api/client-setup")
+def api_client_setup_list():
+    """List client profiles and hub URLs for Setup page."""
+    return list_profiles()
+
+
+@app.get("/api/client-setup/install.sh")
+def api_client_setup_install_script():
+    """Shell installer: downloads bundle from hub and runs install-cursor-client.sh."""
+    body = read_install_script()
+    if not body:
+        raise HTTPException(status_code=404, detail="install script not found")
+    return Response(content=body, media_type="text/x-shellscript; charset=utf-8")
+
+
+@app.get("/api/client-setup/{profile_id}")
+def api_client_setup_profile(profile_id: str):
+    """Full client profile with copy-paste agent prompt."""
+    try:
+        return profile_payload(profile_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown profile: {profile_id}")
+
+
+@app.get("/api/client-bundle.tar.gz")
+def api_client_bundle():
+    """Tarball of Cursor client files for hub-based install (no git)."""
+    try:
+        data = build_client_bundle()
+    except Exception as e:
+        logger.exception("client bundle build failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    return Response(
+        content=data,
+        media_type="application/gzip",
+        headers={"Content-Disposition": 'attachment; filename="wolf-leader-client.tar.gz"'},
+    )
+
+
 @app.get("/api/onboarding")
 async def get_onboarding():
     """Single setup doc for new devices and zero-context agents."""
@@ -1279,8 +1324,10 @@ async def get_onboarding():
         + "/data/ONBOARDING.md",
         "agent_prompt": (
             f"Connect this workspace to {PRODUCT_NAME}. "
-            f"Fetch and follow: {public}/api/onboarding"
+            f"Open {public}/?tab=setup — pick a client profile and copy the client setup prompt, "
+            f"or fetch: {public}/api/client-setup/cursor-generic"
         ),
+        "client_setup_url": f"{public}/api/client-setup",
     }
 
 

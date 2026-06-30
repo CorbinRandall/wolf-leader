@@ -377,11 +377,22 @@ async def create_chat(chat: ChatCreate):
 
 
 @app.get("/api/search")
-async def global_search(q: str, limit: int = 50, include_archived: bool = False):
-    """Search memories, projects, chats, and messages (hybrid keyword + vector when enabled)."""
-    from ide_storage.search_ops import hybrid_search
+async def global_search(
+    q: str,
+    limit: int = 50,
+    include_archived: bool = False,
+    kinds: Optional[str] = None,
+):
+    """Hybrid keyword + vector search. kinds: comma-separated subset of memory,project,chat,message."""
+    from ide_storage.search_ops import hybrid_search, _parse_kinds
 
-    return hybrid_search(q, limit=limit, include_archived=include_archived, hub_mode=False)
+    return hybrid_search(
+        q,
+        limit=limit,
+        include_archived=include_archived,
+        hub_mode=False,
+        kinds=_parse_kinds(kinds),
+    )
 
 
 @app.get("/api/chats")

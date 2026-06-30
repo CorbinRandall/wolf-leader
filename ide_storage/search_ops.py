@@ -53,76 +53,93 @@ def reciprocal_rank_fusion(
     return merged
 
 
+ALL_KINDS = frozenset({"memory", "project", "chat", "message"})
+
+
+def _parse_kinds(kinds_param: str | None) -> frozenset[str] | None:
+    """Return a frozenset of requested kinds, or None meaning all kinds."""
+    if not kinds_param:
+        return None
+    parsed = frozenset(k.strip() for k in kinds_param.split(",") if k.strip() in ALL_KINDS)
+    return parsed if parsed else None
+
+
 def keyword_search(
     query: str,
     *,
     limit: int = 50,
     include_archived: bool = False,
     hub_mode: bool = False,
+    kinds: frozenset[str] | None = None,
 ) -> list[dict[str, Any]]:
     pattern = f"%{query}%"
     results: list[dict[str, Any]] = []
     chat_filter = "" if include_archived else " AND COALESCE(c.status, 'active') = 'active'"
+    want = kinds or ALL_KINDS
 
     with db_conn() as conn:
         cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT m.id, printf('[%s] %s', m.type, substr(m.content, 1, 120)) AS title,
-                   m.content, m.project_id, 'memory' AS kind, m.type AS memory_type
-            FROM memories m
-            WHERE m.content LIKE ? AND COALESCE(m.status, 'active') = 'active'
-            ORDER BY m.updated_at DESC LIMIT ?
-            """,
-            (pattern, limit),
-        )
-        for row in cur.fetchall():
-            item = dict(row)
-            item["source"] = "keyword"
-            results.append(item)
 
-        if hub_mode:
+        if "memory" in want:
             cur.execute(
                 """
-                SELECT p.id, p.name AS title, 'project' AS kind
-                FROM projects p
-                WHERE p.name LIKE ? OR p.slug LIKE ? LIMIT ?
+                SELECT m.id, printf('[%s] %s', m.type, substr(m.content, 1, 120)) AS title,
+                       m.content, m.project_id, 'memory' AS kind, m.type AS memory_type
+                FROM memories m
+                WHERE m.content LIKE ? AND COALESCE(m.status, 'active') = 'active'
+                ORDER BY m.updated_at DESC LIMIT ?
+                """,
+                (pattern, limit),
+            )
+            for row in cur.fetchall():
+                item = dict(row)
+                item["source"] = "keyword"
+                results.append(item)
+
+        if "project" in want:
+            if hub_mode:
+                cur.execute(
+                    """
+                    SELECT p.id, p.name AS title, 'project' AS kind
+                    FROM projects p
+                    WHERE p.name LIKE ? OR p.slug LIKE ? LIMIT ?
+                    """,
+                    (pattern, pattern, limit),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT p.id, p.name AS title, p.description AS content, p.slug,
+                           'project' AS kind
+                    FROM projects p
+                    WHERE p.name LIKE ? OR p.slug LIKE ? OR p.description LIKE ?
+                    ORDER BY p.updated_at DESC LIMIT ?
+                    """,
+                    (pattern, pattern, pattern, limit),
+                )
+            for row in cur.fetchall():
+                item = dict(row)
+                item["source"] = "keyword"
+                results.append(item)
+
+        if "chat" in want:
+            title_len = 80 if hub_mode else 200
+            cur.execute(
+                f"""
+                SELECT c.id, c.title, substr(c.content, 1, {title_len}) AS content,
+                       c.updated_at, 'chat' AS kind
+                FROM chats c
+                WHERE (c.title LIKE ? OR c.content LIKE ?){chat_filter}
+                ORDER BY c.updated_at DESC LIMIT ?
                 """,
                 (pattern, pattern, limit),
             )
-        else:
-            cur.execute(
-                """
-                SELECT p.id, p.name AS title, p.description AS content, p.slug,
-                       'project' AS kind
-                FROM projects p
-                WHERE p.name LIKE ? OR p.slug LIKE ? OR p.description LIKE ?
-                ORDER BY p.updated_at DESC LIMIT ?
-                """,
-                (pattern, pattern, pattern, limit),
-            )
-        for row in cur.fetchall():
-            item = dict(row)
-            item["source"] = "keyword"
-            results.append(item)
+            for row in cur.fetchall():
+                item = dict(row)
+                item["source"] = "keyword"
+                results.append(item)
 
-        title_len = 80 if hub_mode else 200
-        cur.execute(
-            f"""
-            SELECT c.id, c.title, substr(c.content, 1, {title_len}) AS content,
-                   c.updated_at, 'chat' AS kind
-            FROM chats c
-            WHERE (c.title LIKE ? OR c.content LIKE ?){chat_filter}
-            ORDER BY c.updated_at DESC LIMIT ?
-            """,
-            (pattern, pattern, limit),
-        )
-        for row in cur.fetchall():
-            item = dict(row)
-            item["source"] = "keyword"
-            results.append(item)
-
-        if not hub_mode:
+        if "message" in want and not hub_mode:
             cur.execute(
                 f"""
                 SELECT m.id, m.chat_id, m.role, substr(m.content, 1, 200) AS content,
@@ -142,13 +159,21 @@ def keyword_search(
     return results
 
 
-def vector_search(query: str, *, limit: int = 50) -> list[dict[str, Any]]:
+def vector_search(
+    query: str,
+    *,
+    limit: int = 50,
+    kinds: frozenset[str] | None = None,
+) -> list[dict[str, Any]]:
     if not embeddings_available():
         return []
     query_vec = embed_one(query)
     if not query_vec:
         return []
-    return knn(query_vec, limit=limit)
+    knn_kinds = tuple(kinds & {"memory", "project", "chat"}) if kinds else ("memory", "project", "chat")
+    if not knn_kinds:
+        return []
+    return knn(query_vec, kinds=knn_kinds, limit=limit)
 
 
 def hybrid_search(
@@ -157,15 +182,16 @@ def hybrid_search(
     limit: int = 50,
     include_archived: bool = False,
     hub_mode: bool = False,
+    kinds: frozenset[str] | None = None,
 ) -> dict[str, Any]:
     q = query.strip()
     if not q:
         return {"query": query, "results": [], "count": 0, "mode": "empty"}
 
     keyword_hits = keyword_search(
-        q, limit=limit, include_archived=include_archived, hub_mode=hub_mode
+        q, limit=limit, include_archived=include_archived, hub_mode=hub_mode, kinds=kinds
     )
-    vector_hits = vector_search(q, limit=limit)
+    vector_hits = vector_search(q, limit=limit, kinds=kinds)
 
     if vector_hits:
         merged = reciprocal_rank_fusion(keyword_hits, vector_hits)[:limit]

@@ -97,6 +97,7 @@ function switchTab(tab) {
   state.tab = tab;
   state.searchResults = null;
   $("#search").value = "";
+  $("#search").placeholder = searchPlaceholderForTab(tab);
   $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab));
   renderSidebar();
   if (tab === "home") showHome();
@@ -107,7 +108,9 @@ async function runGlobalSearch(q) {
   const list = $("#sidebar-list");
   list.innerHTML = `<div class="loading">Searching…</div>`;
   try {
-    const data = await api(`/api/search?q=${encodeURIComponent(q)}`);
+    const kinds = searchKindsForTab(state.tab);
+    const url = `/api/search?q=${encodeURIComponent(q)}${kinds ? `&kinds=${kinds}` : ""}`;
+    const data = await api(url);
     state.searchResults = data.results || [];
     state.searchMode = data.mode || "keyword";
     renderSidebar();
@@ -214,7 +217,7 @@ function renderSidebar() {
   }
 
   if (state.tab === "archive") {
-    list.innerHTML = `<div class="sidebar-hint">Checkpoint archive — full transcripts kept for emergency lookup.</div>`;
+    list.innerHTML = `<div class="sidebar-hint">Library — search all memories, sessions, and messages across every project.</div>`;
     const items = state.archivedChats.filter((c) => {
       if (!q) return true;
       return [c.title, c.content, c.project_name, String(c.id)].filter(Boolean).join(" ").toLowerCase().includes(q);
@@ -645,6 +648,18 @@ $("#copy-onboarding-url-btn").addEventListener("click", async () => {
 });
 
 $$(".tab").forEach((t) => t.addEventListener("click", () => switchTab(t.dataset.tab)));
+function searchKindsForTab(tab) {
+  if (tab === "projects") return "project";
+  if (tab === "archive") return "memory,chat,message";
+  return null; // all
+}
+
+function searchPlaceholderForTab(tab) {
+  if (tab === "projects") return "Search projects…";
+  if (tab === "archive") return "Search memories, sessions…";
+  return "Search…";
+}
+
 let _searchTimer = null;
 $("#search").addEventListener("input", () => {
   clearTimeout(_searchTimer);

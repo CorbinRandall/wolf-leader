@@ -83,12 +83,15 @@ EOF
 
 echo ""
 echo "Checking health: $HEALTH_URL"
-if pct exec "$VMID" -- curl -sf "$HEALTH_URL" >/dev/null 2>&1; then
-  pct exec "$VMID" -- curl -s "$HEALTH_URL"
-  echo ""
-  echo "Deploy complete."
-else
-  echo "WARNING: health check failed — inspect logs:" >&2
-  echo "  pct exec $VMID -- docker logs wolf-leader --tail 50" >&2
-  exit 1
-fi
+for _ in 1 2 3 4 5 6; do
+  if pct exec "$VMID" -- curl -sf "$HEALTH_URL" >/dev/null 2>&1; then
+    pct exec "$VMID" -- curl -s "$HEALTH_URL"
+    echo ""
+    echo "Deploy complete."
+    exit 0
+  fi
+  sleep 2
+done
+echo "WARNING: health check failed — inspect logs:" >&2
+echo "  pct exec $VMID -- docker logs wolf-leader --tail 50" >&2
+exit 1

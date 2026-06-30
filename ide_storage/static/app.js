@@ -14,7 +14,6 @@ let state = {
   searchResults: null,
   searchMode: "keyword",
   clientSetupCache: null,
-  clientProfileId: null,
 };
 
 const $ = (s) => document.querySelector(s);
@@ -284,34 +283,12 @@ async function showHome() {
 async function loadClientSetup() {
   if (!state.clientSetupCache) {
     state.clientSetupCache = await api("/api/client-setup");
-  }
-  const sel = $("#client-profile-select");
-  if (!sel.options.length) {
-    for (const p of state.clientSetupCache.profiles) {
-      const opt = document.createElement("option");
-      opt.value = p.id;
-      opt.textContent = p.label;
-      sel.appendChild(opt);
+    const desc = $("#client-setup-desc");
+    if (desc && state.clientSetupCache.description) {
+      desc.textContent = state.clientSetupCache.description;
     }
-    state.clientProfileId =
-      state.clientSetupCache.default_profile || state.clientSetupCache.profiles[0]?.id;
-    sel.value = state.clientProfileId;
   }
-  updateClientProfileUI();
-}
-
-function updateClientProfileUI() {
-  const id = state.clientProfileId || state.clientSetupCache?.default_profile;
-  const meta = state.clientSetupCache?.profiles?.find((p) => p.id === id);
-  if (!meta) return;
-  $("#client-profile-desc").textContent = meta.description || "";
-  $("#client-profile-workspace").textContent = meta.workspace
-    ? `Workspace: ${meta.workspace}`
-    : "";
-}
-
-async function getClientProfilePayload(profileId) {
-  return api(`/api/client-setup/${encodeURIComponent(profileId)}`);
+  return state.clientSetupCache;
 }
 
 async function showSetup() {
@@ -675,20 +652,8 @@ $("#refresh-index-btn").addEventListener("click", async () => {
 });
 
 $("#copy-client-setup-prompt-btn").addEventListener("click", async () => {
-  await loadClientSetup();
-  const id = state.clientProfileId || $("#client-profile-select").value;
-  const profile = await getClientProfilePayload(id);
-  await copyText(profile.agent_prompt, `${profile.label} setup prompt`);
-});
-
-$("#client-profile-select").addEventListener("change", (e) => {
-  state.clientProfileId = e.target.value;
-  updateClientProfileUI();
-});
-
-$("#copy-onboarding-prompt-btn").addEventListener("click", async () => {
-  if (!state.onboardingCache) state.onboardingCache = await api("/api/onboarding");
-  await copyText(state.onboardingCache.agent_prompt, "Agent prompt");
+  const setup = await loadClientSetup();
+  await copyText(setup.agent_prompt, "Setup prompt");
 });
 
 $("#copy-onboarding-url-btn").addEventListener("click", async () => {

@@ -6,7 +6,6 @@ set -uo pipefail
 WOLF_LEADER_API="${WOLF_LEADER_API:-}"
 WOLF_LEADER_MCP="${WOLF_LEADER_MCP:-}"
 WORKSPACE="${WORKSPACE:-${PWD:-$HOME}}"
-PROFILE="${WOLF_LEADER_PROFILE:-cursor-generic}"
 FORCE=0
 
 while [[ $# -gt 0 ]]; do
@@ -18,7 +17,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$WOLF_LEADER_API" ]]; then
-  echo "ERROR: set WOLF_LEADER_API (hub REST URL, e.g. http://192.168.1.221:6971)" >&2
+  echo "ERROR: set WOLF_LEADER_API (hub REST URL, e.g. http://192.168.1.230:6971)" >&2
   exit 1
 fi
 
@@ -43,29 +42,11 @@ fi
 export WOLF_LEADER_MCP
 export WORKSPACE
 
-# Workspace → project link from profile (e.g. unraid-config for /boot/config)
-if command -v jq >/dev/null 2>&1; then
-  profile_json=$(curl -fsSL "${API}/api/client-setup/${PROFILE}" 2>/dev/null || true)
-  if [[ -n "$profile_json" ]]; then
-    export WOLF_LEADER_LINK_SLUG
-    export WOLF_LEADER_LINK_NAME
-    WOLF_LEADER_LINK_SLUG=$(echo "$profile_json" | jq -r '.workspace_link.slug // empty')
-    WOLF_LEADER_LINK_NAME=$(echo "$profile_json" | jq -r '.workspace_link.name // empty')
-  fi
-fi
-case "$PROFILE" in
-  cursor-unraid)
-    WOLF_LEADER_LINK_SLUG="${WOLF_LEADER_LINK_SLUG:-unraid-config}"
-    WOLF_LEADER_LINK_NAME="${WOLF_LEADER_LINK_NAME:-Unraid Config}"
-    ;;
-esac
-export WOLF_LEADER_LINK_SLUG WOLF_LEADER_LINK_NAME
-
 INSTALL_ARGS=()
 [[ "$FORCE" == 1 ]] && INSTALL_ARGS+=(--force)
 [[ "${WL_INSTALL_DRY_RUN:-0}" == 1 ]] && INSTALL_ARGS+=(--dry-run)
 
-echo "Installing for workspace: $WORKSPACE (profile: $PROFILE)"
+echo "Installing for workspace: $WORKSPACE"
 echo ""
 bash "$TMP/scripts/install-cursor-client.sh" "${INSTALL_ARGS[@]}"
 rc=$?

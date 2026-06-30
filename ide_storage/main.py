@@ -18,9 +18,9 @@ import uvicorn
 
 from .branding import MCP_SERVER_KEY, PRODUCT_NAME, PRODUCT_TAGLINE, SERVICE_ID
 from .client_setup import (
+    LEGACY_PROFILE_IDS,
     build_client_bundle,
-    list_profiles,
-    profile_payload,
+    client_setup_payload,
     read_install_script,
 )
 
@@ -1271,9 +1271,9 @@ async def get_index(regenerate: bool = False):
 
 
 @app.get("/api/client-setup")
-def api_client_setup_list():
-    """List client profiles and hub URLs for Setup page."""
-    return list_profiles()
+def api_client_setup():
+    """Universal client setup — one prompt for any device, OS, and MCP-capable agent."""
+    return client_setup_payload()
 
 
 @app.get("/api/client-setup/install.sh")
@@ -1286,12 +1286,11 @@ def api_client_setup_install_script():
 
 
 @app.get("/api/client-setup/{profile_id}")
-def api_client_setup_profile(profile_id: str):
-    """Full client profile with copy-paste agent prompt."""
-    try:
-        return profile_payload(profile_id)
-    except KeyError:
+def api_client_setup_legacy(profile_id: str):
+    """Legacy profile URLs — all return the unified client setup payload."""
+    if profile_id not in LEGACY_PROFILE_IDS:
         raise HTTPException(status_code=404, detail=f"Unknown profile: {profile_id}")
+    return client_setup_payload(legacy_profile=profile_id)
 
 
 @app.get("/api/client-bundle.tar.gz")
@@ -1323,9 +1322,9 @@ async def get_onboarding():
         )
         + "/data/ONBOARDING.md",
         "agent_prompt": (
-            f"Connect this workspace to {PRODUCT_NAME}. "
-            f"Open {public}/?tab=setup — pick a client profile and copy the client setup prompt, "
-            f"or fetch: {public}/api/client-setup/cursor-generic"
+            f"Connect this device to {PRODUCT_NAME}. "
+            f"Open {public}/?tab=setup and copy the client setup prompt, "
+            f"or fetch: {public}/api/client-setup"
         ),
         "client_setup_url": f"{public}/api/client-setup",
     }

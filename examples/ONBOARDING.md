@@ -45,39 +45,33 @@ Full platform notes: **INSTALL.md**.
 
 ---
 
-## Client setup (paste into any IDE)
+## Client setup (paste into any agent)
 
 No git clone on the client — the hub serves the install bundle.
 
 | Step | Action |
 |------|--------|
 | 1 | Open http://YOUR_HOST:6971/?tab=setup |
-| 2 | Choose profile: **Cursor → Unraid**, **Cursor → Corbox**, **Cursor (generic)**, or **Claude Code CLI** |
-| 3 | Click **Copy client setup prompt** and paste into Cursor / Claude Code / etc. |
-| 4 | Agent runs hub install script; reload Cursor; verify `/save` and `/new` |
+| 2 | Click **Copy setup prompt** and paste into Cursor, Claude Code, Gemini, or any MCP-capable agent |
+| 3 | Agent connects MCP, runs the hub install script (Cursor), and verifies health |
+| 4 | Reload Cursor if needed; `/save` and `/new` should appear in the slash menu |
 
 API:
 
 ```bash
 curl -s http://YOUR_HOST:6971/api/client-setup
-curl -s http://YOUR_HOST:6971/api/client-setup/cursor-unraid
 ```
 
-Unraid one-liner:
+One-liner (Cursor — set `WORKSPACE` to your project root):
 
 ```bash
 WOLF_LEADER_API=http://YOUR_HOST:6971 \
 WOLF_LEADER_MCP=http://YOUR_HOST:6972/mcp \
-WORKSPACE=/boot/config \
+WORKSPACE="$PWD" \
   bash -c "$(curl -fsSL http://YOUR_HOST:6971/api/client-setup/install.sh)"
 ```
 
-| Profile | Workspace | Use when |
-|---------|-----------|----------|
-| `cursor-unraid` | `/boot/config` | Cursor SSH to Unraid |
-| `cursor-corbox` | `/root` | Cursor SSH to Proxmox host |
-| `cursor-generic` | `$HOME` | Any Remote-SSH workspace |
-| `claude-code` | `$HOME` | Claude Code CLI (MCP only) |
+Works on **macOS, Windows, and Linux** — local or remote (SSH). Use the hub's LAN/Tailscale URL when the hub is not on the same machine.
 
 ---
 
@@ -123,9 +117,11 @@ Optional stable facts: `data/projects/{slug}/SEED.md`.
 
 ---
 
-## Phase 1 — Connect MCP (pick your client)
+## Phase 1 — Connect MCP (any agent)
 
 **Wolf Leader MCP port 6972.** REST/Web UI port **6971**.
+
+Add MCP server `wolf-leader` → `http://YOUR_HOST:6972/mcp` in your agent's config:
 
 ### Cursor
 
@@ -139,13 +135,19 @@ Optional stable facts: `data/projects/{slug}/SEED.md`.
 }
 ```
 
+### Claude Code CLI
+
+```bash
+claude mcp add wolf-leader --url http://YOUR_HOST:6972/mcp
+```
+
 ### Claude Desktop (macOS)
 
-`~/Library/Application Support/Claude/claude_desktop_config.json` — same entry.
+`~/Library/Application Support/Claude/claude_desktop_config.json` — same MCP entry.
 
-### Remote SSH workspace
+### Remote workspace
 
-On the **server**, MCP can use `http://127.0.0.1:6972/mcp`. On **laptops**, use the LAN/Tailscale URL.
+On the **machine where the hub runs**, MCP can use `http://127.0.0.1:6972/mcp`. On **other machines**, use the LAN/Tailscale URL.
 
 ---
 

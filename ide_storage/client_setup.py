@@ -1,4 +1,4 @@
-"""Client setup profiles and hub-served install bundle for Wolf Leader."""
+"""Client setup and hub-served install bundle for Wolf Leader."""
 from __future__ import annotations
 
 import io
@@ -27,34 +27,15 @@ BUNDLE_SCRIPTS = (
     AGENTS_MD,
 )
 
-PROFILES: dict[str, dict[str, str]] = {
-    "cursor-unraid": {
-        "label": "Cursor → Unraid (SSH)",
-        "description": "SSH to Unraid (/boot/config). Hub on LAN (e.g. corbox Proxmox).",
-        "workspace": "/boot/config",
-        "host_label": "unraid",
-        "link_slug": "unraid-config",
-        "link_name": "Unraid Config",
-    },
-    "cursor-corbox": {
-        "label": "Cursor → Corbox (SSH)",
-        "description": "SSH to Proxmox host (/root). Wolf Leader hub on same LAN.",
-        "workspace": "/root",
-        "host_label": "corbox",
-    },
-    "cursor-generic": {
-        "label": "Cursor (any SSH host)",
-        "description": "Generic Cursor Remote-SSH workspace. Set WORKSPACE to your project root.",
-        "workspace": "$HOME",
-        "host_label": "client",
-    },
-    "claude-code": {
-        "label": "Claude Code CLI",
-        "description": "Terminal agent with MCP — no Cursor skills; use save_session via MCP.",
-        "workspace": "$HOME",
-        "host_label": "cli",
-    },
-}
+# Legacy profile IDs from older hubs — all resolve to the unified setup payload.
+LEGACY_PROFILE_IDS = frozenset(
+    {
+        "cursor-unraid",
+        "cursor-corbox",
+        "cursor-generic",
+        "claude-code",
+    }
+)
 
 
 def hub_urls() -> dict[str, str]:
@@ -64,111 +45,93 @@ def hub_urls() -> dict[str, str]:
     return {"api": public, "api_local": local, "mcp": mcp, "setup_web": f"{public}/?tab=setup"}
 
 
-def build_agent_prompt(profile_id: str, *, urls: dict[str, str] | None = None) -> str:
-    profile = PROFILES.get(profile_id, PROFILES["cursor-generic"])
+def build_agent_prompt(*, urls: dict[str, str] | None = None) -> str:
+    """Single copy-paste prompt for any device, OS, and MCP-capable agent."""
     urls = urls or hub_urls()
     api = urls["api"]
     mcp = urls["mcp"]
-    workspace = profile["workspace"]
-    label = profile["label"]
 
-    if profile_id == "claude-code":
-        return f"""Connect this machine to {PRODUCT_NAME} ({label}).
+    return f"""Connect this device to {PRODUCT_NAME}.
 
 Hub API: {api}
 MCP: {mcp}
-Workspace: {workspace}
 
-1. Fetch setup guide: curl -s "{api}/api/client-setup/{profile_id}"
-2. Add MCP: claude mcp add wolf-leader --url {mcp}
-3. Verify hub: curl -s "{api}/health"
-4. Before project work: use MCP recall or curl "{api}/api/bootstrap?path=<workspace>"
-5. End of session: MCP save_session or curl "{api}/api/save-project-guide"
+Works on macOS, Windows, and Linux — local machine or remote host (SSH). Works with any MCP-capable agent (Cursor, Claude Code, Claude Desktop, Gemini CLI, etc.).
 
-Report: MCP connected, hub health, and how to save sessions from this client.
-"""
+## Step 1 — Fetch setup spec (mandatory)
+curl -s "{api}/api/client-setup"
+curl -s "{api}/api/onboarding"
 
-    return f"""Connect this Cursor workspace to {PRODUCT_NAME} ({label}).
+## Step 2 — Set workspace path
+WORKSPACE = absolute path to the project folder opened in the IDE (use pwd, ask the user, or infer from the workspace root).
 
-Hub: {api}
-MCP: {mcp}
-Workspace path for this client: {workspace}
+## Step 3 — Connect MCP (all agents)
+Add MCP server `wolf-leader` → {mcp}
 
-Do everything below on the **SSH host** (Remote-SSH target), not only on the laptop.
+Examples:
+- Cursor: ~/.cursor/mcp.json → "wolf-leader": {{ "url": "{mcp}" }}
+- Claude Code: claude mcp add wolf-leader --url {mcp}
+- Other MCP clients: use their config format with the same URL
 
-## Step 1 — Fetch client setup spec (mandatory)
-curl -s "{api}/api/client-setup/{profile_id}"
+If the hub runs on another machine, use the LAN/Tailscale URL above — not localhost — unless the hub is on this same machine.
 
-## Step 2 — Install client bundle from hub (no git clone)
+## Step 4 — Cursor client (only if using Cursor)
+Run on the machine that owns ~/.cursor (local laptop or Remote-SSH target):
+
 WOLF_LEADER_API={api} \\
 WOLF_LEADER_MCP={mcp} \\
-WORKSPACE={workspace} \\
+WORKSPACE=<WORKSPACE> \\
   bash -c "$(curl -fsSL {api}/api/client-setup/install.sh)"
 
-If curl pipe fails, download and run:
+If curl pipe fails:
   curl -fsSL {api}/api/client-bundle.tar.gz -o /tmp/wl-client.tar.gz
   mkdir -p /tmp/wl-client && tar xzf /tmp/wl-client.tar.gz -C /tmp/wl-client
-  WOLF_LEADER_API={api} WOLF_LEADER_MCP={mcp} WORKSPACE={workspace} /tmp/wl-client/scripts/install-cursor-client.sh
+  WOLF_LEADER_API={api} WOLF_LEADER_MCP={mcp} WORKSPACE=<WORKSPACE> /tmp/wl-client/scripts/install-cursor-client.sh
 
-## Step 3 — Verify
+Reload the Cursor window. /save and /new should appear in the slash menu.
+
+## Step 5 — Verify
 curl -s "{api}/health"
-test -f ~/.cursor/skills/save/SKILL.md && test -f ~/.cursor/wolf-leader.env
+MCP: resolve_project + recall — or curl "{api}/api/bootstrap?path=<WORKSPACE>"
+Place AGENTS.md in the workspace root (included in the hub client bundle).
 
-## Step 4 — Reload Cursor window
-/save and /new must appear in the slash menu.
+## Step 6 — Every session
+Start: resolve_project({{ path: "<WORKSPACE>" }}) → recall() or get_brief()
+During: remember() for durable decisions
+End: /save (Cursor) or MCP save_session
 
-## Step 5 — Session start
-MCP: resolve_project + recall — or curl "{api}/api/bootstrap?path={workspace}"
-
-Report: skills (/save, /new), mcp.json wolf-leader entry, wolf-leader.env, hub health OK, workspace path used.
+Report: OS, agent/IDE, WORKSPACE used, MCP connected, hub health OK, and whether /save is available.
 """
 
 
-def profile_payload(profile_id: str) -> dict[str, Any]:
-    if profile_id not in PROFILES:
-        raise KeyError(profile_id)
+def client_setup_payload(*, legacy_profile: str | None = None) -> dict[str, Any]:
     urls = hub_urls()
-    profile = PROFILES[profile_id]
-    payload = {
-        "id": profile_id,
-        **profile,
+    payload: dict[str, Any] = {
+        "id": "universal",
+        "label": "Any device · any agent",
+        "description": (
+            "One setup flow for macOS, Windows, Linux, local or remote. "
+            "Cursor, Claude Code, Claude Desktop, Gemini CLI, or any MCP client."
+        ),
+        "workspace": "<your project root>",
         "hub_api": urls["api"],
         "hub_mcp": urls["mcp"],
         "setup_web_url": urls["setup_web"],
-        "agent_prompt": build_agent_prompt(profile_id, urls=urls),
+        "agent_prompt": build_agent_prompt(urls=urls),
         "install_command": (
             f'WOLF_LEADER_API={urls["api"]} WOLF_LEADER_MCP={urls["mcp"]} '
-            f'WORKSPACE={profile["workspace"]} '
+            f'WORKSPACE="<your project root>" '
             f'bash -c "$(curl -fsSL {urls["api"]}/api/client-setup/install.sh)"'
         ),
         "bundle_url": f'{urls["api"]}/api/client-bundle.tar.gz',
         "onboarding_url": f'{urls["api"]}/api/onboarding',
     }
-    if profile.get("link_slug"):
-        payload["workspace_link"] = {
-            "slug": profile["link_slug"],
-            "name": profile.get("link_name") or profile["link_slug"],
-        }
+    if legacy_profile:
+        payload["legacy_profile"] = legacy_profile
+        payload["deprecated"] = (
+            f"Profile '{legacy_profile}' is deprecated; use GET /api/client-setup instead."
+        )
     return payload
-
-
-def list_profiles() -> dict[str, Any]:
-    urls = hub_urls()
-    return {
-        "hub_api": urls["api"],
-        "hub_mcp": urls["mcp"],
-        "setup_web_url": urls["setup_web"],
-        "default_profile": "cursor-generic",
-        "profiles": [
-            {
-                "id": pid,
-                "label": meta["label"],
-                "description": meta["description"],
-                "workspace": meta["workspace"],
-            }
-            for pid, meta in PROFILES.items()
-        ],
-    }
 
 
 def build_client_bundle() -> bytes:

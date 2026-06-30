@@ -32,7 +32,7 @@ curl -s "${API}/api/save-project-guide"
 Canonical prompt:
 
 ```
-Save this conversation to Wolf Leader on corbox. Fetch and follow every step: ${API}/api/save-project-guide
+Save this conversation to Wolf Leader. Fetch and follow every step: ${API}/api/save-project-guide
 ```
 
 ## Step 3 — Pick the existing project (mandatory)
@@ -59,7 +59,7 @@ Use `best` only if confidence is **high** or **medium** and reasons fit the main
 
 ## Step 4 — Write semantic descriptors (required for vector search)
 
-{PRODUCT_NAME} embeds your descriptors so search works by description, not just keywords.
+Wolf Leader embeds your descriptors so search works by description, not just keywords.
 
 **Per memory** — include `semantic_descriptor` on every `POST /api/memories`:
 ```json

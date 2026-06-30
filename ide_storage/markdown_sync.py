@@ -236,7 +236,7 @@ richer text = better search.
 
 ## Pick one path
 
-### Path A — Cursor on corbox (local transcript exists)
+### Path A — Cursor on the hub host (local transcript exists)
 
 ```bash
 curl -s -X POST http://127.0.0.1:6971/api/save-project \\
@@ -292,7 +292,7 @@ numbers. List projects if unsure: `GET /api/projects` or MCP `list_projects`.
 |---------|-----|
 | `No Cursor transcript found` | Use Path B with `messages` array |
 | Wrong project linked | Re-run with `"slug": "correct-slug"` |
-| Cannot reach LAN IP | On corbox: use `http://127.0.0.1:6971` |
+| Cannot reach LAN IP | On the hub host itself: use `http://127.0.0.1:6971` |
 """
 
 

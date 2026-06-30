@@ -57,14 +57,18 @@ Copy `data/AGENTS.md` into workspace roots after first run (see `examples/AGENTS
 
 | File | Use |
 |------|-----|
-| `docker-compose.yml` | Portable default (Pi, Windows, Linux, …) |
+| `docker-compose.yml` | Portable default — **lean / keyword-only** (Pi, Windows, Linux, …) |
+| `docker-compose.embeddings.yml` | Opt-in semantic search (builds model + enables vectors) |
 | `docker-compose.dev.yml` | Live-mount source for development |
 | `docker-compose.unraid.yml` | Unraid overlay (extra bind mounts) |
 | `docker-compose.local.yml` | Your private overrides (not in git) |
 
 ```bash
-# Portable
+# Portable (lean, keyword-only)
 docker compose up -d --build
+
+# With semantic search (heavier image)
+docker compose -f docker-compose.yml -f docker-compose.embeddings.yml up -d --build
 
 # Unraid
 docker compose -f docker-compose.yml -f docker-compose.unraid.yml up -d --build
@@ -72,6 +76,16 @@ docker compose -f docker-compose.yml -f docker-compose.unraid.yml up -d --build
 # Development
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
+
+## Optional: semantic search
+
+The default image is **keyword-only** and ships with no embedding dependencies — keeping it lean on small hardware. Semantic (vector) search is an explicit opt-in:
+
+1. Build with the embedding deps + baked CPU model: `--build-arg INCLUDE_EMBEDDINGS=1` (or use `docker-compose.embeddings.yml`).
+2. Enable at runtime: `IDE_STORAGE_EMBEDDINGS_ENABLED=1` (the overlay sets this).
+3. Backfill existing data once: `python -m ide_storage.backfill_embeddings`.
+
+When enabled, `GET /api/search?q=...` (and MCP `search`) runs **hybrid** keyword + vector search, merging substring hits with semantic matches via Reciprocal Rank Fusion. With embeddings off it transparently falls back to keyword-only. See [INSTALL.md](INSTALL.md#optional-semantic-search) for sizing.
 
 ## Run natively (no Docker)
 
@@ -102,6 +116,7 @@ Optional: `CURSOR_TRANSCRIPTS_ROOT`, `COMPOSE_MANAGER_ROOT`, `IDE_STORAGE_HOST_L
 - `GET /health`
 - `GET /api/onboarding`
 - `GET /api/bootstrap?path=…`
+- `GET /api/search?q=…` — hybrid keyword + vector search (keyword-only when embeddings are off)
 - `GET /api/projects/{slug}/agent-brief`
 - `POST /api/projects` — create project
 

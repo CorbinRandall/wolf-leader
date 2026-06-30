@@ -86,10 +86,11 @@ def keyword_search(
                 SELECT m.id, printf('[%s] %s', m.type, substr(m.content, 1, 120)) AS title,
                        m.content, m.project_id, 'memory' AS kind, m.type AS memory_type
                 FROM memories m
-                WHERE m.content LIKE ? AND COALESCE(m.status, 'active') = 'active'
+                WHERE (m.content LIKE ? OR COALESCE(m.semantic_descriptor, '') LIKE ?)
+                  AND COALESCE(m.status, 'active') = 'active'
                 ORDER BY m.updated_at DESC LIMIT ?
                 """,
-                (pattern, limit),
+                (pattern, pattern, limit),
             )
             for row in cur.fetchall():
                 item = dict(row)
@@ -113,9 +114,10 @@ def keyword_search(
                            'project' AS kind
                     FROM projects p
                     WHERE p.name LIKE ? OR p.slug LIKE ? OR p.description LIKE ?
+                       OR COALESCE(p.metadata, '') LIKE ?
                     ORDER BY p.updated_at DESC LIMIT ?
                     """,
-                    (pattern, pattern, pattern, limit),
+                    (pattern, pattern, pattern, pattern, limit),
                 )
             for row in cur.fetchall():
                 item = dict(row)
@@ -164,6 +166,7 @@ def vector_search(
     *,
     limit: int = 50,
     kinds: frozenset[str] | None = None,
+    include_archived: bool = False,
 ) -> list[dict[str, Any]]:
     if not embeddings_available():
         return []
@@ -173,7 +176,7 @@ def vector_search(
     knn_kinds = tuple(kinds & {"memory", "project", "chat"}) if kinds else ("memory", "project", "chat")
     if not knn_kinds:
         return []
-    return knn(query_vec, kinds=knn_kinds, limit=limit)
+    return knn(query_vec, kinds=knn_kinds, limit=limit, include_archived=include_archived)
 
 
 def hybrid_search(
@@ -191,7 +194,9 @@ def hybrid_search(
     keyword_hits = keyword_search(
         q, limit=limit, include_archived=include_archived, hub_mode=hub_mode, kinds=kinds
     )
-    vector_hits = vector_search(q, limit=limit, kinds=kinds)
+    vector_hits = vector_search(
+        q, limit=limit, kinds=kinds, include_archived=include_archived
+    )
 
     if vector_hits:
         merged = reciprocal_rank_fusion(keyword_hits, vector_hits)[:limit]

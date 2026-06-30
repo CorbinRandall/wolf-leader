@@ -160,6 +160,10 @@ Production URL: http://192.168.1.221:6971/health
 
 First deploy bootstraps git inside the LXC (preserves `data/` and `.env`). Later deploys are just pull + rebuild.
 
+### Automatic deploy (optional, recommended)
+
+After a one-time [self-hosted runner setup](GITHUB_ACTIONS.md) on Proxmox, **pushes to `main`** run tests and deploy automatically. Until then, use `./scripts/deploy-prod.sh` manually.
+
 Other clients (Unraid, etc.) keep using **`192.168.1.221`** — no change unless you intentionally point them at your Mac.
 
 ---

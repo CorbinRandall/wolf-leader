@@ -20,9 +20,88 @@ from ide_storage.markdown_sync import read_project_md
 
 EMBED_KINDS = ("memory", "project", "chat")
 
+# Sub-batch size for embedding so a large project doesn't spike RAM/CPU by
+# embedding everything in one call. Mirrors backfill_embeddings.DEFAULT_BATCH.
+DEFAULT_BATCH = 20
+
 
 def text_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def synthesize_descriptor(
+    *,
+    kind: str,
+    type: str | None = None,
+    content: str,
+    project_name: str | None = None,
+    slug: str | None = None,
+) -> str:
+    """Cheap, LLM-free fallback semantic descriptor from available fields.
+
+    Used server-side so the vector index is never silently content-only when an
+    agent forgets to supply a descriptor. Pure string composition — keep it cheap.
+    """
+    content = (content or "").strip()
+    snippet = content[:200].strip()
+    label = (project_name or slug or "").strip()
+
+    # With no usable content, the best we can offer is the project label (or
+    # nothing) — a bare "memory:"/"project:" prefix carries no signal.
+    if not snippet:
+        return label
+
+    prefix_bits: list[str] = []
+    if label:
+        prefix_bits.append(label)
+    type_part = (type or kind or "").strip()
+    if type_part:
+        prefix_bits.append(f"{type_part}:")
+    prefix = " ".join(prefix_bits).strip()
+    return f"{prefix} {snippet}".strip() if prefix else snippet
+
+
+def delete_embeddings(pairs: list[tuple[str, int]]) -> int:
+    """Delete embedding rows for (kind, ref_id) pairs. Safe no-op if none.
+
+    Not gated on embeddings being enabled: the embeddings table always exists and
+    may hold rows from a period when embeddings were on, so stale rows must be
+    cleaned up regardless of the current toggle.
+    """
+    pairs = [(k, int(r)) for k, r in (pairs or []) if k and r is not None]
+    if not pairs:
+        return 0
+    deleted = 0
+    try:
+        with db_conn() as conn:
+            cur = conn.cursor()
+            for kind, ref_id in pairs:
+                cur.execute(
+                    "DELETE FROM embeddings WHERE kind = ? AND ref_id = ?",
+                    (kind, ref_id),
+                )
+                deleted += cur.rowcount
+            conn.commit()
+    except Exception:
+        return deleted
+    return deleted
+
+
+def delete_project_embeddings(project_id: int) -> int:
+    """Delete embeddings for a project and all of its memories and chats."""
+    try:
+        with db_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM memories WHERE project_id = ?", (project_id,))
+            mem_ids = [int(r[0]) for r in cur.fetchall()]
+            cur.execute("SELECT id FROM chats WHERE project_id = ?", (project_id,))
+            chat_ids = [int(r[0]) for r in cur.fetchall()]
+    except Exception:
+        return 0
+    pairs: list[tuple[str, int]] = [("project", int(project_id))]
+    pairs += [("memory", m) for m in mem_ids]
+    pairs += [("chat", c) for c in chat_ids]
+    return delete_embeddings(pairs)
 
 
 def _project_semantic_descriptor(metadata: Any) -> str:
@@ -138,12 +217,14 @@ def sync_dirty(
     now = datetime.utcnow().isoformat()
     report: dict[str, Any] = {"embedded": 0, "skipped_unchanged": 0, "kinds": {}}
 
+    # --- Phase 1: open a read connection, collect pending work, then CLOSE it. --
+    # We deliberately do NOT hold a DB connection open while embedding (which can
+    # be slow on CPU) so writers aren't blocked the whole time.
+    pending: list[tuple[str, int, str]] = []
     with db_conn() as conn:
         cur = conn.cursor()
         if not load_vec_extension(conn):
             return {"ok": False, "error": "sqlite-vec extension unavailable"}
-
-        pending: list[tuple[str, int, str]] = []
 
         # Memories — JOIN projects so embed text includes project name for better clustering
         mem_query = """
@@ -218,23 +299,39 @@ def sync_dirty(
                     continue
                 pending.append(("chat", int(row["id"]), text))
 
-        if not pending:
-            report["ok"] = True
-            return report
+    if not pending:
+        report["ok"] = True
+        return report
 
-        texts = [p[2] for p in pending]
+    # --- Phase 2: embed OUTSIDE any DB transaction, in bounded sub-batches. -----
+    # Each batch is embedded then written in its own short write connection so a
+    # large project never spikes RAM/CPU in one call and writers aren't starved.
+    for batch_start in range(0, len(pending), DEFAULT_BATCH):
+        batch = pending[batch_start : batch_start + DEFAULT_BATCH]
+        texts = [p[2] for p in batch]
         vectors = embed_texts(texts)
         if vectors is None:
-            return {"ok": False, "error": "embedding model failed"}
+            return {"ok": False, "error": "embedding model failed", **report}
+        if len(vectors) != len(texts):
+            return {
+                "ok": False,
+                "error": (
+                    f"embedding alignment mismatch: {len(vectors)} vectors "
+                    f"for {len(texts)} texts"
+                ),
+                **report,
+            }
 
-        for (kind, ref_id, embed_text), vector in zip(pending, vectors):
-            _upsert_embedding(
-                cur, kind=kind, ref_id=ref_id, embed_text=embed_text, vector=vector, now=now
-            )
-            report["embedded"] += 1
-            report["kinds"][kind] = report["kinds"].get(kind, 0) + 1
-
-        conn.commit()
+        # --- Phase 3: short write connection for this batch's upserts. ----------
+        with db_conn() as conn:
+            cur = conn.cursor()
+            for (kind, ref_id, embed_text), vector in zip(batch, vectors):
+                _upsert_embedding(
+                    cur, kind=kind, ref_id=ref_id, embed_text=embed_text, vector=vector, now=now
+                )
+                report["embedded"] += 1
+                report["kinds"][kind] = report["kinds"].get(kind, 0) + 1
+            conn.commit()
 
     report["ok"] = True
     return report
@@ -250,6 +347,7 @@ def knn(
     limit: int = 50,
     project_id: int | None = None,
     min_similarity: float = MIN_SIMILARITY,
+    include_archived: bool = False,
 ) -> list[dict[str, Any]]:
     """Cosine-distance KNN over the embeddings table."""
     if not embeddings_available():
@@ -290,10 +388,12 @@ def knn(
         cur.execute(sql, params)
         rows = [dict(r) for r in cur.fetchall()]
 
-    return _hydrate_knn_rows(rows)
+    return _hydrate_knn_rows(rows, include_archived=include_archived)
 
 
-def _hydrate_knn_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _hydrate_knn_rows(
+    rows: list[dict[str, Any]], *, include_archived: bool = False
+) -> list[dict[str, Any]]:
     if not rows:
         return []
 
@@ -350,10 +450,23 @@ def _hydrate_knn_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     }
                 )
             elif kind == "chat":
-                cur.execute(
-                    "SELECT id, title, substr(content, 1, 200) AS content, updated_at FROM chats WHERE id = ?",
-                    (ref_id,),
-                )
+                # Mirror the keyword leg: exclude non-active (archived) chats from
+                # vector results unless the caller explicitly wants archived too,
+                # so both search legs agree on what's visible.
+                if include_archived:
+                    cur.execute(
+                        "SELECT id, title, substr(content, 1, 200) AS content, updated_at FROM chats WHERE id = ?",
+                        (ref_id,),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT id, title, substr(content, 1, 200) AS content, updated_at
+                        FROM chats
+                        WHERE id = ? AND COALESCE(status, 'active') = 'active'
+                        """,
+                        (ref_id,),
+                    )
                 chat = cur.fetchone()
                 if not chat:
                     continue

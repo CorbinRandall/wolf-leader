@@ -147,6 +147,11 @@ def post_save_pipeline(
     slug = project.get("slug") or f"project-{project_id}"
     extract = extract_memories_for_project(project_id, chat_id=chat["id"], max_new=5)
     report["steps"].append({"extract_memories": extract})
+    # A4: soft, non-breaking observability — bubble up when memories were saved
+    # without an agent-provided descriptor and embeddings are on (descriptors
+    # were auto-synthesized server-side).
+    if extract.get("warnings"):
+        report.setdefault("warnings", []).extend(extract["warnings"])
     spec_result = distill_spec(project_id)
     report["steps"].append({"distill_spec": spec_result})
     spec_yaml = read_spec_yaml(slug)

@@ -441,6 +441,17 @@ def save_session_with_pipeline(
         from .post_save_pipeline import post_save_pipeline
 
         result["pipeline"] = post_save_pipeline(session_id, sync=False)
+    else:
+        # C5: no session_id means the pipeline (which embeds the chat) doesn't run.
+        # Still embed the saved chat directly so the vector index isn't skipped.
+        from .embeddings import embeddings_enabled
+
+        if embeddings_enabled() and result.get("id"):
+            from .embed_index import sync_dirty
+
+            result["embeddings"] = sync_dirty(
+                chat_ids=[result["id"]], project_id=project_id
+            )
     return result
 
 

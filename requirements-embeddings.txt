@@ -1,0 +1,6 @@
+# Optional semantic search deps — CPU ONNX embeddings + SQLite vector store.
+# Installed only when building with INCLUDE_EMBEDDINGS=1 (and enabled at runtime
+# via IDE_STORAGE_EMBEDDINGS_ENABLED=1). Both are lazily imported, so the app
+# runs fine in keyword-only mode without these installed.
+fastembed>=0.4.0,<0.8.0
+sqlite-vec>=0.1.6

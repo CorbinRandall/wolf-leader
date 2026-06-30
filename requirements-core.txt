@@ -1,0 +1,8 @@
+# Core runtime — keyword-only hub. No embedding/vector deps.
+# This is what the lean default Docker image installs (INCLUDE_EMBEDDINGS=0).
+fastapi>=0.104.0,<0.129.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
+httpx>=0.28.0
+fastmcp>=2.11.2
+starlette>=0.40.0,<0.51.0

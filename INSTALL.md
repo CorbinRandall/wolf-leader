@@ -5,30 +5,38 @@
 ## Requirements
 
 - Docker Engine 24+ and Docker Compose v2
-- ~512 MB RAM, ~500 MB disk for the image + your `data/` growth
+- **Lean default (keyword-only):** ~512 MB RAM, ~500 MB disk for the image + your `data/` growth
+- **With embeddings:** plan for **1 GB+ RAM** and a larger image (model + ONNX runtime baked in)
 - Ports **6971** (REST/Web UI) and **6972** (MCP) available on the host
 
 ### Optional semantic search
 
-Hybrid keyword + vector search is available but **disabled by default** so Wolf Leader stays lightweight on small hardware.
+The **default image is keyword-only** — it installs no embedding/vector dependencies, bakes no model, and has effectively **zero embedding overhead**. Hybrid keyword + vector search is an explicit, opt-in build.
 
-| Mode | Extra image size | Extra RAM (while embedding) | Pi 4/5 |
-|------|------------------|-----------------------------|--------|
-| Default (keyword only) | — | — | Yes |
-| `IDE_STORAGE_EMBEDDINGS_ENABLED=1` | ~150–250 MB | ~150–250 MB peak | Yes (4 GB+ recommended) |
-| Tiny Pi / tight RAM | leave disabled | — | Yes |
+| Mode | Build | Image size | RAM | Pi 4/5 |
+|------|-------|-----------|-----|--------|
+| Default (keyword only) | `docker compose up -d --build` | base | ~512 MB | Yes |
+| Semantic search | `INCLUDE_EMBEDDINGS=1` + embeddings overlay | +~150–250 MB | 1 GB+ (model load + embedding) | Yes (4 GB+ recommended) |
+
+Enabling embeddings takes **three** things:
+
+1. **Build** with the embedding deps + baked model: `--build-arg INCLUDE_EMBEDDINGS=1` (or use the overlay below).
+2. **Enable at runtime**: `IDE_STORAGE_EMBEDDINGS_ENABLED=1` (the overlay sets this for you).
+3. **Backfill once** so existing data gets vectors.
+
+```bash
+# Build + run with semantic search (sets INCLUDE_EMBEDDINGS=1 and
+# IDE_STORAGE_EMBEDDINGS_ENABLED=1):
+docker compose -f docker-compose.yml -f docker-compose.embeddings.yml up -d --build
+
+# After first deploy with embeddings on, backfill existing data once:
+docker compose -f docker-compose.yml -f docker-compose.embeddings.yml \
+  exec wolf-leader python -m ide_storage.backfill_embeddings
+```
 
 When enabled, the container bundles **all-MiniLM-L6-v2** (CPU ONNX, no PyTorch). Vectors live in SQLite via `sqlite-vec`; search merges keyword `LIKE` hits with semantic matches (Reciprocal Rank Fusion). Keyword search still handles IPs, paths, and slugs exactly.
 
-```bash
-# In .env or compose environment:
-IDE_STORAGE_EMBEDDINGS_ENABLED=1
-
-# After first deploy with embeddings on, backfill existing data once:
-docker compose exec wolf-leader python -m ide_storage.backfill_embeddings
-```
-
-Leave `IDE_STORAGE_EMBEDDINGS_ENABLED` unset (or `0`) on Pi Zero / 1 GB hosts.
+Leave embeddings off (the default) on Pi Zero / 1 GB hosts — keyword search works fully without them.
 
 ## Quick start (any platform)
 

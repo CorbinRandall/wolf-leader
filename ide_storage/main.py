@@ -262,6 +262,29 @@ async def api_sync_stubs():
     return {"registered": added, "stubs_written": len(written), "paths": written}
 
 
+def _sync_chat_embedding(chat_id: int) -> None:
+    """Re-embed a chat after create/update so the vector index never goes stale.
+
+    Guarded by embeddings_enabled() to avoid needless work on the lean/keyword-only
+    image (sync_dirty itself also early-returns when embeddings are unavailable).
+    """
+    from ide_storage.embeddings import embeddings_enabled
+
+    if not embeddings_enabled():
+        return
+    try:
+        with db_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT project_id FROM chats WHERE id = ?", (chat_id,))
+            row = cur.fetchone()
+        project_id = row["project_id"] if row else None
+        from ide_storage.embed_index import sync_dirty
+
+        sync_dirty(chat_ids=[chat_id], project_id=project_id)
+    except Exception:
+        logger.exception("chat embedding sync failed for chat %s", chat_id)
+
+
 # Chat endpoints
 @app.post("/api/chats")
 async def create_chat(chat: ChatCreate):
@@ -331,6 +354,8 @@ async def create_chat(chat: ChatCreate):
                     new_message_count += 1
             
             conn.commit()
+
+            _sync_chat_embedding(chat_id)
             return {
                 "id": chat_id,
                 "message": "Chat updated successfully",
@@ -368,6 +393,8 @@ async def create_chat(chat: ChatCreate):
                     )
             
             conn.commit()
+
+            _sync_chat_embedding(chat_id)
             return {
                 "id": chat_id,
                 "message": "Chat created successfully",
@@ -553,6 +580,7 @@ async def update_chat(chat_id: int, chat: ChatUpdate):
             raise HTTPException(status_code=404, detail="Chat not found")
 
     regenerate_index()
+    _sync_chat_embedding(chat_id)
     return {"message": "Chat updated successfully"}
 
 
@@ -567,6 +595,9 @@ async def delete_chat(chat_id: int):
         if cur.rowcount == 0:
             raise HTTPException(status_code=404, detail="Chat not found")
 
+    from ide_storage.embed_index import delete_embeddings
+
+    delete_embeddings([("chat", chat_id)])
     regenerate_index()
     return {"message": "Chat deleted successfully"}
 
@@ -886,7 +917,27 @@ async def get_project(project_id: int):
 async def update_project(project_id: int, project: ProjectUpdate):
     """Update a project."""
     import json
-    
+
+    # B1: read existing metadata up front so a partial update MERGES rather than
+    # wipes — otherwise PUTs that omit metadata.semantic_descriptor would silently
+    # destroy the project's vector descriptor (real data loss).
+    existing_metadata: dict = {}
+    if project.metadata is not None:
+        with db_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT metadata FROM projects WHERE id = ?", (project_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Project not found")
+            raw = row["metadata"]
+            if raw:
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, dict):
+                        existing_metadata = parsed
+                except (json.JSONDecodeError, TypeError):
+                    existing_metadata = {}
+
     updates = []
     params = []
     
@@ -899,8 +950,9 @@ async def update_project(project_id: int, project: ProjectUpdate):
         params.append(project.description)
     
     if project.metadata is not None:
+        merged = {**existing_metadata, **project.metadata}
         updates.append("metadata = ?")
-        params.append(json.dumps(project.metadata))
+        params.append(json.dumps(merged))
 
     if project.slug is not None:
         updates.append("slug = ?")
@@ -952,9 +1004,21 @@ async def update_project(project_id: int, project: ProjectUpdate):
 
 @app.delete("/api/projects/{project_id}")
 async def delete_project(project_id: int):
-    """Delete a project."""
+    """Delete a project (cascades to its memories; chats are detached)."""
+    from ide_storage.embed_index import delete_project_embeddings
+
+    # Drop vectors for the project + its memories/chats BEFORE the row is gone
+    # (memories cascade-delete once foreign_keys=ON, so enumerate them first).
+    delete_project_embeddings(project_id)
+
     with db_conn() as conn:
         cur = conn.cursor()
+        # snippets.project_id is a FK with no ON DELETE action; with
+        # foreign_keys=ON a delete would otherwise be blocked. Detach them.
+        cur.execute(
+            "UPDATE snippets SET project_id = NULL WHERE project_id = ?",
+            (project_id,),
+        )
         cur.execute("DELETE FROM projects WHERE id = ?", (project_id,))
         conn.commit()
         
@@ -1027,7 +1091,15 @@ async def put_project_md(project_id: int, body: ProjectMdUpdate):
         )
         conn.commit()
     regenerate_index()
-    return {"message": "PROJECT.md updated", "path": path}
+    # C2: PROJECT.md feeds project_embed_text, so re-embed after an edit.
+    from ide_storage.embeddings import embeddings_enabled
+
+    embed_report = None
+    if embeddings_enabled():
+        from ide_storage.embed_index import sync_dirty
+
+        embed_report = sync_dirty(project_id=project_id)
+    return {"message": "PROJECT.md updated", "path": path, "embeddings": embed_report}
 
 
 @app.get("/api/save-project-guide")
@@ -1092,6 +1164,21 @@ async def distill_all_projects():
     spec_results = distill_all_specs()
     results = distill_all()
     regenerate_index()
+    # C3: distillation refreshes project text; re-embed each project so the
+    # vector index tracks the new briefs/descriptors.
+    from ide_storage.embeddings import embeddings_enabled
+
+    if embeddings_enabled():
+        from ide_storage.embed_index import sync_dirty
+
+        with db_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id FROM projects WHERE COALESCE(status, 'active') != 'archived'"
+            )
+            pids = [r["id"] for r in cur.fetchall()]
+        for pid in pids:
+            sync_dirty(project_id=pid)
     return {
         "spec_distilled": len(spec_results),
         "distilled": len(results),
@@ -1135,6 +1222,13 @@ async def distill_one_project(project_id: int):
     result = distill_project(project_id)
     result["spec"] = spec_result
     regenerate_index()
+    # C3: re-embed this project after its brief/spec changed.
+    from ide_storage.embeddings import embeddings_enabled
+
+    if embeddings_enabled():
+        from ide_storage.embed_index import sync_dirty
+
+        result["embeddings"] = sync_dirty(project_id=project_id)
     return result
 
 
@@ -1245,6 +1339,8 @@ async def update_memory(memory_id: int, body: MemoryUpdate):
         raise HTTPException(status_code=400, detail=f"type must be one of {MEMORY_TYPES}")
     from .memory_ops import refresh_project_after_memory_change
 
+    from ide_storage.embeddings import embeddings_enabled
+
     updates, params = [], []
     if body.type is not None:
         updates.append("type = ?")
@@ -1257,17 +1353,46 @@ async def update_memory(memory_id: int, body: MemoryUpdate):
         params.append(body.semantic_descriptor)
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
-    updates.append("updated_at = ?")
-    params.append(datetime.utcnow().isoformat())
-    params.append(memory_id)
     project_id = None
     with db_conn() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT project_id FROM memories WHERE id = ?", (memory_id,))
+        cur.execute(
+            """
+            SELECT m.project_id, m.type, m.content, m.semantic_descriptor,
+                   p.name AS project_name, p.slug AS project_slug
+            FROM memories m LEFT JOIN projects p ON p.id = m.project_id
+            WHERE m.id = ?
+            """,
+            (memory_id,),
+        )
         row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Memory not found")
         project_id = row["project_id"]
+
+        # A3: soft fallback — if embeddings are on and there is still no descriptor
+        # after this update, synthesize a cheap one so the vector stays meaningful.
+        new_descriptor = (
+            body.semantic_descriptor
+            if body.semantic_descriptor is not None
+            else row["semantic_descriptor"]
+        )
+        if embeddings_enabled() and not (new_descriptor and new_descriptor.strip()):
+            from ide_storage.embed_index import synthesize_descriptor
+
+            synthesized = synthesize_descriptor(
+                kind="memory",
+                type=body.type if body.type is not None else row["type"],
+                content=body.content if body.content is not None else row["content"],
+                project_name=row["project_name"],
+                slug=row["project_slug"],
+            )
+            updates.append("semantic_descriptor = ?")
+            params.append(synthesized)
+
+        updates.append("updated_at = ?")
+        params.append(datetime.utcnow().isoformat())
+        params.append(memory_id)
         cur.execute(f"UPDATE memories SET {', '.join(updates)} WHERE id = ?", params)
         conn.commit()
     refresh_project_after_memory_change(project_id)
@@ -1291,6 +1416,9 @@ async def delete_memory(memory_id: int):
         project_id = row["project_id"]
         cur.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
         conn.commit()
+    from ide_storage.embed_index import delete_embeddings
+
+    delete_embeddings([("memory", memory_id)])
     refresh_project_after_memory_change(project_id)
     return {"message": "Memory deleted", "project_id": project_id}
 

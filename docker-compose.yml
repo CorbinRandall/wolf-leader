@@ -1,6 +1,11 @@
 # Wolf Leader — AI Project Storage. Runs on any Docker host (Pi, Windows, Linux, macOS).
 # Copy .env.example → .env and set IDE_STORAGE_PUBLIC_URL to your LAN IP or hostname.
 #
+# DEFAULT BUILD IS LEAN (keyword-only) — no fastembed / sqlite-vec, no model bake.
+#
+# Optional semantic search (heavier image, bakes the CPU model + enables vectors):
+#   docker compose -f docker-compose.yml -f docker-compose.embeddings.yml up -d --build
+#
 # Unraid: use the overlay for Compose Manager paths and extra mounts:
 #   docker compose -f docker-compose.yml -f docker-compose.unraid.yml up -d
 #
@@ -13,6 +18,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Lean default. Override to 1 (or use the embeddings overlay) for vectors.
+        INCLUDE_EMBEDDINGS: ${INCLUDE_EMBEDDINGS:-0}
     env_file:
       - .env
     environment:

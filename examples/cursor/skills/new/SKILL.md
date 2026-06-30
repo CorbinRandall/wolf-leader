@@ -39,7 +39,7 @@ curl -s "${API}/api/onboarding"
 Canonical prompt:
 
 ```
-Connect this workspace to Wolf Leader on corbox and finish setup.
+Connect this workspace to Wolf Leader and finish setup.
 
 Fetch and follow: ${API}/api/onboarding
 ```
@@ -74,7 +74,7 @@ curl -s "${API}/api/save-project-guide"
 Canonical prompt:
 
 ```
-Save this conversation to Wolf Leader on corbox. Fetch and follow every step: ${API}/api/save-project-guide
+Save this conversation to Wolf Leader. Fetch and follow every step: ${API}/api/save-project-guide
 ```
 
 This is a **new** project — do **not** rely on auto-detect. Do **not** use `/save`.
@@ -87,7 +87,7 @@ This is a **new** project — do **not** rely on auto-detect. Do **not** use `/s
 
 ### Write semantic descriptors (required for vector search)
 
-{PRODUCT_NAME} embeds these so search works by description, not just keywords.
+Wolf Leader embeds these so search works by description, not just keywords.
 
 **For the new project** — include in `POST /api/projects`:
 ```json

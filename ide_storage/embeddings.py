@@ -82,19 +82,34 @@ def _get_model():
 
 
 def embed_texts(texts: Sequence[str]) -> list[list[float]] | None:
-    """Return embedding vectors, or None when embeddings are disabled/unavailable."""
+    """Return embedding vectors, or None when embeddings are disabled/unavailable.
+
+    Contract: the returned list is positionally aligned 1:1 with ``texts`` so
+    callers (sync_dirty, backfill) can safely ``zip`` vectors back onto their
+    source rows. We intentionally do NOT drop empty entries — empty/whitespace
+    strings are replaced with a single-space placeholder to keep alignment and
+    avoid model errors on empty input. Callers should pre-filter rows that have
+    no usable text before embedding.
+    """
     if not embeddings_enabled():
         return None
-    cleaned = [t.strip() for t in texts if t and t.strip()]
+    cleaned = [(t or "").strip() for t in texts]
     if not cleaned:
         return []
+    safe = [c if c else " " for c in cleaned]
     try:
         model = _get_model()
-        return [list(vec) for vec in model.embed(cleaned)]
+        vectors = [list(vec) for vec in model.embed(safe)]
     except Exception as exc:
         global _load_error
         _load_error = str(exc)
         return None
+    if len(vectors) != len(cleaned):
+        _load_error = (
+            f"embedding count mismatch: got {len(vectors)} vectors for {len(cleaned)} texts"
+        )
+        return None
+    return vectors
 
 
 def embed_one(text: str) -> list[float] | None:

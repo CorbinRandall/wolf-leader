@@ -16,8 +16,12 @@ services:
       PORT: ${PORT:-6971}
       MCP_PORT: ${MCP_PORT:-6972}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+    # Unraid-specific bind mounts only. The source tree is NOT live-mounted here
+    # and there is no per-start `pip install` — the built image already contains
+    # the app and its deps (start.sh launches MCP + REST). For a dev live-mount,
+    # add `-f docker-compose.dev.yml`. For semantic search, add
+    # `-f docker-compose.embeddings.yml` and rebuild.
     volumes:
-      - .:/app
       - /boot/config/plugins/compose.manager/projects:/boot/config/plugins/compose.manager/projects
       - /boot/config/plugins:/boot/config/plugins:ro
       - /boot/config/ssh:/boot/config/ssh:ro
@@ -26,7 +30,3 @@ services:
       - /root/.cursor/projects/root/agent-transcripts:/root/.cursor/projects/root/agent-transcripts:ro
       - /root/.cursor/plans:/root/.cursor/plans:ro
       - /root:/root:ro
-    command: >
-      bash -c "pip install -r /app/requirements.txt -q 2>/dev/null;
-      python -m ide_storage.mcp_standalone &
-      exec python -m ide_storage.main"

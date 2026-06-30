@@ -38,7 +38,17 @@ _vec_extension_loaded = False
 
 
 def load_vec_extension(conn: sqlite3.Connection) -> bool:
-    """Load sqlite-vec on this connection; return False if unavailable."""
+    """Load sqlite-vec on this connection; return False if unavailable.
+
+    Gated behind ``embeddings_enabled()`` so the lean / keyword-only image never
+    needs sqlite-vec installed (the import is only attempted when embeddings are
+    explicitly turned on).
+    """
+    from ide_storage.embeddings import embeddings_enabled
+
+    if not embeddings_enabled():
+        return False
+
     global _vec_extension_loaded
     if not _vec_extension_loaded:
         try:
@@ -77,6 +87,7 @@ def init_db() -> None:
         cur = conn.cursor()
         cur.execute("PRAGMA journal_mode=WAL")
         cur.execute("PRAGMA synchronous=NORMAL")
+        cur.execute("PRAGMA foreign_keys=ON")
 
         cur.execute(
             """
@@ -208,6 +219,7 @@ def db_conn():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=10000")
+    conn.execute("PRAGMA foreign_keys=ON")
     load_vec_extension(conn)
     try:
         yield conn

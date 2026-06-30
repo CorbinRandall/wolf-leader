@@ -53,6 +53,7 @@ def register_compose_projects() -> int:
 
     now = datetime.utcnow().isoformat()
     added = 0
+    new_ids: list[int] = []
     with db_conn() as conn:
         cur = conn.cursor()
         for item in scan_compose_folders():
@@ -75,8 +76,21 @@ def register_compose_projects() -> int:
                     now,
                 ),
             )
+            new_ids.append(int(cur.lastrowid))
             added += 1
         conn.commit()
+
+    # C4: embed newly registered projects so they're searchable immediately — but
+    # ONLY when embeddings are enabled, so startup stays fast on the lean image
+    # (this runs at boot via the FastAPI lifespan).
+    if new_ids:
+        from .embeddings import embeddings_enabled
+
+        if embeddings_enabled():
+            from .embed_index import sync_dirty
+
+            for pid in new_ids:
+                sync_dirty(project_id=pid)
     return added
 
 

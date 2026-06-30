@@ -1,8 +1,7 @@
-fastapi>=0.104.0,<0.129.0
-uvicorn[standard]>=0.24.0
-pydantic>=2.0.0
-httpx>=0.28.0
-fastmcp>=2.11.2
-starlette>=0.40.0,<0.51.0
-fastembed>=0.4.0,<0.8.0
-sqlite-vec>=0.1.6
+# Full dev stack: core + optional embeddings. `pip install -r requirements.txt`
+# installs everything (keyword + semantic search) for local development.
+#
+# The Docker image is lean by default and installs requirements-core.txt only;
+# build with --build-arg INCLUDE_EMBEDDINGS=1 to also install the embeddings deps.
+-r requirements-core.txt
+-r requirements-embeddings.txt

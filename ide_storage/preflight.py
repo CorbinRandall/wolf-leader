@@ -239,22 +239,39 @@ def _compose_preflight(
 
     docker_check = "ok" if all_containers is not None else "unavailable"
 
+    # When docker is unobservable (no socket — e.g. the hub introspecting its OWN
+    # stack from inside its container) and nothing was found on disk, we genuinely
+    # cannot tell whether the stack is up. Reporting "removed" here gaslights the
+    # next agent into thinking a live deployment is gone. Mirror the honest stance
+    # daemon/external modes already take: say "unknown" and don't assert "missing".
+    unobservable = docker_check == "unavailable" and not compose_present
+
     if compose_present and containers_running:
         observed = "deployed"
-    elif not compose_present and appdata_status not in ("present", "n/a") and not containers_running:
-        observed = "removed"
     elif compose_present or appdata_status == "present" or containers_running:
         observed = "partial"
+    elif unobservable:
+        observed = "unknown"
     else:
         observed = "removed"
 
+    if observed == "unknown":
+        # Don't claim things are "missing" that we could not actually observe.
+        compose_report = "unknown"
+        appdata_report = "unknown" if appdata_status == "missing" else appdata_status
+    else:
+        compose_report = "present" if compose_present else "missing"
+        appdata_report = appdata_status
+
     result: dict[str, Any] = {
         "kind": "compose",
-        "compose": "present" if compose_present else "missing",
+        "compose": compose_report,
         "compose_path": compose or None,
         "compose_discovered_via": compose_discovered_via,
-        "appdata": appdata_status,
-        "appdata_path": appdata_path if appdata_status != "n/a" else None,
+        "appdata": appdata_report,
+        "appdata_path": None if observed == "unknown" else (
+            appdata_path if appdata_status != "n/a" else None
+        ),
         "containers": containers,
         "containers_running": containers_running,
         "docker_check": docker_check,

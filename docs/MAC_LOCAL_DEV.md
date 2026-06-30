@@ -140,15 +140,25 @@ git add -A && git commit -m "your message" && git push origin main
 
 ---
 
-## Step 6 — Deploy to corbox (production) when ready
+## Step 6 — Deploy to production when ready
 
-From Mac, after `git push`:
+After `git push`, from this repo on your Mac:
 
 ```bash
-ssh root@192.168.1.230 'cd /opt/wolf-leader && git pull && bash scripts/deploy-wolf-leader-lxc.sh'
+./scripts/deploy-prod.sh
+```
+
+That SSHs to Proxmox, pulls from GitHub on the host, then **git pull inside LXC 104** and rebuilds the container. No manual file copy.
+
+Or on the Proxmox host directly:
+
+```bash
+cd /opt/wolf-leader && git pull --ff-only && ./scripts/deploy-wolf-leader-lxc.sh
 ```
 
 Production URL: http://192.168.1.221:6971/health
+
+First deploy bootstraps git inside the LXC (preserves `data/` and `.env`). Later deploys are just pull + rebuild.
 
 Other clients (Unraid, etc.) keep using **`192.168.1.221`** — no change unless you intentionally point them at your Mac.
 

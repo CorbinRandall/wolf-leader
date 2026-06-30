@@ -25,6 +25,8 @@ jobs:
           pip install -r requirements-core.txt -r requirements-dev.txt
 
       - name: Run tests
+        env:
+          PYTHONPATH: .
         run: pytest -q
 
   deploy:

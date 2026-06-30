@@ -18,6 +18,11 @@ if [[ -z "${GITHUB_RUNNER_TOKEN:-}" ]]; then
   exit 1
 fi
 
+# Proxmox/host installs often run as root.
+if [[ "$(id -u)" -eq 0 ]]; then
+  export RUNNER_ALLOW_RUNASROOT=1
+fi
+
 ARCH="$(uname -m)"
 case "$ARCH" in
   x86_64) RUNNER_ARCH=x64 ;;

@@ -381,6 +381,45 @@ body {
   border-radius: var(--radius);
 }
 
+.left-off-panel {
+  margin-bottom: 1.25rem;
+}
+.left-off-label {
+  margin: 0.75rem 0 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.left-off-label:first-of-type {
+  margin-top: 0;
+}
+.left-off-hint {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+}
+.left-off-auto {
+  white-space: pre-wrap;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  padding: 0.65rem 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  max-width: 52rem;
+}
+.left-off-saved {
+  max-width: 52rem;
+  min-height: 7rem;
+}
+.left-off-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
 .btn-danger {
   background: transparent;
   color: #f87171;

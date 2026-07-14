@@ -145,7 +145,23 @@ def get_agent_brief_payload(project_id: Optional[int] = None, slug: Optional[str
         pickup_from_spec = m.group(1).replace('\\"', '"')
 
     drill_down = _drill_down_from_spec(handoff, cfg.get("public_base_url", ""))
-    return build_agent_brief_response(
+    public_base = cfg.get("public_base_url", "http://127.0.0.1:6971")
+    brief_url = f"{public_base.rstrip('/')}/api/projects/{pslug}/agent-brief"
+    default_pickup = pickup_from_spec or pickup_prompt(project, public_base=public_base)
+    from .left_off import left_off_payload, resolve_pickup
+
+    pickup_prompt_resolved, _ = resolve_pickup(
+        project, default_pickup=default_pickup, brief_url=brief_url
+    )
+    left_off = left_off_payload(
+        project,
+        brief_url=brief_url,
+        archived_recent_sessions=archived_recent,
+        active_sessions=chats[:1],
+        memories=memories,
+        default_pickup=default_pickup,
+    )
+    payload = build_agent_brief_response(
         project,
         chats,
         memories,
@@ -156,12 +172,13 @@ def get_agent_brief_payload(project_id: Optional[int] = None, slug: Optional[str
         spec_yaml=spec_yaml,
         continue_mode=continue_mode,
         deploy_state=handoff.get("observed_deploy_state") or get_deploy_state(project),
-        pickup_prompt=pickup_from_spec
-        or pickup_prompt(project, public_base=cfg.get("public_base_url", "http://127.0.0.1:6971")),
+        pickup_prompt=pickup_prompt_resolved,
         handoff_tier=handoff.get("handoff_tier"),
         drill_down=drill_down,
         preflight=preflight,
     )
+    payload["where_we_left_off"] = left_off
+    return payload
 
 
 def _drill_down_from_spec(handoff: Dict[str, Any], public_base: str) -> Dict[str, Any]:

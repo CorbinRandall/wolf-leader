@@ -79,6 +79,20 @@
           </div>
         </header>
         <p id="project-purpose" class="project-purpose hidden"></p>
+        <section id="left-off-panel" class="panel left-off-panel">
+          <h3>Where we left off</h3>
+          <p class="left-off-label muted">Last activity</p>
+          <div id="left-off-auto" class="left-off-auto muted">Loading…</div>
+          <p class="left-off-label">Saved spot</p>
+          <p class="left-off-hint muted">Persists as the pickup prompt so a new chat can resume these items.</p>
+          <textarea id="left-off-saved" class="edit-area left-off-saved" rows="6" placeholder="What should the next session pick up?"></textarea>
+          <div class="left-off-actions">
+            <button type="button" id="left-off-save-btn" class="btn btn-small btn-primary">Save spot</button>
+            <button type="button" id="left-off-suggest-btn" class="btn btn-small btn-secondary">Suggest from activity</button>
+            <button type="button" id="left-off-clear-btn" class="btn btn-small btn-secondary">Clear</button>
+            <span id="left-off-saved-meta" class="muted"></span>
+          </div>
+        </section>
         <p id="brief-meta" class="setup-lead muted"></p>
         <section class="panel">
           <h3>Agent brief (distilled)</h3>

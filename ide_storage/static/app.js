@@ -10,6 +10,8 @@ let state = {
   activeChat: null,
   activeProject: null,
   agentContextCache: {},
+  agentBriefCache: null,
+  leftOffCache: null,
   onboardingCache: null,
   searchResults: null,
   searchMode: "keyword",
@@ -344,6 +346,8 @@ async function selectProject(id) {
     purposeEl.classList.add("hidden");
   }
 
+  await loadLeftOff(id, briefData?.where_we_left_off || null);
+
   if (briefData) {
     $("#brief-meta").textContent = [
       briefData.brief_updated_at && `Brief updated: ${formatDate(briefData.brief_updated_at)}`,
@@ -594,6 +598,77 @@ $("#copy-project-context-btn").addEventListener("click", async () => {
   if (ctx?.paste_text) copyText(ctx.paste_text, "Project context");
 });
 
+async function loadLeftOff(projectId, cached) {
+  let data = cached;
+  if (!data) {
+    try {
+      data = await api(`/api/projects/${projectId}/where-left-off`);
+    } catch {
+      data = null;
+    }
+  }
+  state.leftOffCache = data;
+  const autoEl = $("#left-off-auto");
+  const savedEl = $("#left-off-saved");
+  const metaEl = $("#left-off-saved-meta");
+  if (!data) {
+    autoEl.textContent = "Could not load left-off snapshot.";
+    savedEl.value = "";
+    metaEl.textContent = "";
+    return;
+  }
+  autoEl.textContent = data.auto?.summary || "No recent sessions or active_work memories yet.";
+  savedEl.value = data.saved || "";
+  metaEl.textContent = data.saved_at
+    ? `Saved ${formatDate(data.saved_at)}${data.from_saved ? " · used as pickup" : ""}`
+    : (data.from_saved ? "Using saved pickup" : "");
+}
+
+async function saveLeftOff(content) {
+  const pid = state.activeProjectId;
+  if (!pid) return;
+  const data = await api(`/api/projects/${pid}/where-left-off`, {
+    method: "PUT",
+    body: JSON.stringify({ content: content ?? $("#left-off-saved").value, distill: true }),
+  });
+  state.leftOffCache = data;
+  await loadLeftOff(pid, data);
+  // Refresh brief so Copy pickup / purpose stay in sync
+  const p = state.activeProject;
+  state.agentBriefCache = await api(`/api/projects/${p?.slug || pid}/agent-brief`).catch(() => state.agentBriefCache);
+  return data;
+}
+
+$("#left-off-save-btn").addEventListener("click", async () => {
+  try {
+    await saveLeftOff($("#left-off-saved").value);
+    showToast("Spot saved");
+  } catch (err) {
+    showToast(`Save failed: ${err.message || err}`);
+  }
+});
+
+$("#left-off-suggest-btn").addEventListener("click", () => {
+  const suggest = state.leftOffCache?.suggest;
+  if (suggest) {
+    $("#left-off-saved").value = suggest;
+    showToast("Suggestion filled — click Save spot to keep it");
+  } else {
+    showToast("No suggestion available yet");
+  }
+});
+
+$("#left-off-clear-btn").addEventListener("click", async () => {
+  if (!confirm("Clear the saved spot? Pickup will fall back to the auto prompt.")) return;
+  try {
+    $("#left-off-saved").value = "";
+    await saveLeftOff("");
+    showToast("Spot cleared");
+  } catch (err) {
+    showToast(`Clear failed: ${err.message || err}`);
+  }
+});
+
 $("#copy-agent-start-btn").addEventListener("click", async () => {
   const pid = state.activeProjectId;
   if (!pid) return;
@@ -603,7 +678,11 @@ $("#copy-agent-start-btn").addEventListener("click", async () => {
     brief = await api(`/api/projects/${p?.slug || pid}/agent-brief`);
     state.agentBriefCache = brief;
   }
-  const prompt = brief?.pickup_prompt || brief?.agent_prompt;
+  const prompt =
+    state.leftOffCache?.pickup ||
+    brief?.where_we_left_off?.pickup ||
+    brief?.pickup_prompt ||
+    brief?.agent_prompt;
   if (prompt) copyText(prompt, "Pickup prompt");
 });
 

@@ -184,6 +184,21 @@ def build_purpose_summary(
     """Natural-language paragraph: what this project is + current work context."""
     slug = (project.get("slug") or f"project-{project.get('id', 0)}").strip()
     overview = _extract_overview(project, spec_yaml=spec_yaml, project_md=project_md)
+    from .left_off import get_saved_left_off
+
+    saved = get_saved_left_off(project)
+    if saved:
+        # Prefer the intentional saved spot over auto last-session narration.
+        first_line = saved.splitlines()[0].strip()
+        if len(first_line) > 220:
+            first_line = first_line[:217].rstrip() + "…"
+        left_off_sentence = f"Where we left off: {first_line}"
+    else:
+        left_off_sentence = _recent_sentence(
+            archived_recent_sessions=archived_recent_sessions or [],
+            active_sessions=active_sessions or [],
+            blockers=_yaml_list_items(spec_yaml, "blockers", limit=1),
+        )
     parts = [
         _identity_sentence(slug, overview),
         _work_sentence(
@@ -192,11 +207,7 @@ def build_purpose_summary(
             deploy_state=deploy_state or "",
             preflight=preflight or {},
         ),
-        _recent_sentence(
-            archived_recent_sessions=archived_recent_sessions or [],
-            active_sessions=active_sessions or [],
-            blockers=_yaml_list_items(spec_yaml, "blockers", limit=1),
-        ),
+        left_off_sentence,
     ]
     text = " ".join(p.strip() for p in parts if p and p.strip())
     text = re.sub(r"\s+", " ", text).strip()

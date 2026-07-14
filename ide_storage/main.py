@@ -147,6 +147,13 @@ class ProjectMdUpdate(BaseModel):
     content: str
 
 
+class LeftOffUpdate(BaseModel):
+    """Saved 'where we left off' spot for a project."""
+    content: Optional[str] = None
+    # When true, regenerate SPEC so pickup reflects the saved spot immediately.
+    distill: bool = True
+
+
 class SaveMessage(BaseModel):
     role: str
     content: str
@@ -1236,6 +1243,75 @@ async def distill_one_project(project_id: int):
 
         result["embeddings"] = sync_dirty(project_id=project_id)
     return result
+
+
+def _left_off_context(project_id: int) -> tuple[dict, dict]:
+    """Load project + left-off payload inputs."""
+    from .hub import _project_chats, _project_memories, _recent_archived_sessions
+    from .left_off import left_off_payload
+    from .project_archetypes import pickup_prompt
+
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM projects WHERE id = ?", (project_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Project not found")
+        project = dict(row)
+        chats = _project_chats(cur, project_id, 5)
+        memories = _project_memories(cur, project_id, 40)
+        archived_recent = _recent_archived_sessions(cur, project_id, 2)
+
+    slug = project.get("slug") or f"project-{project_id}"
+    public = os.environ.get("IDE_STORAGE_PUBLIC_URL", "http://127.0.0.1:6971").rstrip("/")
+    brief_url = f"{public}/api/projects/{slug}/agent-brief"
+    default_pickup = pickup_prompt(project, public_base=public)
+    payload = left_off_payload(
+        project,
+        brief_url=brief_url,
+        archived_recent_sessions=archived_recent,
+        active_sessions=chats[:1],
+        memories=memories,
+        default_pickup=default_pickup,
+    )
+    return project, payload
+
+
+@app.get("/api/projects/{project_id}/where-left-off")
+async def get_where_left_off(project_id: int):
+    """Where we left off — auto last activity + saved pickup spot."""
+    _, payload = _left_off_context(project_id)
+    return payload
+
+
+@app.put("/api/projects/{project_id}/where-left-off")
+async def put_where_left_off(project_id: int, body: LeftOffUpdate):
+    """Save (or clear) the where-we-left-off spot for a project."""
+    import json
+
+    from .left_off import metadata_with_left_off
+
+    project, _ = _left_off_context(project_id)
+    meta = metadata_with_left_off(project, body.content)
+    now = datetime.utcnow().isoformat()
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE projects SET metadata = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(meta), now, project_id),
+        )
+        conn.commit()
+
+    distill_result = None
+    if body.distill:
+        try:
+            distill_result = distill_spec(project_id)
+        except Exception as exc:  # noqa: BLE001
+            distill_result = {"error": str(exc)}
+
+    _, payload = _left_off_context(project_id)
+    payload["distill"] = distill_result
+    return payload
 
 
 @app.get("/api/projects/{project_id}/agent-context")

@@ -235,30 +235,44 @@ def _backfill_occurred_at(cur) -> None:
         WHERE occurred_at IS NULL OR TRIM(occurred_at) = ''
         """
     )
-    rows = [dict(r) for r in cur.fetchall()]
+    rows = cur.fetchall()
     for row in rows:
+        # init_db may not set row_factory — support both Row and tuple.
+        if hasattr(row, "keys"):
+            chat_id, title, created_at, occurred_at = (
+                row["id"],
+                row["title"],
+                row["created_at"],
+                row["occurred_at"],
+            )
+        else:
+            chat_id, title, created_at, occurred_at = row
         cur.execute(
             "SELECT created_at FROM messages WHERE chat_id = ? ORDER BY id ASC LIMIT 40",
-            (row["id"],),
+            (chat_id,),
         )
-        msgs = [{"created_at": r["created_at"]} for r in cur.fetchall()]
+        msg_rows = cur.fetchall()
+        msgs = []
+        for mr in msg_rows:
+            created = mr["created_at"] if hasattr(mr, "keys") else mr[0]
+            msgs.append({"created_at": created})
         # Prefer title timestamp over uniform save-time message stamps when
         # every message shares the chat created_at (typical Path B save).
-        title_dt = parse_title_timestamp(row.get("title"))
+        title_dt = parse_title_timestamp(title)
         msg_dt = earliest_message_time(msgs)
-        created = (row.get("created_at") or "").strip()
+        created = (created_at or "").strip()
         if title_dt and msg_dt and isoformat_utc(msg_dt) == created:
             occurred = isoformat_utc(title_dt)
         else:
             occurred = infer_occurred_at(
-                title=row.get("title"),
+                title=title,
                 messages=msgs,
                 created_at=created,
             )
         if occurred:
             cur.execute(
                 "UPDATE chats SET occurred_at = ? WHERE id = ?",
-                (occurred, row["id"]),
+                (occurred, chat_id),
             )
 
 

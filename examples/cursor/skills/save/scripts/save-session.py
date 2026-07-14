@@ -8,6 +8,7 @@ import re
 import sys
 import urllib.error
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 MAX_MSG_CHARS = 12000
@@ -227,6 +228,8 @@ def save_via_remote_upload(
         "workspace_path": workspace,
         "session_id": sid,
         "messages": messages,
+        # Prefer transcript mtime as session timeline when available.
+        "occurred_at": datetime.utcfromtimestamp(path.stat().st_mtime).isoformat(),
     }
     if slug:
         body["slug"] = slug

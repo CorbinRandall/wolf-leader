@@ -157,6 +157,7 @@ class LeftOffUpdate(BaseModel):
 class SaveMessage(BaseModel):
     role: str
     content: str
+    created_at: Optional[str] = None  # when this message happened (ISO)
 
 
 class SaveProjectBody(BaseModel):
@@ -166,6 +167,8 @@ class SaveProjectBody(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
     messages: Optional[List[SaveMessage]] = None
+    # When the conversation actually happened (ISO). Logbook sorts by this, not save time.
+    occurred_at: Optional[str] = None
 
 
 class ProjectMatchBody(BaseModel):
@@ -1150,7 +1153,10 @@ async def save_project_checkpoint(body: SaveProjectBody = SaveProjectBody()):
 
     messages = None
     if body.messages:
-        messages = [{"role": m.role, "content": m.content} for m in body.messages]
+        messages = [
+            {"role": m.role, "content": m.content, **({"created_at": m.created_at} if m.created_at else {})}
+            for m in body.messages
+        ]
 
     try:
         report = save_project(
@@ -1160,6 +1166,7 @@ async def save_project_checkpoint(body: SaveProjectBody = SaveProjectBody()):
             title=body.title,
             content=body.content,
             messages=messages,
+            occurred_at=body.occurred_at,
         )
     except Exception as exc:
         logger.exception("save-project failed")

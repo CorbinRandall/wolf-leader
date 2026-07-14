@@ -605,26 +605,29 @@ async function loadLeftOff(projectId, cached) {
   try {
     data = await api(`/api/projects/${projectId}/where-left-off`);
   } catch (err) {
-    console.warn("where-left-off fetch failed", err);
+    console.warn("logbook fetch failed", err);
     data = cached || null;
   }
   state.leftOffCache = data;
+  const headingEl = $("#left-off-heading");
   const latestEl = $("#left-off-latest");
   const logEl = $("#left-off-log");
   if (!latestEl || !logEl) {
-    console.warn("left-off DOM nodes missing");
+    console.warn("logbook DOM nodes missing");
     return;
   }
+  if (headingEl && data?.heading) headingEl.textContent = data.heading;
   if (!data) {
     latestEl.classList.add("muted");
-    latestEl.textContent = "Could not load activity log.";
+    latestEl.textContent = "Could not load logbook.";
     logEl.innerHTML = "";
     return;
   }
   const latest = data.latest || null;
   const latestText = (latest && latest.summary) || data.saved || "";
+  const whenRaw = latest?.occurred_at || latest?.updated_at;
   if (latestText) {
-    const when = latest?.updated_at ? formatDate(latest.updated_at) : "Latest checkpoint";
+    const when = whenRaw ? formatDate(whenRaw) : "Latest session";
     const title = latest?.title ? ` · ${escapeHtml(latest.title)}` : "";
     latestEl.classList.remove("muted");
     latestEl.innerHTML = `
@@ -632,17 +635,23 @@ async function loadLeftOff(projectId, cached) {
       <div>${escapeHtml(latestText)}</div>`;
   } else {
     latestEl.classList.add("muted");
-    latestEl.textContent = "No checkpoints yet — /save a session to start the log.";
+    latestEl.textContent = "No sessions yet — /save to add the first logbook entry.";
   }
 
   const entries = data.entries || [];
+  // Latest is already shown above; list the rest (or all if only one).
+  const rest = entries.length > 1 ? entries.slice(1) : [];
   if (!entries.length) {
-    logEl.innerHTML = `<p class="muted">Each /save adds a short entry here.</p>`;
+    logEl.innerHTML = `<p class="muted">Each /save adds a short entry here, ordered by when the session happened.</p>`;
     return;
   }
-  logEl.innerHTML = entries.map((e, i) => `
-    <button type="button" class="left-off-entry${i === 0 ? " is-latest" : ""}" data-goto-chat="${e.chat_id || ""}">
-      <span class="left-off-entry-meta">${escapeHtml(formatDate(e.updated_at))}${e.title ? ` · ${escapeHtml(e.title)}` : ""}</span>
+  if (!rest.length) {
+    logEl.innerHTML = `<p class="muted">Only one session so far.</p>`;
+    return;
+  }
+  logEl.innerHTML = rest.map((e) => `
+    <button type="button" class="left-off-entry" data-goto-chat="${e.chat_id || ""}">
+      <span class="left-off-entry-meta">${escapeHtml(formatDate(e.occurred_at || e.updated_at))}${e.title ? ` · ${escapeHtml(e.title)}` : ""}</span>
       <div class="left-off-entry-body">${escapeHtml(e.summary || "")}</div>
     </button>`).join("");
   $$("#left-off-log [data-goto-chat]").forEach((b) => {

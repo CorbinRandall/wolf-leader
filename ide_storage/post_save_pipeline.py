@@ -130,6 +130,28 @@ def post_save_pipeline(
     report["chat_url"] = f"{_public_base()}/?chat={chat['id']}"
     report["message_count"] = _message_count(chat["id"])
 
+    # Ensure session timeline date (when chat happened) is set for logbook order.
+    from ide_storage.session_time import infer_occurred_at
+
+    msgs = _chat_messages(chat["id"])
+    occurred = infer_occurred_at(
+        title=chat.get("title"),
+        messages=msgs,
+        created_at=chat.get("created_at"),
+        explicit=(chat.get("occurred_at") or None),
+    )
+    if occurred and occurred != (chat.get("occurred_at") or ""):
+        conn = sqlite3.connect(db_file())
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE chats SET occurred_at = ? WHERE id = ?",
+            (occurred, chat["id"]),
+        )
+        conn.commit()
+        conn.close()
+        chat["occurred_at"] = occurred
+    report["occurred_at"] = occurred
+
     project_id = chat.get("project_id")
     if not project_id:
         report["ok"] = True

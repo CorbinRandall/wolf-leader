@@ -104,6 +104,8 @@ def save_from_conversation(
     workspace_path: str | None = None,
     session_id: str | None = None,
     db_path: Path | None = None,
+    occurred_at: str | None = None,
+    transcript_mtime: float | None = None,
 ) -> dict[str, Any]:
     """Save an in-context agent conversation (Claude, etc.) — no Cursor transcript."""
     import uuid
@@ -164,8 +166,11 @@ def save_from_conversation(
         workspace_path=workspace or None,
         project_id=project_id,
         messages=messages,
+        occurred_at=occurred_at,
+        transcript_mtime=transcript_mtime,
     )
     report["steps"].append({"save_session": saved})
+    report["occurred_at"] = saved.get("occurred_at")
 
     # Never force a relink here: the project was already chosen above from the
     # FULL message text (explicit slug or best_project_match). Forcing a relink
@@ -207,6 +212,7 @@ def save_project(
     root: Path = TRANSCRIPTS_ROOT,
     db_path: Path | None = None,
     force_relink: bool = True,
+    occurred_at: str | None = None,
 ) -> dict[str, Any]:
     """
     Save into Wolf Leader — agent transcript and/or in-context messages.
@@ -224,6 +230,7 @@ def save_project(
             workspace_path=workspace_path,
             session_id=session_id,
             db_path=db_path,
+            occurred_at=occurred_at,
         )
 
     report: dict[str, Any] = {"ok": False, "steps": [], "source": "cursor_transcript"}

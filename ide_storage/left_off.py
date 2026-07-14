@@ -197,16 +197,21 @@ def build_session_log_summary(
 
 
 def log_entry_from_chat(chat: dict[str, Any]) -> dict[str, Any]:
-    """Normalize a chat row into a log-book entry."""
+    """Normalize a chat row into a logbook entry."""
+    from .session_time import effective_occurred_at
+
     summary = (chat.get("content") or "").strip()
     title = clean_title(chat.get("title") or f"Session #{chat.get('id', '?')}")
     if not _usable_content(summary):
         summary = title
+    when = effective_occurred_at(chat)
     return {
         "chat_id": chat.get("id"),
         "title": title,
         "summary": summary,
-        "updated_at": chat.get("updated_at"),
+        "occurred_at": when,
+        "updated_at": when,  # UI historically used updated_at for display date
+        "saved_at": chat.get("updated_at"),
         "web": None,
     }
 
@@ -218,9 +223,13 @@ def left_off_payload(
     log_entries: Optional[list[dict[str, Any]]] = None,
     default_pickup: str = "",
 ) -> dict[str, Any]:
-    """Payload for UI log book + agent pickup."""
-    entries = [log_entry_from_chat(e) if "summary" not in e or "chat_id" not in e else e for e in (log_entries or [])]
-    # Prefer newest session summary; fall back to stored metadata / default pickup.
+    """Payload for UI logbook + agent pickup."""
+    entries = [
+        log_entry_from_chat(e) if "summary" not in e or "chat_id" not in e else e
+        for e in (log_entries or [])
+    ]
+    # Newest on timeline first (already sorted by query, but keep safe).
+    entries.sort(key=lambda e: e.get("occurred_at") or e.get("updated_at") or "", reverse=True)
     latest = entries[0] if entries else None
     latest_summary = (latest or {}).get("summary") or get_saved_left_off(project) or ""
     pickup, from_saved = resolve_pickup(
@@ -228,16 +237,15 @@ def left_off_payload(
         default_pickup=latest_summary or default_pickup,
         brief_url=brief_url,
     )
-    # If metadata empty but we have a latest log, use that as the spot.
     if latest_summary and not get_saved_left_off(project):
         pickup = ensure_brief_url(latest_summary, brief_url)
         from_saved = True
     return {
-        "heading": "Where we left off",
+        "heading": "Logbook",
         "latest": latest,
         "entries": entries,
         "saved": get_saved_left_off(project) or (latest_summary or None),
-        "saved_at": get_left_off_updated_at(project) or ((latest or {}).get("updated_at")),
+        "saved_at": get_left_off_updated_at(project) or ((latest or {}).get("occurred_at")),
         "pickup": pickup,
         "from_saved": from_saved,
     }

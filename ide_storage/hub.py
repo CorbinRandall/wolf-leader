@@ -235,9 +235,9 @@ def _archived_session_count(cur, project_id: int) -> int:
 def _recent_archived_sessions(cur, project_id: int, limit: int = 2) -> List[Dict[str, Any]]:
     cur.execute(
         """
-        SELECT id, title, content, updated_at FROM chats
+        SELECT id, title, content, updated_at, created_at, occurred_at FROM chats
         WHERE project_id = ? AND COALESCE(status, 'active') = 'archived'
-        ORDER BY updated_at DESC LIMIT ?
+        ORDER BY COALESCE(occurred_at, created_at, updated_at) DESC LIMIT ?
         """,
         (project_id, limit),
     )
@@ -245,12 +245,12 @@ def _recent_archived_sessions(cur, project_id: int, limit: int = 2) -> List[Dict
 
 
 def _activity_log_sessions(cur, project_id: int, limit: int = 25) -> List[Dict[str, Any]]:
-    """Archived session summaries for the user-facing activity log book."""
+    """Archived session summaries for the user-facing logbook (session timeline order)."""
     cur.execute(
         """
-        SELECT id, title, content, updated_at FROM chats
+        SELECT id, title, content, updated_at, created_at, occurred_at FROM chats
         WHERE project_id = ? AND COALESCE(status, 'active') = 'archived'
-        ORDER BY updated_at DESC LIMIT ?
+        ORDER BY COALESCE(occurred_at, created_at, updated_at) DESC LIMIT ?
         """,
         (project_id, limit),
     )
@@ -404,9 +404,20 @@ def save_session(
     project_id: Optional[int] = None,
     messages: Optional[List[Dict[str, str]]] = None,
     device_name: str = "unraid-server",
+    occurred_at: Optional[str] = None,
+    transcript_mtime: Optional[float] = None,
 ) -> Dict[str, Any]:
+    from .session_time import infer_occurred_at, parse_datetime, isoformat_utc
+
     now = datetime.utcnow().isoformat()
     messages = messages or []
+    occurred = infer_occurred_at(
+        explicit=occurred_at,
+        title=title,
+        messages=messages,
+        created_at=now,
+        transcript_mtime=transcript_mtime,
+    )
 
     if project_id is None and workspace_path:
         proj = resolve_project(path=workspace_path)
@@ -417,18 +428,23 @@ def save_session(
         cur = conn.cursor()
         existing_id = None
         if session_id:
-            cur.execute("SELECT id FROM chats WHERE session_id = ?", (session_id,))
+            cur.execute("SELECT id, occurred_at, created_at FROM chats WHERE session_id = ?", (session_id,))
             row = cur.fetchone()
             if row:
                 existing_id = row["id"]
+                # Keep earlier occurred_at if we already know a better session time.
+                existing_occ = (row["occurred_at"] or "").strip()
+                if existing_occ and (not occurred or existing_occ <= occurred):
+                    occurred = existing_occ
 
         if existing_id:
             cur.execute(
                 """
                 UPDATE chats SET title = ?, content = ?, project_id = ?,
-                    workspace_path = ?, updated_at = ? WHERE id = ?
+                    workspace_path = ?, updated_at = ?, occurred_at = COALESCE(?, occurred_at)
+                WHERE id = ?
                 """,
-                (title, content, project_id, workspace_path, now, existing_id),
+                (title, content, project_id, workspace_path, now, occurred, existing_id),
             )
             chat_id = existing_id
             action = "updated"
@@ -436,8 +452,8 @@ def save_session(
             cur.execute(
                 """
                 INSERT INTO chats (title, workspace_path, device_name, session_id,
-                    project_id, created_at, updated_at, content, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
+                    project_id, created_at, updated_at, content, status, occurred_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
                 """,
                 (
                     title,
@@ -448,6 +464,7 @@ def save_session(
                     now,
                     now,
                     content,
+                    occurred,
                 ),
             )
             chat_id = cur.lastrowid
@@ -455,18 +472,25 @@ def save_session(
 
         added = 0
         for msg in messages:
+            msg_time = isoformat_utc(parse_datetime(msg.get("created_at") if isinstance(msg, dict) else None)) or occurred or now
             cur.execute(
                 """
                 INSERT INTO messages (chat_id, role, content, created_at, metadata)
                 VALUES (?, ?, ?, ?, NULL)
                 """,
-                (chat_id, msg.get("role", "user"), msg.get("content", ""), now),
+                (chat_id, msg.get("role", "user"), msg.get("content", ""), msg_time),
             )
             added += 1
 
         conn.commit()
 
-    return {"id": chat_id, "action": action, "messages_added": added, "session_id": session_id}
+    return {
+        "id": chat_id,
+        "action": action,
+        "messages_added": added,
+        "session_id": session_id,
+        "occurred_at": occurred,
+    }
 
 
 def save_session_with_pipeline(
@@ -477,9 +501,17 @@ def save_session_with_pipeline(
     project_id: Optional[int] = None,
     messages: Optional[List[Dict[str, str]]] = None,
     device_name: str = "unraid-server",
+    occurred_at: Optional[str] = None,
 ) -> Dict[str, Any]:
     result = save_session(
-        title, content, session_id, workspace_path, project_id, messages, device_name
+        title,
+        content,
+        session_id,
+        workspace_path,
+        project_id,
+        messages,
+        device_name,
+        occurred_at=occurred_at,
     )
     if session_id:
         from .post_save_pipeline import post_save_pipeline

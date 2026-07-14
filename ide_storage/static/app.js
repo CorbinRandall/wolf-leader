@@ -608,66 +608,41 @@ async function loadLeftOff(projectId, cached) {
     }
   }
   state.leftOffCache = data;
-  const autoEl = $("#left-off-auto");
-  const savedEl = $("#left-off-saved");
-  const metaEl = $("#left-off-saved-meta");
+  const latestEl = $("#left-off-latest");
+  const logEl = $("#left-off-log");
   if (!data) {
-    autoEl.textContent = "Could not load left-off snapshot.";
-    savedEl.value = "";
-    metaEl.textContent = "";
+    latestEl.textContent = "Could not load activity log.";
+    logEl.innerHTML = "";
     return;
   }
-  autoEl.textContent = data.auto?.summary || "No recent sessions or active_work memories yet.";
-  savedEl.value = data.saved || "";
-  metaEl.textContent = data.saved_at
-    ? `Saved ${formatDate(data.saved_at)}${data.from_saved ? " · used as pickup" : ""}`
-    : (data.from_saved ? "Using saved pickup" : "");
-}
-
-async function saveLeftOff(content) {
-  const pid = state.activeProjectId;
-  if (!pid) return;
-  const data = await api(`/api/projects/${pid}/where-left-off`, {
-    method: "PUT",
-    body: JSON.stringify({ content: content ?? $("#left-off-saved").value, distill: true }),
-  });
-  state.leftOffCache = data;
-  await loadLeftOff(pid, data);
-  // Refresh brief so Copy pickup / purpose stay in sync
-  const p = state.activeProject;
-  state.agentBriefCache = await api(`/api/projects/${p?.slug || pid}/agent-brief`).catch(() => state.agentBriefCache);
-  return data;
-}
-
-$("#left-off-save-btn").addEventListener("click", async () => {
-  try {
-    await saveLeftOff($("#left-off-saved").value);
-    showToast("Spot saved");
-  } catch (err) {
-    showToast(`Save failed: ${err.message || err}`);
-  }
-});
-
-$("#left-off-suggest-btn").addEventListener("click", () => {
-  const suggest = state.leftOffCache?.suggest;
-  if (suggest) {
-    $("#left-off-saved").value = suggest;
-    showToast("Suggestion filled — click Save spot to keep it");
+  const latest = data.latest;
+  const latestText = latest?.summary || data.saved || "";
+  if (latestText) {
+    latestEl.innerHTML = `
+      <span class="left-off-latest-meta">${latest?.updated_at ? escapeHtml(formatDate(latest.updated_at)) : "Latest checkpoint"}${latest?.title ? ` · ${escapeHtml(latest.title)}` : ""}</span>
+      <div>${escapeHtml(latestText)}</div>`;
   } else {
-    showToast("No suggestion available yet");
+    latestEl.textContent = "No checkpoints yet — /save a session to start the log.";
   }
-});
 
-$("#left-off-clear-btn").addEventListener("click", async () => {
-  if (!confirm("Clear the saved spot? Pickup will fall back to the auto prompt.")) return;
-  try {
-    $("#left-off-saved").value = "";
-    await saveLeftOff("");
-    showToast("Spot cleared");
-  } catch (err) {
-    showToast(`Clear failed: ${err.message || err}`);
+  const entries = data.entries || [];
+  if (!entries.length) {
+    logEl.innerHTML = `<p class="muted">Each /save adds a short entry here.</p>`;
+    return;
   }
-});
+  logEl.innerHTML = entries.map((e, i) => `
+    <button type="button" class="left-off-entry${i === 0 ? " is-latest" : ""}" data-goto-chat="${e.chat_id || ""}">
+      <span class="left-off-entry-meta">${escapeHtml(formatDate(e.updated_at))}${e.title ? ` · ${escapeHtml(e.title)}` : ""}</span>
+      <div class="left-off-entry-body">${escapeHtml(e.summary || "")}</div>
+    </button>`).join("");
+  $$("#left-off-log [data-goto-chat]").forEach((b) => {
+    if (!b.dataset.gotoChat) return;
+    b.addEventListener("click", () => {
+      switchTab("archive");
+      selectChat(+b.dataset.gotoChat);
+    });
+  });
+}
 
 $("#copy-agent-start-btn").addEventListener("click", async () => {
   const pid = state.activeProjectId;

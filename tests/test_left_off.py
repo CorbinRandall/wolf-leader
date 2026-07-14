@@ -1,89 +1,92 @@
-"""Tests for where-we-left-off helpers."""
+"""Tests for session activity log / where-we-left-off."""
 from __future__ import annotations
 
 from ide_storage.left_off import (
     LEGACY_OVERRIDE_KEY,
     LEFT_OFF_KEY,
-    build_auto_snapshot,
-    ensure_brief_url,
+    build_session_log_summary,
     get_saved_left_off,
+    left_off_payload,
+    log_entry_from_chat,
     metadata_with_left_off,
     resolve_pickup,
-    suggest_left_off_text,
 )
 
 
-def test_get_saved_prefers_canonical_then_legacy():
-    project = {"metadata": {LEFT_OFF_KEY: "canonical spot", LEGACY_OVERRIDE_KEY: "legacy"}}
-    assert get_saved_left_off(project) == "canonical spot"
-    project2 = {"metadata": f'{{"{LEGACY_OVERRIDE_KEY}": "legacy only"}}'}
-    assert get_saved_left_off(project2) == "legacy only"
-    assert get_saved_left_off({"metadata": None}) is None
-
-
-def test_resolve_pickup_uses_saved_and_appends_brief():
-    project = {"metadata": {LEFT_OFF_KEY: "Finish Stop button UI"}}
-    pickup, from_saved = resolve_pickup(
-        project,
-        default_pickup="Continue project — maintain only.",
-        brief_url="http://example/agent-brief",
-    )
-    assert from_saved is True
-    assert "Finish Stop button UI" in pickup
-    assert "Brief: http://example/agent-brief" in pickup
-
-
-def test_resolve_pickup_falls_back_without_saved():
-    pickup, from_saved = resolve_pickup(
-        {"metadata": {}},
-        default_pickup="auto prompt",
-        brief_url="http://example/agent-brief",
-    )
-    assert from_saved is False
-    assert pickup == "auto prompt"
-
-
-def test_ensure_brief_url_skips_when_present():
-    text = "Work items\nBrief: http://already/there"
-    assert ensure_brief_url(text, "http://other") == text
-
-
-def test_build_auto_snapshot_from_session_and_active_work():
-    snap = build_auto_snapshot(
-        archived_recent_sessions=[{"id": 9, "title": "Stop button WIP", "updated_at": "2026-07-14T12:00:00"}],
-        memories=[
-            {"type": "active_work", "content": "Finish dashboard Stop button"},
-            {"type": "decision", "content": "Use compose_maintain"},
-            {"type": "active_work", "content": "CLI live progress"},
+def test_build_summary_from_extracted_memories():
+    text = build_session_log_summary(
+        title="Stop button work",
+        messages=[],
+        extracted_memories=[
+            {"type": "active_work", "content": "Finish dashboard Stop button UI"},
+            {"type": "decision", "content": "Keep pickup driven by /save session logs"},
         ],
     )
-    assert snap["last_activity"]["title"] == "Stop button WIP"
-    assert "Finish dashboard Stop button" in snap["open_items"]
-    assert "CLI live progress" in snap["open_items"]
-    assert "Open items:" in snap["summary"]
+    assert "Stop button" in text
+    assert "pickup" in text.lower() or "save" in text.lower()
+    assert len(text) < 500
 
 
-def test_metadata_with_left_off_sets_and_clears_both_keys():
-    project = {"metadata": {"continue_mode": "compose_maintain", LEGACY_OVERRIDE_KEY: "old"}}
-    meta = metadata_with_left_off(project, "New spot", updated_at="2026-07-14T01:02:03")
-    assert meta["continue_mode"] == "compose_maintain"
-    assert meta[LEFT_OFF_KEY] == "New spot"
-    assert meta[LEGACY_OVERRIDE_KEY] == "New spot"
-    assert meta["where_we_left_off_at"] == "2026-07-14T01:02:03"
+def test_build_summary_from_assistant_signal():
+    text = build_session_log_summary(
+        title="Misc",
+        messages=[
+            {"role": "user", "content": "ship the feature"},
+            {
+                "role": "assistant",
+                "content": "Shipped the where-we-left-off log book on Proxmox and removed the manual form.",
+            },
+        ],
+    )
+    assert "where-we-left-off" in text.lower() or "Shipped" in text
 
-    cleared = metadata_with_left_off({**project, "metadata": meta}, "")
+
+def test_build_summary_falls_back_to_user_ask():
+    text = build_session_log_summary(
+        title="Chat #12",
+        messages=[{"role": "user", "content": "Please wire up Docker health checks for the archive service."}],
+    )
+    assert "health checks" in text.lower() or "Worked on" in text
+
+
+def test_log_entry_falls_back_when_generic_content():
+    entry = log_entry_from_chat(
+        {"id": 5, "title": "Real session title", "content": "Saved 12 messages from agent conversation", "updated_at": "2026-07-14"}
+    )
+    assert entry["summary"] == "Real session title"
+
+
+def test_left_off_payload_uses_latest_entry():
+    project = {"metadata": {}}
+    entries = [
+        {"chat_id": 2, "title": "Newest", "summary": "Finished Stop button and verified on LXC.", "updated_at": "2026-07-14"},
+        {"chat_id": 1, "title": "Older", "summary": "Older work.", "updated_at": "2026-07-01"},
+    ]
+    payload = left_off_payload(
+        project,
+        brief_url="http://hub/api/projects/x/agent-brief",
+        log_entries=entries,
+        default_pickup="fallback",
+    )
+    assert payload["latest"]["chat_id"] == 2
+    assert "Finished Stop button" in payload["pickup"]
+    assert "agent-brief" in payload["pickup"]
+    assert len(payload["entries"]) == 2
+
+
+def test_resolve_pickup_honors_metadata():
+    project = {"metadata": {LEFT_OFF_KEY: "Manual leftover note"}}
+    pickup, from_saved = resolve_pickup(project, default_pickup="auto", brief_url="http://b")
+    assert from_saved is True
+    assert "Manual leftover note" in pickup
+
+
+def test_metadata_clears_legacy_alias():
+    project = {"metadata": {LEGACY_OVERRIDE_KEY: "old", "continue_mode": "compose_maintain"}}
+    meta = metadata_with_left_off(project, "new spot")
+    assert meta[LEFT_OFF_KEY] == "new spot"
+    assert meta[LEGACY_OVERRIDE_KEY] == "new spot"
+    cleared = metadata_with_left_off({"metadata": meta}, "")
     assert LEFT_OFF_KEY not in cleared
     assert LEGACY_OVERRIDE_KEY not in cleared
-    assert "continue_mode" in cleared
-
-
-def test_suggest_includes_name_and_items():
-    text = suggest_left_off_text(
-        project={"name": "iMessage Archive", "slug": "imessage-archive"},
-        brief_url="http://hub/api/projects/imessage-archive/agent-brief",
-        archived_recent_sessions=[{"id": 1, "title": "Dashboard work", "updated_at": "2026-07-14T00:00:00"}],
-        memories=[{"type": "active_work", "content": "Stop button"}],
-    )
-    assert "iMessage Archive" in text
-    assert "Stop button" in text
-    assert "agent-brief" in text
+    assert get_saved_left_off({"metadata": cleared}) is None

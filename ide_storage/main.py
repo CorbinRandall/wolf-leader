@@ -1246,9 +1246,9 @@ async def distill_one_project(project_id: int):
 
 
 def _left_off_context(project_id: int) -> tuple[dict, dict]:
-    """Load project + left-off payload inputs."""
-    from .hub import _project_chats, _project_memories, _recent_archived_sessions
-    from .left_off import left_off_payload
+    """Load project + activity-log payload."""
+    from .hub import _activity_log_sessions
+    from .left_off import left_off_payload, log_entry_from_chat
     from .project_archetypes import pickup_prompt
 
     with db_conn() as conn:
@@ -1258,20 +1258,21 @@ def _left_off_context(project_id: int) -> tuple[dict, dict]:
         if not row:
             raise HTTPException(status_code=404, detail="Project not found")
         project = dict(row)
-        chats = _project_chats(cur, project_id, 5)
-        memories = _project_memories(cur, project_id, 40)
-        archived_recent = _recent_archived_sessions(cur, project_id, 2)
+        log_rows = _activity_log_sessions(cur, project_id, 25)
 
     slug = project.get("slug") or f"project-{project_id}"
     public = os.environ.get("IDE_STORAGE_PUBLIC_URL", "http://127.0.0.1:6971").rstrip("/")
     brief_url = f"{public}/api/projects/{slug}/agent-brief"
     default_pickup = pickup_prompt(project, public_base=public)
+    entries = []
+    for r in log_rows:
+        entry = log_entry_from_chat(r)
+        entry["web"] = f"{public}/?chat={r['id']}"
+        entries.append(entry)
     payload = left_off_payload(
         project,
         brief_url=brief_url,
-        archived_recent_sessions=archived_recent,
-        active_sessions=chats[:1],
-        memories=memories,
+        log_entries=entries,
         default_pickup=default_pickup,
     )
     return project, payload
@@ -1279,14 +1280,14 @@ def _left_off_context(project_id: int) -> tuple[dict, dict]:
 
 @app.get("/api/projects/{project_id}/where-left-off")
 async def get_where_left_off(project_id: int):
-    """Where we left off — auto last activity + saved pickup spot."""
+    """Activity log + latest where-we-left-off snapshot (filled on each /save)."""
     _, payload = _left_off_context(project_id)
     return payload
 
 
 @app.put("/api/projects/{project_id}/where-left-off")
 async def put_where_left_off(project_id: int, body: LeftOffUpdate):
-    """Save (or clear) the where-we-left-off spot for a project."""
+    """Optional manual override (prefer /save auto log). Kept for API compatibility."""
     import json
 
     from .left_off import metadata_with_left_off

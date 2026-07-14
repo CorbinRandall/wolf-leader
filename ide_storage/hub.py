@@ -148,7 +148,18 @@ def get_agent_brief_payload(project_id: Optional[int] = None, slug: Optional[str
     public_base = cfg.get("public_base_url", "http://127.0.0.1:6971")
     brief_url = f"{public_base.rstrip('/')}/api/projects/{pslug}/agent-brief"
     default_pickup = pickup_from_spec or pickup_prompt(project, public_base=public_base)
-    from .left_off import left_off_payload, resolve_pickup
+    from .left_off import left_off_payload, log_entry_from_chat, resolve_pickup
+
+    with db_conn() as conn:
+        cur = conn.cursor()
+        log_rows = _activity_log_sessions(cur, pid, 25)
+
+    public = public_base.rstrip("/")
+    entries = []
+    for row in log_rows:
+        entry = log_entry_from_chat(row)
+        entry["web"] = f"{public}/?chat={row['id']}"
+        entries.append(entry)
 
     pickup_prompt_resolved, _ = resolve_pickup(
         project, default_pickup=default_pickup, brief_url=brief_url
@@ -156,11 +167,13 @@ def get_agent_brief_payload(project_id: Optional[int] = None, slug: Optional[str
     left_off = left_off_payload(
         project,
         brief_url=brief_url,
-        archived_recent_sessions=archived_recent,
-        active_sessions=chats[:1],
-        memories=memories,
+        log_entries=entries,
         default_pickup=default_pickup,
     )
+    # Prefer resolved pickup that includes latest log when metadata empty
+    if left_off.get("pickup"):
+        pickup_prompt_resolved = left_off["pickup"]
+
     payload = build_agent_brief_response(
         project,
         chats,
@@ -178,6 +191,7 @@ def get_agent_brief_payload(project_id: Optional[int] = None, slug: Optional[str
         preflight=preflight,
     )
     payload["where_we_left_off"] = left_off
+    payload["activity_log"] = entries
     return payload
 
 
@@ -221,7 +235,20 @@ def _archived_session_count(cur, project_id: int) -> int:
 def _recent_archived_sessions(cur, project_id: int, limit: int = 2) -> List[Dict[str, Any]]:
     cur.execute(
         """
-        SELECT id, title, updated_at FROM chats
+        SELECT id, title, content, updated_at FROM chats
+        WHERE project_id = ? AND COALESCE(status, 'active') = 'archived'
+        ORDER BY updated_at DESC LIMIT ?
+        """,
+        (project_id, limit),
+    )
+    return [dict(r) for r in cur.fetchall()]
+
+
+def _activity_log_sessions(cur, project_id: int, limit: int = 25) -> List[Dict[str, Any]]:
+    """Archived session summaries for the user-facing activity log book."""
+    cur.execute(
+        """
+        SELECT id, title, content, updated_at FROM chats
         WHERE project_id = ? AND COALESCE(status, 'active') = 'archived'
         ORDER BY updated_at DESC LIMIT ?
         """,

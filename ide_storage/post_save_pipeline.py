@@ -152,6 +152,24 @@ def post_save_pipeline(
     # were auto-synthesized server-side).
     if extract.get("warnings"):
         report.setdefault("warnings", []).extend(extract["warnings"])
+
+    # User-facing activity log: short paragraph from this save → chat.content
+    # and project where_we_left_off (pickup).
+    from ide_storage.left_off import apply_log_summary_to_chat, build_session_log_summary
+
+    messages = _chat_messages(chat["id"])
+    extracted_for_log = extract.get("memories") or []
+    log_summary = build_session_log_summary(
+        title=chat.get("title") or "",
+        messages=messages,
+        extracted_memories=extracted_for_log if isinstance(extracted_for_log, list) else [],
+    )
+    log_result = apply_log_summary_to_chat(chat["id"], log_summary, project=project)
+    report["steps"].append({"session_log": log_result})
+    report["session_log"] = log_summary
+    # Refresh project row so later distill sees updated where_we_left_off metadata.
+    project = _get_project(project_id) or project
+
     spec_result = distill_spec(project_id)
     report["steps"].append({"distill_spec": spec_result})
     spec_yaml = read_spec_yaml(slug)
@@ -234,6 +252,19 @@ def _message_count(chat_id: int) -> int:
     n = cur.fetchone()[0]
     conn.close()
     return n
+
+
+def _chat_messages(chat_id: int) -> list[dict]:
+    conn = sqlite3.connect(db_file())
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT role, content FROM messages WHERE chat_id = ? ORDER BY id",
+        (chat_id,),
+    )
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
 
 
 def main() -> None:

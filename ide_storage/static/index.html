@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/styles.css" />
+  <link rel="stylesheet" href="/static/styles.css?v=left-off-2" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
@@ -82,9 +82,9 @@
         <section id="left-off-panel" class="panel left-off-panel">
           <h3>Where we left off</h3>
           <p class="left-off-hint muted">Filled automatically each time you /save — a short log of what happened.</p>
-          <div id="left-off-latest" class="left-off-latest muted">No checkpoints yet.</div>
+          <div id="left-off-latest" class="left-off-latest muted">Loading activity…</div>
           <h4 class="left-off-log-heading">Activity log</h4>
-          <div id="left-off-log" class="left-off-log"></div>
+          <div id="left-off-log" class="left-off-log"><p class="muted">Loading…</p></div>
         </section>
         <p id="brief-meta" class="setup-lead muted"></p>
         <section class="panel">
@@ -152,6 +152,6 @@
   </dialog>
 
   <div id="toast" class="toast hidden"></div>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=left-off-2"></script>
 </body>
 </html>

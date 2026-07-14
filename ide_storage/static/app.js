@@ -599,29 +599,39 @@ $("#copy-project-context-btn").addEventListener("click", async () => {
 });
 
 async function loadLeftOff(projectId, cached) {
-  let data = cached;
-  if (!data) {
-    try {
-      data = await api(`/api/projects/${projectId}/where-left-off`);
-    } catch {
-      data = null;
-    }
+  // Always hit the dedicated endpoint so a stale/partial agent-brief cache
+  // cannot leave the panel stuck on the HTML placeholder.
+  let data = null;
+  try {
+    data = await api(`/api/projects/${projectId}/where-left-off`);
+  } catch (err) {
+    console.warn("where-left-off fetch failed", err);
+    data = cached || null;
   }
   state.leftOffCache = data;
   const latestEl = $("#left-off-latest");
   const logEl = $("#left-off-log");
+  if (!latestEl || !logEl) {
+    console.warn("left-off DOM nodes missing");
+    return;
+  }
   if (!data) {
+    latestEl.classList.add("muted");
     latestEl.textContent = "Could not load activity log.";
     logEl.innerHTML = "";
     return;
   }
-  const latest = data.latest;
-  const latestText = latest?.summary || data.saved || "";
+  const latest = data.latest || null;
+  const latestText = (latest && latest.summary) || data.saved || "";
   if (latestText) {
+    const when = latest?.updated_at ? formatDate(latest.updated_at) : "Latest checkpoint";
+    const title = latest?.title ? ` · ${escapeHtml(latest.title)}` : "";
+    latestEl.classList.remove("muted");
     latestEl.innerHTML = `
-      <span class="left-off-latest-meta">${latest?.updated_at ? escapeHtml(formatDate(latest.updated_at)) : "Latest checkpoint"}${latest?.title ? ` · ${escapeHtml(latest.title)}` : ""}</span>
+      <span class="left-off-latest-meta">${escapeHtml(when)}${title}</span>
       <div>${escapeHtml(latestText)}</div>`;
   } else {
+    latestEl.classList.add("muted");
     latestEl.textContent = "No checkpoints yet — /save a session to start the log.";
   }
 

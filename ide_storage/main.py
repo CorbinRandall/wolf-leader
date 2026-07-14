@@ -211,7 +211,10 @@ async def web_ui():
     """Chat directory web UI."""
     index = STATIC_DIR / "index.html"
     if index.is_file():
-        return FileResponse(index)
+        return FileResponse(
+            index,
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
     return {"message": f"{PRODUCT_NAME} API", "docs": "/docs"}
 
 

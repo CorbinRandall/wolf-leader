@@ -1,4 +1,8 @@
-"""Session activity log — short human summaries written on each /save."""
+"""Session activity log — dual summaries on each /save.
+
+- Human log (chats.content / UI Logbook): plain-language “what happened”
+- Agent pickup (projects.metadata.where_we_left_off): technical handoff for agents
+"""
 from __future__ import annotations
 
 import json
@@ -10,9 +14,12 @@ from typing import Any, Optional
 LEFT_OFF_KEY = "where_we_left_off"
 LEFT_OFF_UPDATED_KEY = "where_we_left_off_at"
 LEGACY_OVERRIDE_KEY = "pickup_override"
+CHAT_AGENT_SUMMARY_KEY = "agent_summary"
+CHAT_HUMAN_SUMMARY_KEY = "human_summary"
 
 _GENERIC_CONTENT_RE = re.compile(
-    r"(?i)^(saved\s+\d+\s+messages|agent conversation|chat\s*#?\d+)\b"
+    r"(?i)^(saved\s+\d+\s+messages|synced\s+\d+\s+messages|agent conversation|"
+    r"chat\s*#?\d+|checkpoint test)\b"
 )
 _TIMESTAMP_RE = re.compile(r"<timestamp>.*?</timestamp>\s*", re.I | re.DOTALL)
 _FILLER_RE = re.compile(
@@ -23,6 +30,11 @@ _SIGNAL_RE = re.compile(
     r"finished|completed|migrated|refactored|verified|resolved|installed|"
     r"where we left off|left off|next step|still need|unfinished)\b"
 )
+_AGENT_DENSE_RE = re.compile(
+    r"(?i)\b(handoff_tier|pickup_override|agent-brief|SPEC\.yaml|do not redeploy|"
+    r"LXC\s*\d+|bin/deploy|primary_hub|corbox-sshd)\b"
+)
+_PATH_HEAVY_RE = re.compile(r"(/[^\s]{8,})|(\d{1,3}(?:\.\d{1,3}){3})")
 
 
 def parse_metadata(raw: Any) -> dict[str, Any]:
@@ -118,37 +130,48 @@ def _usable_content(content: Optional[str]) -> bool:
     return True
 
 
-def build_session_log_summary(
+def _collect_parts(
     *,
-    title: str = "",
-    messages: Optional[list[dict[str, Any]]] = None,
-    extracted_memories: Optional[list[dict[str, Any]]] = None,
-    max_len: int = 480,
-) -> str:
-    """
-    Short user-facing paragraph for one saved session (log-book entry).
-    Prefer extracted memories from this save; else signal lines from assistants;
-    else cleaned title + last user ask.
-    """
+    title: str,
+    messages: Optional[list[dict[str, Any]]],
+    extracted_memories: Optional[list[dict[str, Any]]],
+    prefer_human: bool,
+    max_parts: int = 3,
+) -> list[str]:
     parts: list[str] = []
     seen: set[str] = set()
 
     def add(text: str) -> None:
         t = re.sub(r"\s+", " ", (text or "").strip())
+        t = re.sub(r"\*\*?|`+", "", t)
         if len(t) < 12:
             return
+        if prefer_human and _AGENT_DENSE_RE.search(t) and len(parts) > 0:
+            return
+        if prefer_human and len(_PATH_HEAVY_RE.findall(t)) >= 3 and len(t) > 160:
+            # Keep a shorter clipped form instead of a path dump.
+            t = _clip(t, 160)
         key = t[:100].lower()
         if key in seen:
             return
         seen.add(key)
         parts.append(t)
 
+    memory_types = ("goal", "decision", "problem", "active_work") if prefer_human else (
+        "active_work",
+        "decision",
+        "problem",
+        "goal",
+    )
     for m in extracted_memories or []:
         typ = (m.get("type") or "").lower()
-        if typ not in ("active_work", "decision", "problem", "goal"):
+        if typ not in memory_types:
             continue
-        add(m.get("content") or "")
-        if len(parts) >= 3:
+        content = m.get("content") or ""
+        if prefer_human and typ == "active_work" and _AGENT_DENSE_RE.search(content):
+            continue
+        add(content)
+        if len(parts) >= max_parts:
             break
 
     if len(parts) < 2:
@@ -163,6 +186,8 @@ def build_session_log_summary(
                 line = re.sub(r"^#+\s*", "", line)
                 line = re.sub(r"^\*\*?|\*\*?$", "", line).strip()
                 if len(line) < 30 or _FILLER_RE.match(line):
+                    continue
+                if prefer_human and _AGENT_DENSE_RE.search(line) and len(parts) >= 1:
                     continue
                 if _SIGNAL_RE.search(line) or len(parts) < 1:
                     add(line)
@@ -179,14 +204,21 @@ def build_session_log_summary(
                 break
         title_bit = clean_title(title)
         if last_user and len(last_user) > 20:
-            ask = _clip(last_user, 180)
-            add(f"Worked on: {ask}")
+            ask = _clip(last_user, 160 if prefer_human else 180)
+            add(f"Worked on: {ask}" if prefer_human else f"Worked on: {ask}")
         elif title_bit and not _GENERIC_CONTENT_RE.match(title_bit):
             add(title_bit)
         else:
-            add("Session checkpointed — see agent brief for technical detail.")
+            add(
+                "Session saved — open the archive for the full conversation."
+                if prefer_human
+                else "Session checkpointed — see agent brief for technical detail."
+            )
 
-    # Turn bullets into one short paragraph.
+    return parts
+
+
+def _parts_to_paragraph(parts: list[str], max_len: int) -> str:
     if len(parts) == 1:
         summary = parts[0]
     else:
@@ -196,19 +228,93 @@ def build_session_log_summary(
     return _clip(summary, max_len)
 
 
+def build_session_log_summary(
+    *,
+    title: str = "",
+    messages: Optional[list[dict[str, Any]]] = None,
+    extracted_memories: Optional[list[dict[str, Any]]] = None,
+    max_len: int = 480,
+) -> str:
+    """
+    Agent-oriented session summary (technical handoff / pickup).
+    Kept as the historical name used by tests and the post-save pipeline.
+    """
+    parts = _collect_parts(
+        title=title,
+        messages=messages,
+        extracted_memories=extracted_memories,
+        prefer_human=False,
+    )
+    return _parts_to_paragraph(parts, max_len)
+
+
+def build_human_log_summary(
+    *,
+    title: str = "",
+    messages: Optional[list[dict[str, Any]]] = None,
+    extracted_memories: Optional[list[dict[str, Any]]] = None,
+    max_len: int = 360,
+) -> str:
+    """Plain-language logbook entry for the Wolf Leader web UI."""
+    parts = _collect_parts(
+        title=title,
+        messages=messages,
+        extracted_memories=extracted_memories,
+        prefer_human=True,
+        max_parts=2,
+    )
+    # Soften leading agent-ish openers for display.
+    if parts:
+        parts[0] = re.sub(
+            r"(?i)^(fixed:|note:|decision:|constraint:)\s*",
+            "",
+            parts[0],
+        ).strip() or parts[0]
+    return _parts_to_paragraph(parts, max_len)
+
+
+def humanize_log_summary(summary: str, *, title: str = "") -> str:
+    """Best-effort display cleanup for older log entries."""
+    s = (summary or "").strip()
+    if not s or _GENERIC_CONTENT_RE.match(s):
+        t = clean_title(title)
+        return t if t and not _GENERIC_CONTENT_RE.match(t) else "Session saved."
+    s = re.sub(r"\s+", " ", s)
+    s = re.sub(r"\*\*?|`+", "", s)
+    # Drop trailing Brief: URLs from UI copy.
+    s = re.sub(r"(?i)\s*Brief:\s*https?://\S+\s*$", "", s).strip()
+    if _AGENT_DENSE_RE.search(s) and len(s) > 220:
+        s = _clip(s, 200)
+    return s
+
+
+def _chat_meta(chat: dict[str, Any]) -> dict[str, Any]:
+    return parse_metadata(chat.get("metadata"))
+
+
 def log_entry_from_chat(chat: dict[str, Any]) -> dict[str, Any]:
-    """Normalize a chat row into a logbook entry."""
+    """Normalize a chat row into a logbook entry (human summary for UI)."""
     from .session_time import effective_occurred_at
 
-    summary = (chat.get("content") or "").strip()
+    meta = _chat_meta(chat)
     title = clean_title(chat.get("title") or f"Session #{chat.get('id', '?')}")
+    raw = (chat.get("content") or "").strip()
+    human = meta.get(CHAT_HUMAN_SUMMARY_KEY)
+    if isinstance(human, str) and human.strip():
+        summary = human.strip()
+    else:
+        summary = humanize_log_summary(raw, title=title) if raw else title
     if not _usable_content(summary):
         summary = title
+    agent = meta.get(CHAT_AGENT_SUMMARY_KEY)
+    if not (isinstance(agent, str) and agent.strip()) and _usable_content(raw):
+        agent = raw
     when = effective_occurred_at(chat)
     return {
         "chat_id": chat.get("id"),
         "title": title,
         "summary": summary,
+        "agent_summary": agent.strip() if isinstance(agent, str) else None,
         "occurred_at": when,
         "updated_at": when,  # UI historically used updated_at for display date
         "saved_at": chat.get("updated_at"),
@@ -256,35 +362,64 @@ def apply_log_summary_to_chat(
     summary: str,
     *,
     project: Optional[dict[str, Any]] = None,
+    human_summary: Optional[str] = None,
+    agent_summary: Optional[str] = None,
 ) -> dict[str, Any]:
     """
-    Write the session log paragraph onto the chat and refresh project left-off metadata.
-    Called from the post-save pipeline.
+    Write the human logbook paragraph onto the chat; agent pickup onto the project.
+
+    - chats.content → human-friendly log (UI)
+    - chats.metadata.human_summary / agent_summary → both retained
+    - projects.metadata.where_we_left_off → agent-oriented pickup
     """
     from .db import db_conn
 
-    text = (summary or "").strip()
+    human = (human_summary if human_summary is not None else summary or "").strip()
+    agent = (agent_summary if agent_summary is not None else summary or "").strip()
     now = datetime.utcnow().isoformat()
     with db_conn() as conn:
         cur = conn.cursor()
-        if text:
-            # Don't clobber a hand-written summary that is already good unless
-            # it's the generic placeholder from Mac saves.
-            cur.execute("SELECT content FROM chats WHERE id = ?", (chat_id,))
+        if human or agent:
+            cur.execute("SELECT content, metadata FROM chats WHERE id = ?", (chat_id,))
             row = cur.fetchone()
-            existing = (row["content"] if row else "") or ""
-            if not _usable_content(existing) or len(text) >= len(existing.strip()):
+            if row is None:
+                existing, raw_meta = "", None
+            elif hasattr(row, "keys"):
+                existing, raw_meta = (row["content"] or ""), row["metadata"]
+            else:
+                existing, raw_meta = (row[0] or ""), row[1]
+            chat_meta = parse_metadata(raw_meta)
+            if human:
+                chat_meta[CHAT_HUMAN_SUMMARY_KEY] = human
+            if agent:
+                chat_meta[CHAT_AGENT_SUMMARY_KEY] = agent
+            # Prefer writing the human paragraph into content for the Logbook UI.
+            write_content = human or agent
+            if write_content and (
+                not _usable_content(existing) or len(write_content) >= len(existing.strip()) * 0.6
+            ):
                 cur.execute(
-                    "UPDATE chats SET content = ?, updated_at = ? WHERE id = ?",
-                    (text, now, chat_id),
+                    "UPDATE chats SET content = ?, metadata = ?, updated_at = ? WHERE id = ?",
+                    (write_content, json.dumps(chat_meta), now, chat_id),
+                )
+            else:
+                cur.execute(
+                    "UPDATE chats SET metadata = ?, updated_at = ? WHERE id = ?",
+                    (json.dumps(chat_meta), now, chat_id),
                 )
         meta_written = False
-        if project is not None and text:
-            meta = metadata_with_left_off(project, text, updated_at=now)
+        if project is not None and agent:
+            meta = metadata_with_left_off(project, agent, updated_at=now)
             cur.execute(
                 "UPDATE projects SET metadata = ?, updated_at = ? WHERE id = ?",
                 (json.dumps(meta), now, project["id"]),
             )
             meta_written = True
         conn.commit()
-    return {"chat_id": chat_id, "summary": text, "metadata_updated": meta_written}
+    return {
+        "chat_id": chat_id,
+        "summary": human,
+        "human_summary": human,
+        "agent_summary": agent,
+        "metadata_updated": meta_written,
+    }

@@ -598,6 +598,30 @@ $("#copy-project-context-btn").addEventListener("click", async () => {
   if (ctx?.paste_text) copyText(ctx.paste_text, "Project context");
 });
 
+function friendlySessionTitle(title) {
+  let t = (title || "").trim();
+  if (!t) return "";
+  // First-message titles are often the whole user paste — shorten for the log.
+  if (t.length > 72) t = t.slice(0, 69).replace(/\s+\S*$/, "").trim() + "…";
+  t = t.replace(/^@\S+\s+/, "");
+  return t;
+}
+
+function renderLogEntry(e, { latest = false } = {}) {
+  const when = formatDate(e.occurred_at || e.updated_at);
+  const title = friendlySessionTitle(e.title);
+  const body = (e.summary || "").trim() || title || "Session saved.";
+  const label = latest ? "Latest" : when;
+  const metaBits = latest
+    ? [label, when, title].filter(Boolean)
+    : [when, title].filter(Boolean);
+  return `
+    <button type="button" class="left-off-entry${latest ? " is-latest" : ""}" data-goto-chat="${e.chat_id || ""}">
+      <span class="left-off-entry-meta">${metaBits.map(escapeHtml).join(" · ")}</span>
+      <div class="left-off-entry-body">${escapeHtml(body)}</div>
+    </button>`;
+}
+
 async function loadLeftOff(projectId, cached) {
   // Always hit the dedicated endpoint so a stale/partial agent-brief cache
   // cannot leave the panel stuck on the HTML placeholder.
@@ -616,44 +640,40 @@ async function loadLeftOff(projectId, cached) {
     console.warn("logbook DOM nodes missing");
     return;
   }
-  if (headingEl && data?.heading) headingEl.textContent = data.heading;
+  if (headingEl) headingEl.textContent = data?.heading || "Logbook";
   if (!data) {
     latestEl.classList.add("muted");
     latestEl.textContent = "Could not load logbook.";
     logEl.innerHTML = "";
     return;
   }
-  const latest = data.latest || null;
-  const latestText = (latest && latest.summary) || data.saved || "";
-  const whenRaw = latest?.occurred_at || latest?.updated_at;
-  if (latestText) {
-    const when = whenRaw ? formatDate(whenRaw) : "Latest session";
-    const title = latest?.title ? ` · ${escapeHtml(latest.title)}` : "";
+  const entries = data.entries || [];
+  const latest = data.latest || entries[0] || null;
+  if (latest && (latest.summary || latest.title)) {
     latestEl.classList.remove("muted");
-    latestEl.innerHTML = `
-      <span class="left-off-latest-meta">${escapeHtml(when)}${title}</span>
-      <div>${escapeHtml(latestText)}</div>`;
+    latestEl.innerHTML = renderLogEntry(latest, { latest: true });
+    const btn = latestEl.querySelector("[data-goto-chat]");
+    if (btn?.dataset.gotoChat) {
+      btn.addEventListener("click", () => {
+        switchTab("archive");
+        selectChat(+btn.dataset.gotoChat);
+      });
+    }
   } else {
     latestEl.classList.add("muted");
-    latestEl.textContent = "No sessions yet — /save to add the first logbook entry.";
+    latestEl.textContent = "No sessions yet — /save after a chat to add the first entry.";
   }
 
-  const entries = data.entries || [];
-  // Latest is already shown above; list the rest (or all if only one).
   const rest = entries.length > 1 ? entries.slice(1) : [];
   if (!entries.length) {
-    logEl.innerHTML = `<p class="muted">Each /save adds a short entry here, ordered by when the session happened.</p>`;
+    logEl.innerHTML = `<p class="muted">Each /save adds a short plain-language note here.</p>`;
     return;
   }
   if (!rest.length) {
     logEl.innerHTML = `<p class="muted">Only one session so far.</p>`;
     return;
   }
-  logEl.innerHTML = rest.map((e) => `
-    <button type="button" class="left-off-entry" data-goto-chat="${e.chat_id || ""}">
-      <span class="left-off-entry-meta">${escapeHtml(formatDate(e.occurred_at || e.updated_at))}${e.title ? ` · ${escapeHtml(e.title)}` : ""}</span>
-      <div class="left-off-entry-body">${escapeHtml(e.summary || "")}</div>
-    </button>`).join("");
+  logEl.innerHTML = rest.map((e) => renderLogEntry(e)).join("");
   $$("#left-off-log [data-goto-chat]").forEach((b) => {
     if (!b.dataset.gotoChat) return;
     b.addEventListener("click", () => {

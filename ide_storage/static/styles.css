@@ -371,10 +371,10 @@ body {
 
 .project-purpose {
   color: var(--text);
-  font-size: 0.95rem;
-  line-height: 1.55;
-  margin: -0.25rem 0 1rem;
-  padding: 0.85rem 1rem;
+  font-size: 1.02rem;
+  line-height: 1.6;
+  margin: -0.25rem 0 1.15rem;
+  padding: 1rem 1.1rem;
   max-width: 52rem;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -387,14 +387,15 @@ body {
 .left-off-hint {
   margin: 0 0 0.75rem;
   font-size: 0.85rem;
+  max-width: 52rem;
 }
 .left-off-latest {
   font-size: 0.95rem;
   line-height: 1.55;
-  padding: 0.85rem 1rem;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
   max-width: 52rem;
 }
 .left-off-latest-meta {
@@ -405,21 +406,23 @@ body {
 }
 .left-off-log-heading {
   margin: 1.1rem 0 0.5rem;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
 .left-off-log {
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 0.55rem;
   max-width: 52rem;
 }
 .left-off-entry {
-  padding: 0.7rem 0.85rem;
-  background: var(--bg);
+  display: block;
+  width: 100%;
+  padding: 0.85rem 1rem;
+  background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   text-align: left;
@@ -429,20 +432,21 @@ body {
 }
 .left-off-entry:hover {
   border-color: var(--accent-dim, var(--border));
-  background: var(--bg-hover, var(--bg-elevated));
+  background: var(--bg-hover, var(--bg));
 }
 .left-off-entry.is-latest {
   border-color: var(--accent-dim, var(--border));
+  box-shadow: inset 3px 0 0 var(--accent, #6ea8fe);
 }
 .left-off-entry-meta {
   display: block;
-  margin-bottom: 0.3rem;
+  margin-bottom: 0.35rem;
   font-size: 0.78rem;
   color: var(--text-muted);
 }
 .left-off-entry-body {
-  font-size: 0.9rem;
-  line-height: 1.5;
+  font-size: 0.95rem;
+  line-height: 1.55;
 }
 
 .btn-danger {

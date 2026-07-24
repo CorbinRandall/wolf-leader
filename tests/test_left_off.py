@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 from ide_storage.left_off import (
+    CHAT_AGENT_SUMMARY_KEY,
+    CHAT_HUMAN_SUMMARY_KEY,
     LEGACY_OVERRIDE_KEY,
     LEFT_OFF_KEY,
+    build_human_log_summary,
     build_session_log_summary,
     get_saved_left_off,
+    humanize_log_summary,
     left_off_payload,
     log_entry_from_chat,
     metadata_with_left_off,
@@ -90,3 +94,51 @@ def test_metadata_clears_legacy_alias():
     assert LEFT_OFF_KEY not in cleared
     assert LEGACY_OVERRIDE_KEY not in cleared
     assert get_saved_left_off({"metadata": cleared}) is None
+
+
+def test_human_summary_skips_agent_dense_memories():
+    text = build_human_log_summary(
+        title="Hub work",
+        messages=[
+            {"role": "user", "content": "Can we make the project summary more readable?"},
+            {
+                "role": "assistant",
+                "content": "Updated the overview so it explains what the project is for in plain language.",
+            },
+        ],
+        extracted_memories=[
+            {
+                "type": "active_work",
+                "content": "handoff_tier continue — do not redeploy; see agent-brief and SPEC.yaml",
+            },
+            {
+                "type": "decision",
+                "content": "Keep agent pickup technical; show a friendlier story on the project page.",
+            },
+        ],
+    )
+    assert "plain language" in text.lower() or "friendlier" in text.lower() or "readable" in text.lower()
+    assert "handoff_tier" not in text
+    assert "SPEC.yaml" not in text
+
+
+def test_log_entry_prefers_stored_human_summary():
+    entry = log_entry_from_chat(
+        {
+            "id": 9,
+            "title": "Long first message about deploy paths",
+            "content": "Agent note: handoff_tier orient; LXC 103; bin/deploy-hub --proxmox",
+            "metadata": {
+                CHAT_HUMAN_SUMMARY_KEY: "Made the phone hub an independent backup of the main dashboard.",
+                CHAT_AGENT_SUMMARY_KEY: "Phone hub independent; deploy via bin/deploy-hub.",
+            },
+            "updated_at": "2026-07-24",
+        }
+    )
+    assert "independent backup" in entry["summary"]
+    assert "handoff_tier" not in entry["summary"]
+    assert "bin/deploy-hub" in (entry.get("agent_summary") or "")
+
+
+def test_humanize_strips_synced_placeholder():
+    assert humanize_log_summary("Synced 12 messages from Cursor transcript", title="Stop button") == "Stop button"

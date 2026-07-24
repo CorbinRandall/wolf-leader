@@ -175,20 +175,37 @@ def post_save_pipeline(
     if extract.get("warnings"):
         report.setdefault("warnings", []).extend(extract["warnings"])
 
-    # User-facing activity log: short paragraph from this save → chat.content
-    # and project where_we_left_off (pickup).
-    from ide_storage.left_off import apply_log_summary_to_chat, build_session_log_summary
+    # Dual session log: human paragraph → chat.content / Logbook UI;
+    # agent paragraph → project where_we_left_off (pickup for agents).
+    from ide_storage.left_off import (
+        apply_log_summary_to_chat,
+        build_human_log_summary,
+        build_session_log_summary,
+    )
 
     messages = _chat_messages(chat["id"])
     extracted_for_log = extract.get("memories") or []
-    log_summary = build_session_log_summary(
+    mem_list = extracted_for_log if isinstance(extracted_for_log, list) else []
+    human_summary = build_human_log_summary(
         title=chat.get("title") or "",
         messages=messages,
-        extracted_memories=extracted_for_log if isinstance(extracted_for_log, list) else [],
+        extracted_memories=mem_list,
     )
-    log_result = apply_log_summary_to_chat(chat["id"], log_summary, project=project)
+    agent_summary = build_session_log_summary(
+        title=chat.get("title") or "",
+        messages=messages,
+        extracted_memories=mem_list,
+    )
+    log_result = apply_log_summary_to_chat(
+        chat["id"],
+        human_summary,
+        project=project,
+        human_summary=human_summary,
+        agent_summary=agent_summary,
+    )
     report["steps"].append({"session_log": log_result})
-    report["session_log"] = log_summary
+    report["session_log"] = human_summary
+    report["session_log_agent"] = agent_summary
     # Refresh project row so later distill sees updated where_we_left_off metadata.
     project = _get_project(project_id) or project
 

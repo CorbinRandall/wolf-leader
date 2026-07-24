@@ -248,7 +248,7 @@ def _activity_log_sessions(cur, project_id: int, limit: int = 25) -> List[Dict[s
     """Archived session summaries for the user-facing logbook (session timeline order)."""
     cur.execute(
         """
-        SELECT id, title, content, updated_at, created_at, occurred_at FROM chats
+        SELECT id, title, content, metadata, updated_at, created_at, occurred_at FROM chats
         WHERE project_id = ? AND COALESCE(status, 'active') = 'archived'
         ORDER BY COALESCE(occurred_at, created_at, updated_at) DESC LIMIT ?
         """,

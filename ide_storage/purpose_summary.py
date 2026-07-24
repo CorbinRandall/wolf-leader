@@ -1,8 +1,6 @@
-"""Human-facing project overview for the web UI.
+"""Human-facing project overview for the web UI (Project tab).
 
-This is what a person with no context should read: what the project is for and
-how it evolved. Agent handoff / “where we left off” lives elsewhere (SPEC pickup,
-where_we_left_off metadata) and must not dominate this paragraph.
+Super-basic “what is this project?” copy — not session status, not agent pickup.
 """
 from __future__ import annotations
 
@@ -10,70 +8,58 @@ import json
 import re
 from typing import Any, Optional
 
-# Plain-language stories when DB/SPEC overview is thin. Prefer narrative over
-# deployment jargon so the project page reads like a short project blurb.
+# One or two plain sentences: what we’re actually doing. Keep it non-technical.
 SLUG_STORIES: dict[str, str] = {
     "samsung-server": (
-        "Turns an old Samsung Galaxy phone into a small always-on home server — "
-        "SSH access, UPS-aware backup hub, and a lightweight Docker dashboard that "
-        "can also run on Proxmox. Started as phone tooling; grew into the shared "
-        "Go hub (corbox-lite) used for both the phone backup and the main Proxmox dashboard."
+        "Running an old Samsung phone as a small home server — for SSH access, "
+        "backups, and a simple dashboard."
     ),
     "logitech-g-hub": (
-        "Started as a simple toolkit to pull and adjust Logitech G502 presets without "
-        "relying on Logitech G HUB. Grew into a fuller ownership app: onboard preset "
-        "management, blocking unwanted G HUB updates, and recovering from macOS HID/USB wedges."
+        "Building tools to work with Logitech G Hub yourself — so you can use, "
+        "save, and own your mouse presets without depending on Logitech’s app."
     ),
     "docker-dashboard": (
-        "Homelab “Server Hub” — a small web page to wake the server, see Docker apps, "
-        "and jump into services. Began as a Python stack on Proxmox; now centered on the "
-        "Go corbox-lite hub, with the phone build as an independent backup."
+        "A simple home-server hub page — wake the machine, see apps, and open services."
     ),
     "ide-storage": (
-        "Wolf Leader is the self-hosted memory hub for AI project work — projects, "
-        "session logbook, typed memories, and agent briefs so a new chat can pick up "
-        "without re-explaining the whole homelab."
+        "Wolf Leader: a place to keep project memory for AI chats — what each project "
+        "is, what’s been done, and how to pick up again later."
     ),
     "wolf-leader": (
-        "Wolf Leader is the self-hosted memory hub for AI project work — projects, "
-        "session logbook, typed memories, and agent briefs so a new chat can pick up "
-        "without re-explaining the whole homelab."
+        "Wolf Leader: a place to keep project memory for AI chats — what each project "
+        "is, what’s been done, and how to pick up again later."
     ),
     "imessage-archive": (
-        "Self-hosted Apple Messages archive: Mac agents export chats, Unraid stores "
-        "and indexes them, and a web UI lets you browse and search years of iMessage "
-        "history (including attachments)."
+        "Backing up and searching Apple Messages on your own server, with a web browser UI."
     ),
     "s3-sleep": (
-        "Hardens Unraid S3 sleep so the server sleeps when you’re really idle — smarter "
-        "activity checks, Docker awareness, and recovery hooks — instead of staying awake "
-        "for noise like idle SSH or background sync."
+        "Making the Unraid server sleep when you’re actually idle — and wake reliably when needed."
     ),
     "ssh-passwordless": (
-        "Passwordless SSH from Cursor, Mac, and other clients into the homelab hosts, "
-        "so agents and you can work without typing passwords every session."
+        "Setting up passwordless SSH so your Mac and Cursor can reach the servers without typing a password each time."
     ),
     "tailscale": (
-        "Homelab Tailscale mesh so Macs can reach LAN services remotely via the Proxmox "
-        "subnet router — durable remote access without exposing every service to the internet."
+        "Remote access to the home network via Tailscale, so Macs can reach LAN services away from home."
     ),
     "custom-server-url": (
-        "Friendly hostnames and reverse-proxy wiring (NPM, Caddy, local DNS) so services "
-        "are reachable by name — separate from the container-links dashboard."
+        "Friendly names and reverse-proxy wiring so home services are reachable by hostname."
     ),
-    "cache-drive": "Unraid cache drive inspection and maintenance.",
+    "cache-drive": "Looking after the Unraid cache drive.",
 }
 
-# Backward-compatible alias used by older tests/imports.
+# Backward-compatible alias.
 SLUG_HINTS = SLUG_STORIES
 
 _GENERIC_OVERVIEW_RE = re.compile(
-    r"^(compose stack:\s*\S+|homelab project [“\"'].+[”\"']\.?)$",
+    r"^(compose stack:\s*\S+|homelab project [“\"'].+[”\"']\.?|"
+    r".*\bownership toolkit\b.*|"
+    r"g502 ownership toolkit.*)$",
     re.I,
 )
 _AGENT_JARGON_RE = re.compile(
     r"(?i)\b(handoff_tier|pickup_override|agent-brief|SPEC\.yaml|where we left off|"
-    r"do not redeploy|orient first|verify what.?s on disk)\b"
+    r"do not redeploy|orient first|verify what.?s on disk|bin/deploy|"
+    r"192\.168\.|LXC\s*\d+)\b"
 )
 
 
@@ -102,7 +88,7 @@ def _yaml_field(spec_yaml: str, key: str) -> str:
     return raw
 
 
-def _clean_prose(text: str, *, max_len: int = 480) -> str:
+def _clean_prose(text: str, *, max_len: int = 320) -> str:
     t = re.sub(r"\s+", " ", (text or "").strip())
     t = re.sub(r"\*\*?|`+", "", t)
     if len(t) > max_len:
@@ -132,9 +118,7 @@ def _extract_overview(
     return overview
 
 
-def _story_from_memories(memories: list[dict[str, Any]], *, max_len: int = 420) -> str:
-    """Build a short origin→now blurb from goal/decision memories when nothing else exists."""
-    useful: list[str] = []
+def _story_from_memories(memories: list[dict[str, Any]], *, max_len: int = 280) -> str:
     for m in memories or []:
         typ = (m.get("type") or "").lower()
         if typ not in ("goal", "decision"):
@@ -142,28 +126,10 @@ def _story_from_memories(memories: list[dict[str, Any]], *, max_len: int = 420) 
         content = re.sub(r"\s+", " ", (m.get("content") or "").strip())
         if len(content) < 40 or _AGENT_JARGON_RE.search(content):
             continue
-        # Skip ultra-technical one-liners full of paths/IPs.
-        slash_n = content.count("/")
-        if slash_n >= 3 and len(content) < 160:
+        if content.count("/") >= 2:
             continue
-        useful.append(content)
-        if len(useful) >= 6:
-            break
-    if not useful:
-        return ""
-    if len(useful) == 1:
-        return _clean_prose(useful[0], max_len=max_len)
-    first = useful[-1] if len(useful) > 1 else useful[0]  # older often later in recall lists
-    # Prefer earliest-looking: memories are usually newest-first from recall.
-    oldest = useful[-1]
-    newest = useful[0]
-    if oldest[:80].lower() == newest[:80].lower():
-        return _clean_prose(newest, max_len=max_len)
-    blended = (
-        f"Started around: {_clean_prose(oldest, max_len=180).rstrip('.')} "
-        f"More recently: {_clean_prose(newest, max_len=220)}"
-    )
-    return _clean_prose(blended, max_len=max_len)
+        return _clean_prose(content, max_len=max_len)
+    return ""
 
 
 def _identity_story(
@@ -176,34 +142,29 @@ def _identity_story(
     # Explicit human override wins.
     for key in ("human_overview", "project_story"):
         val = meta.get(key)
-        if isinstance(val, str) and len(val.strip()) >= 40:
+        if isinstance(val, str) and len(val.strip()) >= 24:
             return _clean_prose(val.strip())
 
+    # Curated plain-language blurb for known projects (preferred over ops descriptors).
     story = SLUG_STORIES.get(slug, "")
-    semantic = meta.get("semantic_descriptor")
-    if isinstance(semantic, str) and len(semantic.strip()) >= 40:
-        sem = _clean_prose(semantic.strip(), max_len=480)
-        # Prefer curated story when semantic is still deploy-ops dense.
-        if story and (sem.count("/") + sem.count(":")) >= 6:
-            return story
-        return sem
-
-    if overview and not _GENERIC_OVERVIEW_RE.match(overview.strip()):
-        # Short DB descriptions are fine as the lead sentence; expand with story if we have one.
-        ov = _clean_prose(overview, max_len=280)
-        if story and len(overview) < 100:
-            return _clean_prose(f"{ov.rstrip('.')}. {story}", max_len=480)
-        return ov
-
     if story:
         return story
+
+    if overview and not _GENERIC_OVERVIEW_RE.match(overview.strip()):
+        if not _AGENT_JARGON_RE.search(overview):
+            return _clean_prose(overview, max_len=280)
+
+    semantic = meta.get("semantic_descriptor")
+    if isinstance(semantic, str) and len(semantic.strip()) >= 40:
+        if not _AGENT_JARGON_RE.search(semantic) and semantic.count("/") < 3:
+            return _clean_prose(semantic.strip(), max_len=280)
 
     from_mem = _story_from_memories(memories or [])
     if from_mem:
         return from_mem
 
     label = slug.replace("-", " ")
-    return f"Homelab project “{label}” — open the logbook below for what’s been done."
+    return f"Homelab project “{label}.”"
 
 
 def build_purpose_summary(
@@ -218,14 +179,9 @@ def build_purpose_summary(
     archived_recent_sessions: Optional[list[dict[str, Any]]] = None,
     active_sessions: Optional[list[dict[str, Any]]] = None,
     memories: Optional[list[dict[str, Any]]] = None,
-    max_len: int = 520,
+    max_len: int = 320,
 ) -> str:
-    """Natural-language paragraph: what this project is for (human UI).
-
-    Intentionally ignores agent pickup / where_we_left_off and continue-mode
-    instructions — those belong in the agent brief, not the project blurb.
-    """
-    # Unused agent-context kwargs kept for call-site compatibility.
+    """Short Project-tab overview: what this project is for."""
     _ = (continue_mode, handoff_tier, deploy_state, preflight, archived_recent_sessions, active_sessions)
 
     slug = (project.get("slug") or f"project-{project.get('id', 0)}").strip()

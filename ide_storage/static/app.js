@@ -337,13 +337,16 @@ async function selectProject(id) {
   ].filter(Boolean).map((x) => `<span>${escapeHtml(x)}</span>`).join("");
 
   const purposeEl = $("#project-purpose");
+  const overviewPanel = $("#project-overview-panel");
   const purpose = briefData?.purpose_summary || project.description || "";
   if (purpose) {
     purposeEl.textContent = purpose;
     purposeEl.classList.remove("hidden");
+    overviewPanel?.classList.remove("hidden");
   } else {
     purposeEl.textContent = "";
     purposeEl.classList.add("hidden");
+    overviewPanel?.classList.add("hidden");
   }
 
   await loadLeftOff(id, briefData?.where_we_left_off || null);
@@ -607,19 +610,26 @@ function friendlySessionTitle(title) {
   return t;
 }
 
-function renderLogEntry(e, { latest = false } = {}) {
+function renderLogEntry(e) {
   const when = formatDate(e.occurred_at || e.updated_at);
   const title = friendlySessionTitle(e.title);
   const body = (e.summary || "").trim() || title || "Session saved.";
-  const label = latest ? "Latest" : when;
-  const metaBits = latest
-    ? [label, when, title].filter(Boolean)
-    : [when, title].filter(Boolean);
+  const metaBits = [when, title].filter(Boolean);
   return `
-    <button type="button" class="left-off-entry${latest ? " is-latest" : ""}" data-goto-chat="${e.chat_id || ""}">
+    <button type="button" class="left-off-entry" data-goto-chat="${e.chat_id || ""}">
       <span class="left-off-entry-meta">${metaBits.map(escapeHtml).join(" · ")}</span>
       <div class="left-off-entry-body">${escapeHtml(body)}</div>
     </button>`;
+}
+
+function bindLogEntryClicks(root) {
+  $$(`${root} [data-goto-chat]`).forEach((b) => {
+    if (!b.dataset.gotoChat) return;
+    b.addEventListener("click", () => {
+      switchTab("archive");
+      selectChat(+b.dataset.gotoChat);
+    });
+  });
 }
 
 async function loadLeftOff(projectId, cached) {
@@ -649,24 +659,29 @@ async function loadLeftOff(projectId, cached) {
   }
   const entries = data.entries || [];
   const latest = data.latest || entries[0] || null;
-  if (latest && (latest.summary || latest.title)) {
+  // Prefer the dedicated human left-off field; never show raw agent pickup here.
+  const leftOffText = (
+    data.where_left_off ||
+    latest?.summary ||
+    ""
+  ).trim();
+  if (leftOffText) {
+    const when = formatDate(latest?.occurred_at || latest?.updated_at || data.saved_at);
     latestEl.classList.remove("muted");
-    latestEl.innerHTML = renderLogEntry(latest, { latest: true });
-    const btn = latestEl.querySelector("[data-goto-chat]");
-    if (btn?.dataset.gotoChat) {
-      btn.addEventListener("click", () => {
-        switchTab("archive");
-        selectChat(+btn.dataset.gotoChat);
-      });
-    }
+    latestEl.innerHTML = `
+      <div class="left-off-spotlight${latest?.chat_id ? " is-clickable" : ""}" ${latest?.chat_id ? `data-goto-chat="${latest.chat_id}"` : ""}>
+        <span class="left-off-entry-meta">${escapeHtml(when || "Most recent session")}</span>
+        <div class="left-off-entry-body">${escapeHtml(leftOffText)}</div>
+      </div>`;
+    bindLogEntryClicks("#left-off-latest");
   } else {
     latestEl.classList.add("muted");
-    latestEl.textContent = "No sessions yet — /save after a chat to add the first entry.";
+    latestEl.textContent = "Nothing saved yet — /save after a chat to fill this in.";
   }
 
   const rest = entries.length > 1 ? entries.slice(1) : [];
   if (!entries.length) {
-    logEl.innerHTML = `<p class="muted">Each /save adds a short plain-language note here.</p>`;
+    logEl.innerHTML = `<p class="muted">Earlier sessions will show up here after more saves.</p>`;
     return;
   }
   if (!rest.length) {
@@ -674,13 +689,7 @@ async function loadLeftOff(projectId, cached) {
     return;
   }
   logEl.innerHTML = rest.map((e) => renderLogEntry(e)).join("");
-  $$("#left-off-log [data-goto-chat]").forEach((b) => {
-    if (!b.dataset.gotoChat) return;
-    b.addEventListener("click", () => {
-      switchTab("archive");
-      selectChat(+b.dataset.gotoChat);
-    });
-  });
+  bindLogEntryClicks("#left-off-log");
 }
 
 $("#copy-agent-start-btn").addEventListener("click", async () => {

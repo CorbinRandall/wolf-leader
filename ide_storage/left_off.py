@@ -35,6 +35,28 @@ _AGENT_DENSE_RE = re.compile(
     r"LXC\s*\d+|bin/deploy|primary_hub|corbox-sshd)\b"
 )
 _PATH_HEAVY_RE = re.compile(r"(/[^\s]{8,})|(\d{1,3}(?:\.\d{1,3}){3})")
+# Mid-conversation agent voice — not a useful “where we left off” for humans.
+_PLANNING_VOICE_RE = re.compile(
+    r"(?i)\b("
+    r"i(?:'| a)m (?:checking|looking|going to|about to|working on)|"
+    r"i(?:'| wi)ll (?:push|check|fix|look|add|update)|"
+    r"next[,:]?\s+i(?:'| wi)ll|"
+    r"then i(?:'| wi)ll|"
+    r"the explore pass|"
+    r"ci wouldn.?t catch|"
+    r"open pr\b|"
+    r"hard[- ]fail|"
+    r"dll path"
+    r")\b"
+)
+_OUTCOME_RE = re.compile(
+    r"(?i)\b("
+    r"cleaned up|reorganized|renamed|nested|added|removed|shipped|fixed|"
+    r"finished|completed|verified|force[- ]written|rewrote|rewritten|"
+    r"updated|built|deployed|merged|simplified|grouped|categories|"
+    r"sub[- ]?categories|submenu|menu|presets? are now|now (?:force|live|done)"
+    r")\b"
+)
 
 
 def parse_metadata(raw: Any) -> dict[str, Any]:
@@ -130,6 +152,51 @@ def _usable_content(content: Optional[str]) -> bool:
     return True
 
 
+def _split_sentences(text: str) -> list[str]:
+    chunks = re.split(r"(?<=[.!?])\s+", re.sub(r"\s+", " ", (text or "").strip()))
+    return [c.strip() for c in chunks if len(c.strip()) >= 20]
+
+
+def _score_human_sentence(sentence: str) -> int:
+    """Higher = better for a human ‘where we left off’ blurb."""
+    s = sentence.strip()
+    if len(s) < 20:
+        return -100
+    score = 0
+    if _PLANNING_VOICE_RE.search(s):
+        score -= 50
+    if _AGENT_DENSE_RE.search(s):
+        score -= 30
+    if _OUTCOME_RE.search(s):
+        score += 40
+    if _SIGNAL_RE.search(s):
+        score += 10
+    # Prefer finished-work voice over investigation chatter.
+    if re.search(r"(?i)\b(now|done|finished|complete|verified|shipped)\b", s):
+        score += 15
+    if len(_PATH_HEAVY_RE.findall(s)) >= 2:
+        score -= 20
+    if 40 <= len(s) <= 220:
+        score += 5
+    return score
+
+
+def _best_human_sentences(text: str, *, limit: int = 2) -> list[str]:
+    scored = sorted(
+        ((_score_human_sentence(s), s) for s in _split_sentences(text)),
+        key=lambda x: x[0],
+        reverse=True,
+    )
+    out: list[str] = []
+    for score, sentence in scored:
+        if score < 5:
+            continue
+        out.append(sentence)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def _collect_parts(
     *,
     title: str,
@@ -146,10 +213,17 @@ def _collect_parts(
         t = re.sub(r"\*\*?|`+", "", t)
         if len(t) < 12:
             return
+        if prefer_human and _PLANNING_VOICE_RE.search(t):
+            # Keep only outcome sentences from planning-heavy blobs.
+            outcomes = _best_human_sentences(t, limit=2)
+            if outcomes:
+                for o in outcomes:
+                    add(o)
+                return
+            return
         if prefer_human and _AGENT_DENSE_RE.search(t) and len(parts) > 0:
             return
         if prefer_human and len(_PATH_HEAVY_RE.findall(t)) >= 3 and len(t) > 160:
-            # Keep a shorter clipped form instead of a path dump.
             t = _clip(t, 160)
         key = t[:100].lower()
         if key in seen:
@@ -168,13 +242,30 @@ def _collect_parts(
         if typ not in memory_types:
             continue
         content = m.get("content") or ""
-        if prefer_human and typ == "active_work" and _AGENT_DENSE_RE.search(content):
+        if prefer_human and typ == "active_work" and (
+            _AGENT_DENSE_RE.search(content) or _PLANNING_VOICE_RE.search(content)
+        ):
             continue
         add(content)
         if len(parts) >= max_parts:
             break
 
-    if len(parts) < 2:
+    if prefer_human and len(parts) < max_parts:
+        # Walk newest assistant messages; prefer outcome sentences over status chatter.
+        for msg in reversed(messages or []):
+            if (msg.get("role") or "") != "assistant":
+                continue
+            body = (msg.get("content") or "").strip()
+            if len(body) < 40:
+                continue
+            for sentence in _best_human_sentences(body, limit=max_parts):
+                add(sentence)
+                if len(parts) >= max_parts:
+                    break
+            if len(parts) >= max_parts:
+                break
+
+    if len(parts) < (1 if prefer_human else 2):
         for msg in reversed(messages or []):
             if (msg.get("role") or "") != "assistant":
                 continue
@@ -187,7 +278,9 @@ def _collect_parts(
                 line = re.sub(r"^\*\*?|\*\*?$", "", line).strip()
                 if len(line) < 30 or _FILLER_RE.match(line):
                     continue
-                if prefer_human and _AGENT_DENSE_RE.search(line) and len(parts) >= 1:
+                if prefer_human and (
+                    _AGENT_DENSE_RE.search(line) or _PLANNING_VOICE_RE.search(line)
+                ):
                     continue
                 if _SIGNAL_RE.search(line) or len(parts) < 1:
                     add(line)
@@ -203,9 +296,12 @@ def _collect_parts(
                 last_user = (msg.get("content") or "").strip()
                 break
         title_bit = clean_title(title)
-        if last_user and len(last_user) > 20:
-            ask = _clip(last_user, 160 if prefer_human else 180)
-            add(f"Worked on: {ask}" if prefer_human else f"Worked on: {ask}")
+        if prefer_human and last_user and len(last_user) > 20:
+            ask = _clip(last_user, 140)
+            add(f"Last session looked at: {ask}")
+        elif last_user and len(last_user) > 20:
+            ask = _clip(last_user, 180)
+            add(f"Worked on: {ask}")
         elif title_bit and not _GENERIC_CONTENT_RE.match(title_bit):
             add(title_bit)
         else:
@@ -253,9 +349,9 @@ def build_human_log_summary(
     title: str = "",
     messages: Optional[list[dict[str, Any]]] = None,
     extracted_memories: Optional[list[dict[str, Any]]] = None,
-    max_len: int = 360,
+    max_len: int = 280,
 ) -> str:
-    """Plain-language logbook entry for the Wolf Leader web UI."""
+    """Outcome-focused blurb for Logbook / Where we left off (web UI)."""
     parts = _collect_parts(
         title=title,
         messages=messages,
@@ -263,10 +359,9 @@ def build_human_log_summary(
         prefer_human=True,
         max_parts=2,
     )
-    # Soften leading agent-ish openers for display.
     if parts:
         parts[0] = re.sub(
-            r"(?i)^(fixed:|note:|decision:|constraint:)\s*",
+            r"(?i)^(fixed:|note:|decision:|constraint:|worked on:)\s*",
             "",
             parts[0],
         ).strip() or parts[0]
@@ -274,18 +369,27 @@ def build_human_log_summary(
 
 
 def humanize_log_summary(summary: str, *, title: str = "") -> str:
-    """Best-effort display cleanup for older log entries."""
+    """Best-effort display cleanup for older log entries (drop mid-chat agent voice)."""
     s = (summary or "").strip()
     if not s or _GENERIC_CONTENT_RE.match(s):
         t = clean_title(title)
         return t if t and not _GENERIC_CONTENT_RE.match(t) else "Session saved."
     s = re.sub(r"\s+", " ", s)
     s = re.sub(r"\*\*?|`+", "", s)
-    # Drop trailing Brief: URLs from UI copy.
     s = re.sub(r"(?i)\s*Brief:\s*https?://\S+\s*$", "", s).strip()
-    if _AGENT_DENSE_RE.search(s) and len(s) > 220:
-        s = _clip(s, 200)
-    return s
+
+    outcomes = _best_human_sentences(s, limit=2)
+    if outcomes:
+        return _parts_to_paragraph(outcomes, 260)
+
+    # Strip planning sentences even if nothing scored as a strong outcome.
+    kept = [sent for sent in _split_sentences(s) if not _PLANNING_VOICE_RE.search(sent)]
+    if kept:
+        return _parts_to_paragraph(kept[:2], 260)
+
+    if _AGENT_DENSE_RE.search(s) and len(s) > 200:
+        s = _clip(s, 180)
+    return _clip(s, 260)
 
 
 def _chat_meta(chat: dict[str, Any]) -> dict[str, Any]:
@@ -337,20 +441,24 @@ def left_off_payload(
     # Newest on timeline first (already sorted by query, but keep safe).
     entries.sort(key=lambda e: e.get("occurred_at") or e.get("updated_at") or "", reverse=True)
     latest = entries[0] if entries else None
-    latest_summary = (latest or {}).get("summary") or get_saved_left_off(project) or ""
+    human_left_off = (latest or {}).get("summary") or ""
+    agent_from_latest = (latest or {}).get("agent_summary") or ""
     pickup, from_saved = resolve_pickup(
         project,
-        default_pickup=latest_summary or default_pickup,
+        default_pickup=agent_from_latest or human_left_off or default_pickup,
         brief_url=brief_url,
     )
-    if latest_summary and not get_saved_left_off(project):
-        pickup = ensure_brief_url(latest_summary, brief_url)
+    if not get_saved_left_off(project) and (agent_from_latest or human_left_off):
+        pickup = ensure_brief_url(agent_from_latest or human_left_off, brief_url)
         from_saved = True
     return {
         "heading": "Logbook",
         "latest": latest,
         "entries": entries,
-        "saved": get_saved_left_off(project) or (latest_summary or None),
+        # Human UI: outcome summary for “Where we left off”
+        "where_left_off": human_left_off or None,
+        # Agent pickup (technical) — do not show this as the human left-off blurb
+        "saved": get_saved_left_off(project) or (agent_from_latest or None),
         "saved_at": get_left_off_updated_at(project) or ((latest or {}).get("occurred_at")),
         "pickup": pickup,
         "from_saved": from_saved,

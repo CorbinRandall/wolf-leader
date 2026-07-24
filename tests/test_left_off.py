@@ -142,3 +142,34 @@ def test_log_entry_prefers_stored_human_summary():
 
 def test_humanize_strips_synced_placeholder():
     assert humanize_log_summary("Synced 12 messages from Cursor transcript", title="Stop button") == "Stop button"
+
+
+def test_humanize_keeps_outcomes_drops_planning_voice():
+    raw = (
+        "The explore pass flagged a few Windows hard-fail risks that CI wouldn’t catch. "
+        "I’m checking the HID DLL path and G HUB process handling next, then I’ll push "
+        "any needed fixes to the open PR. Hard push done, and your suspicion was at least "
+        "partly right — the mouse's onboard data was damaged. All three presets are now "
+        "force-written and verified byte-for-byte."
+    )
+    text = humanize_log_summary(raw, title="G Hub work")
+    assert "HID DLL" not in text
+    assert "I’m checking" not in text and "I'm checking" not in text
+    assert "presets" in text.lower() or "force-written" in text.lower() or "onboard" in text.lower()
+
+
+def test_left_off_payload_exposes_human_where_left_off():
+    project = {"metadata": {LEFT_OFF_KEY: "Agent: check HID DLL next. Brief: http://x"}}
+    entries = [
+        {
+            "chat_id": 2,
+            "title": "UI cleanup",
+            "summary": "Cleaned up categories under Preset Management.",
+            "agent_summary": "Agent: check HID DLL next.",
+            "updated_at": "2026-07-14",
+        },
+    ]
+    payload = left_off_payload(project, brief_url="http://hub/b", log_entries=entries)
+    assert payload["where_left_off"] == "Cleaned up categories under Preset Management."
+    assert "HID DLL" in payload["pickup"]
+    assert "Preset Management" not in payload["pickup"]

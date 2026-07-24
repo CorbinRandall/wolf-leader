@@ -41,8 +41,10 @@ def test_logitech_story_reads_like_overview():
     }
     text = build_purpose_summary(project)
     assert "preset" in text.lower()
+    assert "logitech" in text.lower()
     assert "Where we left off" not in text
     assert "HID DLL" not in text
+    assert "ownership toolkit" not in text.lower()
 
 
 def test_human_overview_override_wins():

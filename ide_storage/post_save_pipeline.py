@@ -130,6 +130,28 @@ def post_save_pipeline(
     report["chat_url"] = f"{_public_base()}/?chat={chat['id']}"
     report["message_count"] = _message_count(chat["id"])
 
+    # Ensure session timeline date (when chat happened) is set for logbook order.
+    from ide_storage.session_time import infer_occurred_at
+
+    msgs = _chat_messages(chat["id"])
+    occurred = infer_occurred_at(
+        title=chat.get("title"),
+        messages=msgs,
+        created_at=chat.get("created_at"),
+        explicit=(chat.get("occurred_at") or None),
+    )
+    if occurred and occurred != (chat.get("occurred_at") or ""):
+        conn = sqlite3.connect(db_file())
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE chats SET occurred_at = ? WHERE id = ?",
+            (occurred, chat["id"]),
+        )
+        conn.commit()
+        conn.close()
+        chat["occurred_at"] = occurred
+    report["occurred_at"] = occurred
+
     project_id = chat.get("project_id")
     if not project_id:
         report["ok"] = True
@@ -152,6 +174,41 @@ def post_save_pipeline(
     # were auto-synthesized server-side).
     if extract.get("warnings"):
         report.setdefault("warnings", []).extend(extract["warnings"])
+
+    # Dual session log: human paragraph → chat.content / Logbook UI;
+    # agent paragraph → project where_we_left_off (pickup for agents).
+    from ide_storage.left_off import (
+        apply_log_summary_to_chat,
+        build_human_log_summary,
+        build_session_log_summary,
+    )
+
+    messages = _chat_messages(chat["id"])
+    extracted_for_log = extract.get("memories") or []
+    mem_list = extracted_for_log if isinstance(extracted_for_log, list) else []
+    human_summary = build_human_log_summary(
+        title=chat.get("title") or "",
+        messages=messages,
+        extracted_memories=mem_list,
+    )
+    agent_summary = build_session_log_summary(
+        title=chat.get("title") or "",
+        messages=messages,
+        extracted_memories=mem_list,
+    )
+    log_result = apply_log_summary_to_chat(
+        chat["id"],
+        human_summary,
+        project=project,
+        human_summary=human_summary,
+        agent_summary=agent_summary,
+    )
+    report["steps"].append({"session_log": log_result})
+    report["session_log"] = human_summary
+    report["session_log_agent"] = agent_summary
+    # Refresh project row so later distill sees updated where_we_left_off metadata.
+    project = _get_project(project_id) or project
+
     spec_result = distill_spec(project_id)
     report["steps"].append({"distill_spec": spec_result})
     spec_yaml = read_spec_yaml(slug)
@@ -234,6 +291,19 @@ def _message_count(chat_id: int) -> int:
     n = cur.fetchone()[0]
     conn.close()
     return n
+
+
+def _chat_messages(chat_id: int) -> list[dict]:
+    conn = sqlite3.connect(db_file())
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT role, content FROM messages WHERE chat_id = ? ORDER BY id",
+        (chat_id,),
+    )
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
 
 
 def main() -> None:

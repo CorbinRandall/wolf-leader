@@ -1,31 +1,79 @@
-"""One-paragraph human overview for project pages — what this is and where work left off."""
+"""Human-facing project overview for the web UI (Project tab).
+
+Super-basic “what is this project?” copy — not session status, not agent pickup.
+"""
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Optional
 
-# Plain-language identity when DB/SPEC overview is generic or missing.
-SLUG_HINTS: dict[str, str] = {
-    "docker-dashboard": (
-        "A small homelab web page that lists running Docker containers "
-        "with clickable links — the “Docker Apps” dashboard, not reverse-proxy work."
+# One or two plain sentences: what we’re actually doing. Keep it non-technical.
+SLUG_STORIES: dict[str, str] = {
+    "samsung-server": (
+        "Running an old Samsung phone as a small home server — for SSH access, "
+        "backups, and a simple dashboard."
     ),
-    "custom-server-url": (
-        "Friendly URLs and reverse-proxy setup (NPM, Caddy, local DNS) so services "
-        "are reachable by name — not the container-links dashboard."
+    "logitech-g-hub": (
+        "Building tools to work with Logitech G Hub yourself — so you can use, "
+        "save, and own your mouse presets without depending on Logitech’s app."
+    ),
+    "docker-dashboard": (
+        "A simple home-server hub page — wake the machine, see apps, and open services."
+    ),
+    "ide-storage": (
+        "Wolf Leader: a place to keep project memory for AI chats — what each project "
+        "is, what’s been done, and how to pick up again later."
     ),
     "wolf-leader": (
-        "Central hub for AI project storage — agent briefs, memories, and session handoff."
+        "Wolf Leader: a place to keep project memory for AI chats — what each project "
+        "is, what’s been done, and how to pick up again later."
     ),
-    "s3-sleep": "Unraid S3 sleep hardening — activity checks, watchdog, post-wake hooks.",
-    "ssh-passwordless": "Passwordless SSH from clients (Cursor, Mac, etc.) to the server.",
-    "cache-drive": "Unraid cache drive inspection and maintenance.",
+    "imessage-archive": (
+        "Backing up and searching Apple Messages on your own server, with a web browser UI."
+    ),
+    "s3-sleep": (
+        "Making the Unraid server sleep when you’re actually idle — and wake reliably when needed."
+    ),
+    "ssh-passwordless": (
+        "Setting up passwordless SSH so your Mac and Cursor can reach the servers without typing a password each time."
+    ),
+    "tailscale": (
+        "Remote access to the home network via Tailscale, so Macs can reach LAN services away from home."
+    ),
+    "custom-server-url": (
+        "Friendly names and reverse-proxy wiring so home services are reachable by hostname."
+    ),
+    "cache-drive": "Looking after the Unraid cache drive.",
 }
 
+# Backward-compatible alias.
+SLUG_HINTS = SLUG_STORIES
+
 _GENERIC_OVERVIEW_RE = re.compile(
-    r"^compose stack:\s*\S+$",
+    r"^(compose stack:\s*\S+|homelab project [“\"'].+[”\"']\.?|"
+    r".*\bownership toolkit\b.*|"
+    r"g502 ownership toolkit.*)$",
     re.I,
 )
+_AGENT_JARGON_RE = re.compile(
+    r"(?i)\b(handoff_tier|pickup_override|agent-brief|SPEC\.yaml|where we left off|"
+    r"do not redeploy|orient first|verify what.?s on disk|bin/deploy|"
+    r"192\.168\.|LXC\s*\d+)\b"
+)
+
+
+def _parse_meta(project: dict[str, Any]) -> dict[str, Any]:
+    raw = project.get("metadata")
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
 
 
 def _yaml_field(spec_yaml: str, key: str) -> str:
@@ -40,25 +88,15 @@ def _yaml_field(spec_yaml: str, key: str) -> str:
     return raw
 
 
-def _yaml_list_items(spec_yaml: str, key: str, limit: int = 2) -> list[str]:
-    if not spec_yaml:
-        return []
-    lines = spec_yaml.splitlines()
-    out: list[str] = []
-    in_block = False
-    for line in lines:
-        if re.match(rf"^{re.escape(key)}:\s*$", line):
-            in_block = True
-            continue
-        if in_block:
-            if line and not line.startswith(" "):
-                break
-            m = re.match(r'^\s+-\s+"(.*)"\s*$', line)
-            if m:
-                out.append(m.group(1).replace('\\"', '"'))
-                if len(out) >= limit:
-                    break
-    return out
+def _clean_prose(text: str, *, max_len: int = 320) -> str:
+    t = re.sub(r"\s+", " ", (text or "").strip())
+    t = re.sub(r"\*\*?|`+", "", t)
+    if len(t) > max_len:
+        cut = t[: max_len - 1].rsplit(" ", 1)[0].rstrip(" ,.;:")
+        t = (cut or t[: max_len - 1]).rstrip() + "…"
+    if t and t[-1] not in ".!?…":
+        t += "."
+    return t
 
 
 def _extract_overview(
@@ -80,92 +118,53 @@ def _extract_overview(
     return overview
 
 
-def _identity_sentence(slug: str, overview: str) -> str:
-    hint = SLUG_HINTS.get(slug, "")
-    if hint:
-        if not overview or _GENERIC_OVERVIEW_RE.match(overview.strip()):
-            return hint
-        if overview.strip().lower() == hint.split("—")[0].strip().lower()[: len(overview)]:
-            return hint
-    if overview:
-        return overview.rstrip(".") + "."
-    if hint:
-        return hint
-    return f"Homelab project “{slug.replace('-', ' ')}”."
-
-
-def _work_sentence(
-    *,
-    continue_mode: str,
-    handoff_tier: str,
-    deploy_state: str,
-    preflight: dict[str, Any],
-) -> str:
-    mode = continue_mode or ""
-    tier = handoff_tier or ""
-    deploy = (deploy_state or "").lower()
-    pf = preflight or {}
-
-    if mode == "client_setup":
-        return "Client-device setup — SSH keys, Cursor, or other tooling on your machine."
-    if mode == "server_daemon":
-        running = pf.get("daemon_running")
-        if running is True:
-            return "Unraid plugin/daemon is running — policy and code changes, not Docker Compose."
-        if running is False:
-            return "Plugin/daemon work — service may be stopped; check the brief before editing."
-        return "Unraid plugin or daemon tuning — not a Docker Compose stack."
-    if mode == "integration":
-        if tier == "rebuild":
-            return "External integration — topology may have changed; verify live state before acting."
-        return "External wiring (DNS, reverse proxy, OAuth) — no compose folder tied to this project."
-    if mode == "investigation":
-        return "Diagnostic or tuning work on the host or a service — see findings in the brief."
-    if mode.startswith("compose"):
-        containers = pf.get("containers") or []
-        compose = pf.get("compose", "")
-        if tier == "continue" or deploy == "deployed":
-            n = len(containers)
-            extra = f" ({n} container{'s' if n != 1 else ''} running)" if n else ""
-            return f"Stack is deployed and healthy{extra} — maintain and fix, don’t redeploy unless asked."
-        if compose == "missing" or tier == "rebuild":
-            return "Compose may be missing or incomplete — read archived sessions before redeploying."
-        if tier == "orient":
-            return "Verify what’s on disk and in archived sessions before changing the stack."
-        return "Docker Compose project — check on_disk status in the brief before acting."
-    if tier == "continue":
-        return "Pick up where the last session left off."
-    if tier == "orient":
-        return "Orient first — confirm live state matches the brief."
+def _story_from_memories(memories: list[dict[str, Any]], *, max_len: int = 280) -> str:
+    for m in memories or []:
+        typ = (m.get("type") or "").lower()
+        if typ not in ("goal", "decision"):
+            continue
+        content = re.sub(r"\s+", " ", (m.get("content") or "").strip())
+        if len(content) < 40 or _AGENT_JARGON_RE.search(content):
+            continue
+        if content.count("/") >= 2:
+            continue
+        return _clean_prose(content, max_len=max_len)
     return ""
 
 
-def _recent_sentence(
+def _identity_story(
+    slug: str,
+    overview: str,
     *,
-    archived_recent_sessions: list[dict[str, Any]],
-    active_sessions: list[dict[str, Any]],
-    blockers: list[str],
+    meta: dict[str, Any],
+    memories: Optional[list[dict[str, Any]]] = None,
 ) -> str:
-    if archived_recent_sessions:
-        s = archived_recent_sessions[0]
-        title = (s.get("title") or f"session #{s.get('id', '?')}").strip()
-        if title.lower().startswith("chat #"):
-            title = title[6:].strip() or title
-        when = s.get("updated_at") or ""
-        date_bit = ""
-        if when and len(when) >= 10:
-            date_bit = f" ({when[:10]})"
-        return f"Last checkpointed work{date_bit}: {title}."
-    if active_sessions:
-        s = active_sessions[0]
-        title = (s.get("title") or f"chat #{s.get('id', '?')}").strip()
-        return f"Active session in progress: {title}."
-    if blockers:
-        b = blockers[0]
-        if len(b) > 120:
-            b = b[:117].rstrip() + "…"
-        return f"Open issue: {b}"
-    return ""
+    # Explicit human override wins.
+    for key in ("human_overview", "project_story"):
+        val = meta.get(key)
+        if isinstance(val, str) and len(val.strip()) >= 24:
+            return _clean_prose(val.strip())
+
+    # Curated plain-language blurb for known projects (preferred over ops descriptors).
+    story = SLUG_STORIES.get(slug, "")
+    if story:
+        return story
+
+    if overview and not _GENERIC_OVERVIEW_RE.match(overview.strip()):
+        if not _AGENT_JARGON_RE.search(overview):
+            return _clean_prose(overview, max_len=280)
+
+    semantic = meta.get("semantic_descriptor")
+    if isinstance(semantic, str) and len(semantic.strip()) >= 40:
+        if not _AGENT_JARGON_RE.search(semantic) and semantic.count("/") < 3:
+            return _clean_prose(semantic.strip(), max_len=280)
+
+    from_mem = _story_from_memories(memories or [])
+    if from_mem:
+        return from_mem
+
+    label = slug.replace("-", " ")
+    return f"Homelab project “{label}.”"
 
 
 def build_purpose_summary(
@@ -179,26 +178,16 @@ def build_purpose_summary(
     preflight: Optional[dict[str, Any]] = None,
     archived_recent_sessions: Optional[list[dict[str, Any]]] = None,
     active_sessions: Optional[list[dict[str, Any]]] = None,
-    max_len: int = 480,
+    memories: Optional[list[dict[str, Any]]] = None,
+    max_len: int = 320,
 ) -> str:
-    """Natural-language paragraph: what this project is + current work context."""
+    """Short Project-tab overview: what this project is for."""
+    _ = (continue_mode, handoff_tier, deploy_state, preflight, archived_recent_sessions, active_sessions)
+
     slug = (project.get("slug") or f"project-{project.get('id', 0)}").strip()
+    meta = _parse_meta(project)
     overview = _extract_overview(project, spec_yaml=spec_yaml, project_md=project_md)
-    parts = [
-        _identity_sentence(slug, overview),
-        _work_sentence(
-            continue_mode=continue_mode or "",
-            handoff_tier=handoff_tier or "",
-            deploy_state=deploy_state or "",
-            preflight=preflight or {},
-        ),
-        _recent_sentence(
-            archived_recent_sessions=archived_recent_sessions or [],
-            active_sessions=active_sessions or [],
-            blockers=_yaml_list_items(spec_yaml, "blockers", limit=1),
-        ),
-    ]
-    text = " ".join(p.strip() for p in parts if p and p.strip())
+    text = _identity_story(slug, overview, meta=meta, memories=memories)
     text = re.sub(r"\s+", " ", text).strip()
     if len(text) > max_len:
         text = text[: max_len - 1].rstrip() + "…"

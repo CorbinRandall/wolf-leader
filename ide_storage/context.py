@@ -513,6 +513,7 @@ def build_agent_brief_response(
             preflight=preflight,
             archived_recent_sessions=(ctx or {}).get("archived_recent_sessions"),
             active_sessions=chats,
+            memories=(ctx or {}).get("memories"),
         )
 
     canonical = {

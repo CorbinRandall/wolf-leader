@@ -369,16 +369,95 @@ body {
 .view-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
 .setup-lead { color: var(--text-muted); margin: 0 0 1.25rem; max-width: 52rem; }
 
+.project-overview-panel {
+  margin-bottom: 1rem;
+  max-width: 52rem;
+}
+.project-overview-panel h3 {
+  margin: 0 0 0.5rem;
+}
 .project-purpose {
   color: var(--text);
-  font-size: 0.95rem;
-  line-height: 1.55;
-  margin: -0.25rem 0 1rem;
-  padding: 0.85rem 1rem;
+  font-size: 1.05rem;
+  line-height: 1.6;
+  margin: 0;
+  padding: 0;
   max-width: 52rem;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.left-off-panel {
+  margin-bottom: 1.25rem;
+}
+.left-off-section-heading {
+  margin: 0.35rem 0 0.55rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.left-off-latest {
+  font-size: 1rem;
+  line-height: 1.6;
+  padding: 0;
+  background: transparent;
+  border: none;
+  max-width: 52rem;
+}
+.left-off-spotlight {
+  padding: 1rem 1.1rem;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  box-shadow: inset 3px 0 0 var(--accent, #6ea8fe);
+}
+.left-off-spotlight.is-clickable {
+  cursor: pointer;
+}
+.left-off-spotlight.is-clickable:hover {
+  border-color: var(--accent-dim, var(--border));
+  background: var(--bg-hover, var(--bg));
+}
+.left-off-log-heading {
+  margin: 1.25rem 0 0.55rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.left-off-log {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  max-width: 52rem;
+}
+.left-off-entry {
+  display: block;
+  width: 100%;
+  padding: 0.85rem 1rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.left-off-entry:hover {
+  border-color: var(--accent-dim, var(--border));
+  background: var(--bg-hover, var(--bg-elevated));
+}
+.left-off-entry-meta {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+.left-off-entry-body {
+  font-size: 0.95rem;
+  line-height: 1.55;
 }
 
 .btn-danger {

@@ -147,9 +147,17 @@ class ProjectMdUpdate(BaseModel):
     content: str
 
 
+class LeftOffUpdate(BaseModel):
+    """Saved 'where we left off' spot for a project."""
+    content: Optional[str] = None
+    # When true, regenerate SPEC so pickup reflects the saved spot immediately.
+    distill: bool = True
+
+
 class SaveMessage(BaseModel):
     role: str
     content: str
+    created_at: Optional[str] = None  # when this message happened (ISO)
 
 
 class SaveProjectBody(BaseModel):
@@ -159,6 +167,8 @@ class SaveProjectBody(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
     messages: Optional[List[SaveMessage]] = None
+    # When the conversation actually happened (ISO). Logbook sorts by this, not save time.
+    occurred_at: Optional[str] = None
 
 
 class ProjectMatchBody(BaseModel):
@@ -204,7 +214,10 @@ async def web_ui():
     """Chat directory web UI."""
     index = STATIC_DIR / "index.html"
     if index.is_file():
-        return FileResponse(index)
+        return FileResponse(
+            index,
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
     return {"message": f"{PRODUCT_NAME} API", "docs": "/docs"}
 
 
@@ -1140,7 +1153,10 @@ async def save_project_checkpoint(body: SaveProjectBody = SaveProjectBody()):
 
     messages = None
     if body.messages:
-        messages = [{"role": m.role, "content": m.content} for m in body.messages]
+        messages = [
+            {"role": m.role, "content": m.content, **({"created_at": m.created_at} if m.created_at else {})}
+            for m in body.messages
+        ]
 
     try:
         report = save_project(
@@ -1150,6 +1166,7 @@ async def save_project_checkpoint(body: SaveProjectBody = SaveProjectBody()):
             title=body.title,
             content=body.content,
             messages=messages,
+            occurred_at=body.occurred_at,
         )
     except Exception as exc:
         logger.exception("save-project failed")
@@ -1236,6 +1253,76 @@ async def distill_one_project(project_id: int):
 
         result["embeddings"] = sync_dirty(project_id=project_id)
     return result
+
+
+def _left_off_context(project_id: int) -> tuple[dict, dict]:
+    """Load project + activity-log payload."""
+    from .hub import _activity_log_sessions
+    from .left_off import left_off_payload, log_entry_from_chat
+    from .project_archetypes import pickup_prompt
+
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM projects WHERE id = ?", (project_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Project not found")
+        project = dict(row)
+        log_rows = _activity_log_sessions(cur, project_id, 25)
+
+    slug = project.get("slug") or f"project-{project_id}"
+    public = os.environ.get("IDE_STORAGE_PUBLIC_URL", "http://127.0.0.1:6971").rstrip("/")
+    brief_url = f"{public}/api/projects/{slug}/agent-brief"
+    default_pickup = pickup_prompt(project, public_base=public)
+    entries = []
+    for r in log_rows:
+        entry = log_entry_from_chat(r)
+        entry["web"] = f"{public}/?chat={r['id']}"
+        entries.append(entry)
+    payload = left_off_payload(
+        project,
+        brief_url=brief_url,
+        log_entries=entries,
+        default_pickup=default_pickup,
+    )
+    return project, payload
+
+
+@app.get("/api/projects/{project_id}/where-left-off")
+async def get_where_left_off(project_id: int):
+    """Activity log + latest where-we-left-off snapshot (filled on each /save)."""
+    _, payload = _left_off_context(project_id)
+    return payload
+
+
+@app.put("/api/projects/{project_id}/where-left-off")
+async def put_where_left_off(project_id: int, body: LeftOffUpdate):
+    """Optional manual override (prefer /save auto log). Kept for API compatibility."""
+    import json
+
+    from .left_off import metadata_with_left_off
+
+    project, _ = _left_off_context(project_id)
+    meta = metadata_with_left_off(project, body.content)
+    now = datetime.utcnow().isoformat()
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE projects SET metadata = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(meta), now, project_id),
+        )
+        conn.commit()
+
+    distill_result = None
+    if body.distill:
+        try:
+            distill_result = distill_spec(project_id)
+        except Exception as exc:  # noqa: BLE001
+            distill_result = {"error": str(exc)}
+
+    _, payload = _left_off_context(project_id)
+    payload["distill"] = distill_result
+    return payload
 
 
 @app.get("/api/projects/{project_id}/agent-context")

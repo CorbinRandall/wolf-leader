@@ -186,51 +186,71 @@ def _build_save_guide() -> str:
 
 **Use at the end of any agent chat** — Claude, Cursor, Codex, etc.
 
+This guide is the **canonical checklist**. Client `/save` skills stay thin: fetch
+this URL and follow it. Timeline rules, descriptors, and path details live here
+so you do not rewrite skills every time the process changes.
+
 ---
 
 ## Your job
 
 1. Sync the full conversation into the hub
 2. **Auto-detect** which project it belongs to (do not ask unless detection fails)
-3. Write a **semantic descriptor** for the project and for each key memory (see below)
-4. Extract typed memories, refresh agent brief, archive the session
-5. Report: project slug, brief URL, pickup prompt for the next agent
+3. Set **occurred_at** to when the conversation actually happened (not save time)
+4. Write a **semantic descriptor** for the project and for each key memory
+5. Extract typed memories, refresh agent brief, archive the session
+6. Report: project slug, brief URL, Logbook/pickup summary for the next agent
+
+---
+
+## Session timeline (`occurred_at`) — required for Logbook order
+
+The project **Logbook** sorts by when sessions *happened*, not when `/save` ran.
+Older chats saved later must still appear earlier on the timeline.
+
+Include on `POST /api/save-project` or MCP `save_session`:
+
+```json
+{{
+  "slug": "imessage-archive",
+  "title": "Dashboard Stop button",
+  "occurred_at": "2026-07-02T21:35:00",
+  "messages": []
+}}
+```
+
+If omitted, the hub picks (first match):
+
+1. Explicit `occurred_at` you pass
+2. Cursor title `<timestamp>…</timestamp>`
+3. Earliest real message `created_at`
+4. Local transcript file mtime
+5. Save time (last resort)
 
 ---
 
 ## Semantic descriptors — required for vector search
 
 {PRODUCT_NAME} uses vector embeddings so agents can find projects and memories by
-description, not just keywords. Your words here directly power that search.
+description, not just keywords.
 
-### For the project (update whenever its purpose became clearer this session)
+### For the project (when its purpose became clearer this session)
 
 `PUT /api/projects/<id>` with `metadata.semantic_descriptor`:
 
-Write 2–4 sentences: what this project does, its purpose, synonyms for its name,
+Write 2–4 sentences: what this project does, synonyms for its name,
 and how you'd describe it to someone who forgot the name.
 
-Example:
-> "Wolf Leader is a self-hosted AI project memory hub. It stores typed memories,
-> SPEC checkpoints, and session archives so agents can resume work with full
-> context. Also called ide-storage or the memory hub."
-
 ### For every memory you POST — semantic_descriptor is required
-
-Add `semantic_descriptor` to **each** `POST /api/memories` call:
 
 ```json
 {{
   "project_id": 7,
   "type": "decision",
   "content": "Use WAL mode for SQLite to prevent lock contention.",
-  "semantic_descriptor": "SQLite concurrency fix: WAL journal mode and busy_timeout=10000 let readers continue while the embedding backfill writes, preventing API timeouts."
+  "semantic_descriptor": "SQLite concurrency fix: WAL journal mode and busy_timeout let readers continue while the embedding backfill writes, preventing API timeouts."
 }}
 ```
-
-Write 1–2 sentences per memory: what this fact *means* in plain language, what
-problem it solves, and any synonyms. This is the text the vector index embeds —
-richer text = better search.
 
 ---
 
@@ -244,7 +264,7 @@ curl -s -X POST http://127.0.0.1:6971/api/save-project \\
   -d '{{}}'
 ```
 
-Optional: `"session_id": "<uuid>"` or `"slug": "my-project"` to force project.
+Optional: `"session_id"`, `"slug"`, `"occurred_at"`.
 
 ### Path B — Any other agent (conversation is in your context)
 
@@ -255,6 +275,7 @@ curl -s -X POST http://127.0.0.1:6971/api/save-project \\
     "title": "Short topic title",
     "content": "One-line summary of what was accomplished",
     "slug": "my-project",
+    "occurred_at": "2026-07-02T21:35:00",
     "messages": [
       {{"role": "user", "content": "..."}},
       {{"role": "assistant", "content": "..."}}
@@ -265,7 +286,7 @@ curl -s -X POST http://127.0.0.1:6971/api/save-project \\
 ### Path C — MCP connected
 
 ```
-save_session(title="...", content="...", messages_json="[...]")
+save_session(title="...", content="...", occurred_at="...", messages_json="[...]")
 ```
 
 ---
@@ -281,8 +302,8 @@ numbers. List projects if unsure: `GET /api/projects` or MCP `list_projects`.
 
 - **Project** linked (name + slug)
 - **Brief URL** — `<hub>/api/projects/<slug>/agent-brief`
-- **Pickup prompt** from the API response
-- Session is **archived**; future agents load the brief, not this chat
+- **Logbook / pickup** from the API response
+- Session is **archived**; future agents load the brief + Logbook
 
 ---
 
@@ -292,6 +313,7 @@ numbers. List projects if unsure: `GET /api/projects` or MCP `list_projects`.
 |---------|-----|
 | `No Cursor transcript found` | Use Path B with `messages` array |
 | Wrong project linked | Re-run with `"slug": "correct-slug"` |
+| Wrong Logbook order | Pass `occurred_at` for the real session time |
 | Cannot reach LAN IP | On the hub host itself: use `http://127.0.0.1:6971` |
 """
 
@@ -328,13 +350,17 @@ Add `semantic_descriptor` to each `POST /api/memories`:
 
 
 def read_save_project_md() -> str:
-    path = os.path.join(get_data_dir(), "SAVE_PROJECT.md")
-    if os.path.isfile(path):
-        with open(path, encoding="utf-8", errors="replace") as f:
-            content = f.read()
-        # Transparently upgrade files that predate vector search.
-        if "semantic descriptor" not in content.lower():
-            content += _SEMANTIC_DESCRIPTOR_ADDENDUM
-        return content
-    # No file yet (fresh install) — return the full built-in guide.
+    # Code-built guide is canonical so hub deploys update agent instructions
+    # without rewriting client skills. Optional file override:
+    # IDE_STORAGE_SAVE_GUIDE_FILE=1
+    if os.environ.get("IDE_STORAGE_SAVE_GUIDE_FILE", "").strip() == "1":
+        path = os.path.join(get_data_dir(), "SAVE_PROJECT.md")
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8", errors="replace") as f:
+                content = f.read()
+            if "occurred_at" not in content.lower():
+                content += "\n\n## Session timeline\n\nPass `occurred_at` (ISO) for Logbook order.\n"
+            if "semantic descriptor" not in content.lower():
+                content += _SEMANTIC_DESCRIPTOR_ADDENDUM
+            return content
     return _build_save_guide()

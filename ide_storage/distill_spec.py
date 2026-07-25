@@ -534,13 +534,18 @@ def distill_spec(project_id: int) -> dict[str, Any]:
         force_if_thin=force_drill,
         memories=memories,
     )
-    pickup = pickup_for_tier(
+    default_pickup = pickup_for_tier(
         project.get("name") or slug,
         slug,
         handoff_tier=handoff_tier,
         continue_mode=mode,
         brief_url=brief_url,
         preflight=preflight,
+    )
+    from .left_off import resolve_pickup
+
+    pickup, pickup_from_saved = resolve_pickup(
+        project, default_pickup=default_pickup, brief_url=brief_url
     )
 
     lines = [
@@ -705,6 +710,7 @@ def distill_spec(project_id: int) -> dict[str, Any]:
         "spec_chars": len(spec),
         "brief_path": brief_path,
         "pickup": pickup,
+        "pickup_from_saved": pickup_from_saved,
         "updated_at": now,
         "spec_validation": validation,
     }

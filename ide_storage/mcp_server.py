@@ -211,10 +211,12 @@ def save_session(
     workspace_path: Optional[str] = None,
     project_id: Optional[int] = None,
     messages_json: Optional[str] = None,
+    occurred_at: Optional[str] = None,
     ctx: Context = None,
 ) -> dict:
     """
     Save or update a chat session. messages_json: JSON array of {role, content}.
+    occurred_at: ISO time when the conversation happened (logbook order), not save time.
     Call at session end to persist work to the hub.
     """
     messages = None
@@ -232,6 +234,7 @@ def save_session(
             workspace_path=workspace_path,
             project_id=pid,
             messages=messages,
+            occurred_at=occurred_at,
         )
         regenerate_index()
         return {"ok": True, **result}

@@ -20,7 +20,6 @@ Runs on **any Docker host**: Raspberry Pi, Windows, Linux, macOS, Unraid, cloud 
 
 ```bash
 git clone git@github.com:YOU/wolf-leader.git && cd wolf-leader
-cp .env.example .env    # set IDE_STORAGE_PUBLIC_URL to your host IP
 ./scripts/setup.sh
 ```
 
@@ -106,10 +105,16 @@ Requires Python 3.11+ (uses [`uv`](https://github.com/astral-sh/uv) if present, 
 
 See [`.env.example`](.env.example). Minimum:
 
+- `IDE_STORAGE_PUBLIC_HOST` — stable Tailscale name/IP, LAN name/IP, or loopback
 - `IDE_STORAGE_PUBLIC_URL` — how clients reach the Web UI / brief URLs
 - `IDE_STORAGE_MCP_URL` — MCP endpoint for agents
+- `IDE_STORAGE_DEVICE_NAME` — server identity used in pickup prompts
 
 Optional: `CURSOR_TRANSCRIPTS_ROOT`, `COMPOSE_MANAGER_ROOT`, `IDE_STORAGE_HOST_LABEL`
+
+`./scripts/setup.sh` detects Tailscale first, then LAN, and writes `.env` locally.
+To move an existing install to new hardware or networking, run
+`./scripts/configure-runtime.sh --force` (or pass `--host` and `--name`).
 
 ## API (selection)
 

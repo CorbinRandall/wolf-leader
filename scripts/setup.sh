@@ -6,8 +6,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 if [[ ! -f .env ]]; then
-  cp .env.example .env
-  echo "Created .env from .env.example — edit IDE_STORAGE_PUBLIC_URL before sharing MCP URLs."
+  bash scripts/configure-runtime.sh
 fi
 
 bash scripts/init-data.sh

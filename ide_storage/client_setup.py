@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import io
-import os
 import tarfile
 from pathlib import Path
 from typing import Any
 
 from ide_storage.branding import PRODUCT_NAME
+from ide_storage.runtime_config import runtime_config
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CURSOR_EXAMPLES = REPO_ROOT / "examples" / "cursor"
@@ -39,9 +39,10 @@ LEGACY_PROFILE_IDS = frozenset(
 
 
 def hub_urls() -> dict[str, str]:
-    public = os.environ.get("IDE_STORAGE_PUBLIC_URL", "http://127.0.0.1:6971").rstrip("/")
-    local = os.environ.get("IDE_STORAGE_LOCAL_URL", public).rstrip("/")
-    mcp = os.environ.get("IDE_STORAGE_MCP_URL", f"{public.rsplit(':', 1)[0]}:6972/mcp")
+    cfg = runtime_config()
+    public = cfg.public_url
+    local = cfg.local_url
+    mcp = cfg.mcp_url
     return {"api": public, "api_local": local, "mcp": mcp, "setup_web": f"{public}/?tab=setup"}
 
 
@@ -114,6 +115,7 @@ def client_setup_payload(*, legacy_profile: str | None = None) -> dict[str, Any]
             "Cursor, Claude Code, Claude Desktop, Gemini CLI, or any MCP client."
         ),
         "workspace": "<your project root>",
+        "server": runtime_config().as_dict(),
         "hub_api": urls["api"],
         "hub_mcp": urls["mcp"],
         "setup_web_url": urls["setup_web"],

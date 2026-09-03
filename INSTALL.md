@@ -50,9 +50,10 @@ Edit `.env`:
 
 ```bash
 # Use the address other machines will use to reach this host
-IDE_STORAGE_PUBLIC_URL=http://192.168.1.100:6971
-IDE_STORAGE_MCP_URL=http://192.168.1.100:6972/mcp
-IDE_STORAGE_HOST_LABEL=homelab   # optional — appears in agent pickup prompts
+IDE_STORAGE_PUBLIC_HOST=100.x.y.z # Tailscale preferred; LAN/hostname also works
+IDE_STORAGE_PUBLIC_URL=http://100.x.y.z:6971
+IDE_STORAGE_MCP_URL=http://100.x.y.z:6972/mcp
+IDE_STORAGE_DEVICE_NAME=moto      # appears in agent pickup prompts
 ```
 
 Run setup:
@@ -106,7 +107,7 @@ Then: `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`
 
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 2. Clone repo to e.g. `C:\Users\you\wolf-leader`
-3. Copy `.env.example` → `.env`; set `IDE_STORAGE_PUBLIC_URL=http://localhost:6971` for local-only, or your LAN IP for other devices
+3. Run `./scripts/configure-runtime.sh`; it prefers Tailscale, then LAN, and writes `.env`
 4. In PowerShell: `docker compose up -d --build`
 5. Cursor MCP on Windows: `http://localhost:6972/mcp` or LAN IP
 

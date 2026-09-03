@@ -85,6 +85,20 @@ def test_resolve_pickup_honors_metadata():
     assert "Manual leftover note" in pickup
 
 
+def test_resolve_pickup_rebases_old_server_brief_url():
+    project = {
+        "metadata": '{"where_we_left_off":"Continue work. Brief: http://old-host:6971/api/projects/x/agent-brief"}'
+    }
+    pickup, from_saved = resolve_pickup(
+        project,
+        default_pickup="auto",
+        brief_url="http://moto:6971/api/projects/x/agent-brief",
+    )
+    assert from_saved is True
+    assert "http://moto:6971/api/projects/x/agent-brief" in pickup
+    assert "old-host" not in pickup
+
+
 def test_metadata_clears_legacy_alias():
     project = {"metadata": {LEGACY_OVERRIDE_KEY: "old", "continue_mode": "compose_maintain"}}
     meta = metadata_with_left_off(project, "new spot")

@@ -60,7 +60,10 @@ def resolve_project(
                 if not val:
                     continue
                 vnorm = normalize_path(val)
-                if norm == vnorm or norm.startswith(vnorm + os.sep):
+                # A home-directory project such as /Users/name is a useful
+                # record, but it must not claim every unrelated workspace.
+                broad = len([part for part in vnorm.split(os.sep) if part]) <= 2
+                if norm == vnorm or (not broad and norm.startswith(vnorm + os.sep)):
                     if len(vnorm) > best_len:
                         best = project
                         best_len = len(vnorm)
@@ -448,6 +451,10 @@ def save_session(
             )
             chat_id = existing_id
             action = "updated"
+            # A hook sends the complete current transcript after each turn.
+            # Replace the old snapshot so repeated autosaves stay idempotent.
+            if messages:
+                cur.execute("DELETE FROM messages WHERE chat_id = ?", (chat_id,))
         else:
             cur.execute(
                 """

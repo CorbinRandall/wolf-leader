@@ -6,6 +6,11 @@
         "command": "./hooks/wolf-leader-recall.sh"
       }
     ],
+    "beforeSubmitPrompt": [
+      {
+        "command": "./hooks/wolf-leader-recall.sh"
+      }
+    ],
     "stop": [
       {
         "command": "./hooks/wolf-leader-save.sh"

@@ -121,6 +121,8 @@ run_step "recall hook" install_file 755 \
   "$CURSOR_EXAMPLES/hooks/wolf-leader-recall.sh" "$CURSOR_DIR/hooks/wolf-leader-recall.sh"
 run_step "save hook" install_file 755 \
   "$CURSOR_EXAMPLES/hooks/wolf-leader-save.sh" "$CURSOR_DIR/hooks/wolf-leader-save.sh"
+run_step "autosave hook" install_file 755 \
+  "$CURSOR_EXAMPLES/hooks/wolf-leader-autosave.py" "$CURSOR_DIR/hooks/wolf-leader-autosave.py"
 
 run_step "wolf-leader-hub rule" install_file 644 \
   "$CURSOR_EXAMPLES/rules/wolf-leader-hub.mdc" "$CURSOR_DIR/rules/wolf-leader-hub.mdc"

@@ -534,6 +534,8 @@ body {
   border-radius: var(--radius);
   margin-bottom: 0.5rem;
 }
+.memory-group { margin: 1rem 0; }
+.memory-group h4 { margin: 0 0 .45rem; color: var(--muted); font-size: .78rem; letter-spacing: .06em; text-transform: uppercase; }
 .memory-type {
   font-size: 0.65rem;
   font-weight: 600;

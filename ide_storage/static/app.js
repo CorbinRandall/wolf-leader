@@ -358,9 +358,9 @@ async function selectProject(id) {
       briefData.archived_session_count != null && `${briefData.archived_session_count} archived sessions`,
       briefData.memory_count != null && `${briefData.memory_count} memories`,
     ].filter(Boolean).join(" · ");
-    const preview = briefData.spec_yaml
-      ? `## SPEC.yaml\n\n\`\`\`yaml\n${briefData.spec_yaml}\n\`\`\``
-      : (briefData.brief_md || "");
+    const preview = briefData.brief_md || (briefData.spec_yaml
+      ? `## Technical project state\n\n\`\`\`yaml\n${briefData.spec_yaml}\n\`\`\``
+      : "");
     $("#agent-brief-preview").innerHTML = md(preview);
   } else {
     $("#brief-meta").textContent = "No brief yet — click Refresh brief.";
@@ -370,14 +370,16 @@ async function selectProject(id) {
   $("#project-md").value = mdData.content || "";
   $("#project-md-preview").innerHTML = md(mdData.content);
 
-  $("#memories-list").innerHTML = (memories.memories || []).length
-    ? memories.memories.map((m) => `
+  const memoryRows = memories.memories || [];
+  const memoryLabels = { decision: "Decisions", constraint: "Constraints", active_work: "Active work", problem: "Problems", goal: "Goals", caveat: "Caveats", note: "Notes" };
+  const grouped = Object.groupBy ? Object.groupBy(memoryRows, (m) => m.type || "note") : memoryRows.reduce((a,m) => ((a[m.type || "note"] ||= []).push(m),a),{});
+  $("#memories-list").innerHTML = memoryRows.length
+    ? Object.entries(grouped).map(([type, rows]) => `<section class="memory-group"><h4>${escapeHtml(memoryLabels[type] || type)}</h4>${rows.map((m) => `
       <div class="memory-item" data-mid="${m.id}">
-        <span class="memory-type">${escapeHtml(m.type)}</span>
         <span class="memory-body">${escapeHtml(m.content)}</span>
         <button type="button" class="btn-icon del-memory" data-mid="${m.id}" title="Delete">×</button>
-      </div>`).join("")
-    : `<p class="muted">No typed memories yet.</p>`;
+      </div>`).join("")}</section>`).join("")
+    : `<p class="muted">No saved knowledge yet.</p>`;
 
   $$(".del-memory").forEach((b) => b.addEventListener("click", async () => {
     if (!confirm("Delete this memory?")) return;

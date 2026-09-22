@@ -54,7 +54,7 @@ TOKEN_STOPWORDS = {
 STRONG_PHRASES: list[tuple[str, str, int]] = [
     ("docker-dashboard", r"docker[- ]?dashboard|docker apps website|container links?\s+page", 40),
     ("custom-server-url", r"custom server url|npm.*caddy|reverse proxy", 35),
-    ("wolf-leader", r"wolf[- ]?leader|ide[- ]?storage|ide work storage|\b6971\b", 35),
+    ("ide-storage", r"wolf[- ]?leader|ide[- ]?storage|ide work storage|\b6971\b", 35),
     ("s3-sleep", r"\bs3[- ]?sleep\b|dynamix\.s3\.sleep", 35),
     ("metube", r"\bmetube\b|youtube downloader", 30),
     ("hermes", r"\bhermes\b|telegram bot", 30),

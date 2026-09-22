@@ -48,6 +48,11 @@ def meaningful(messages):
     first=users[0].lower()
     return not ("transcription formatting assistant" in first or "reply with ok" in first)
 
+def is_wolf_leader_topic(text):
+    """Wolf Leader maintenance belongs to its canonical project, even when
+    the transcript also mentions other projects being used as examples."""
+    return bool(re.search(r"\bwolf[- ]?leader\b|\bwolfleader\b|ide[- ]?storage|autosav(?:e|ing)|recall before", text, re.I))
+
 def maybe_git(cwd, created):
     if not created or os.environ.get("WOLF_LEADER_AUTO_GIT","1") != "1": return
     path=Path(cwd)
@@ -66,7 +71,7 @@ def main():
     if not meaningful(messages): print('{"continue":true}'); return
     title=title_for(messages); text="\n".join(m["content"] for m in messages)[:80000]
     match=call("POST","/api/projects/match",{"text":text,"messages":messages,"workspace_path":cwd})
-    best=match.get("best") or {}; slug=best.get("slug") if best.get("confidence") in ("high","medium") else None; created=False
+    best=match.get("best") or {}; slug="ide-storage" if is_wolf_leader_topic(text) else (best.get("slug") if best.get("confidence") in ("high","medium") else None); created=False
     if not slug:
         slug=slugify(title); projects=call("GET","/api/projects").get("projects",[]); existing={p.get("slug") for p in projects}
         base=slug; n=2

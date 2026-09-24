@@ -1,5 +1,6 @@
 # Local configuration — never commit secrets or host-specific URLs
 .env
+.env.bak
 .env.local
 .env.*.local
 docker-compose.local.yml

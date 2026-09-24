@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Deploy Wolf Leader production (LXC) from GitHub — standard git pull + docker rebuild.
 #
-# Run on the Proxmox host after pushing to GitHub:
+# Run on your LXC host after pushing to GitHub:
 #   cd /opt/wolf-leader && git pull --ff-only && ./scripts/deploy-wolf-leader-lxc.sh
 #
-# Or from your Mac:
+# Or from another workstation:
 #   ./scripts/deploy-prod.sh
 #
 set -euo pipefail
@@ -12,11 +12,18 @@ set -euo pipefail
 VMID="${WOLF_LEADER_VMID:-104}"
 DEST="${WOLF_LEADER_DEST:-/opt/wolf-leader}"
 SRC="${WOLF_LEADER_SRC:-/opt/wolf-leader}"
-REPO="${WOLF_LEADER_REPO:-https://github.com/CorbinRandall/wolf-leader.git}"
+REPO="${WOLF_LEADER_REPO:-}"
 HEALTH_URL="${WOLF_LEADER_HEALTH_URL:-http://127.0.0.1:6971/health}"
 
 if [[ -z "${WOLF_LEADER_BRANCH:-}" && -d "$SRC/.git" ]]; then
   WOLF_LEADER_BRANCH="$(git -C "$SRC" rev-parse --abbrev-ref HEAD)"
+fi
+if [[ -z "$REPO" && -d "$SRC/.git" ]]; then
+  REPO="$(git -C "$SRC" remote get-url origin 2>/dev/null || true)"
+fi
+if [[ -z "$REPO" ]]; then
+  echo "ERROR: set WOLF_LEADER_REPO or run from a checkout with an origin remote" >&2
+  exit 1
 fi
 BRANCH="${WOLF_LEADER_BRANCH:-main}"
 

@@ -29,3 +29,6 @@ jobs:
         env:
           PYTHONPATH: .
         run: pytest -q
+
+      - name: Check public repository hygiene
+        run: bash scripts/check-public-hygiene.sh

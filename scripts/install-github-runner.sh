@@ -1,24 +1,29 @@
 #!/usr/bin/env bash
-# One-time: register a self-hosted GitHub Actions runner on the Proxmox host.
+# One-time: register a self-hosted GitHub Actions runner on a deployment host.
 #
 # 1. GitHub → wolf-leader → Settings → Actions → Runners → New self-hosted runner
 # 2. Copy the registration token (expires in ~1 hour)
-# 3. On Proxmox host:
-#      GITHUB_RUNNER_TOKEN='...' ./scripts/install-github-runner.sh
+# 3. On the runner host:
+#      GITHUB_REPO='OWNER/REPO' GITHUB_RUNNER_TOKEN='...' ./scripts/install-github-runner.sh
 #
 set -euo pipefail
 
-REPO="${GITHUB_REPO:-CorbinRandall/wolf-leader}"
+REPO="${GITHUB_REPO:-}"
 RUNNER_DIR="${RUNNER_DIR:-/opt/actions-runner}"
-RUNNER_NAME="${RUNNER_NAME:-proxmox}"
-RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,linux,x64,proxmox}"
+RUNNER_NAME="${RUNNER_NAME:-wolf-leader-deploy}"
+RUNNER_LABELS="${RUNNER_LABELS:-self-hosted,linux}"
+
+if [[ -z "$REPO" || ! "$REPO" =~ ^[^/]+/[^/]+$ ]]; then
+  echo "ERROR: set GITHUB_REPO to OWNER/REPO" >&2
+  exit 1
+fi
 
 if [[ -z "${GITHUB_RUNNER_TOKEN:-}" ]]; then
   echo "ERROR: set GITHUB_RUNNER_TOKEN from GitHub → Settings → Actions → Runners" >&2
   exit 1
 fi
 
-# Proxmox/host installs often run as root.
+# Some deployment hosts install services as root.
 if [[ "$(id -u)" -eq 0 ]]; then
   export RUNNER_ALLOW_RUNASROOT=1
 fi
@@ -67,4 +72,4 @@ echo "Self-hosted runner installed."
 echo "  service: actions.runner.${REPO//\//-}.${RUNNER_NAME}.service"
 echo "  verify:  GitHub → Settings → Actions → Runners (should show online)"
 echo ""
-echo "Pushes to main will now run tests, then deploy automatically."
+echo "The runner is ready for a deployment workflow configured in your repository."

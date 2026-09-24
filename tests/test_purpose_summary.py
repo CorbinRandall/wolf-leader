@@ -10,13 +10,13 @@ def test_samsung_uses_story_not_agent_pickup():
         "description": None,
         "metadata": {
             "where_we_left_off": (
-                "corbox-lite in this repo is canonical docker-dashboard Go hub "
+                "dashboard-lite in this repo is the canonical Go dashboard "
                 "(phone ARM + Proxmox amd64). Deploy: bin/deploy-hub --phone|--proxmox."
             ),
             "semantic_descriptor": (
-                "Samsung Galaxy S4 Active phone server: corbox-sshd at 192.168.1.60:2222, "
-                "hub UI http://192.168.1.60:8888, deploy via bin/deploy-hub --phone|--proxmox, "
-                "LXC 103 path /opt/corbox-hub, primary_hub sync disabled."
+                "example phone server: mobile-sshd at 192.0.2.60:2222, "
+                "hub UI http://192.0.2.60:8888, deploy via bin/deploy-hub --phone|--host, "
+                "LXC 103 path /opt/example-hub, primary_hub sync disabled."
             ),
         },
     }

@@ -1409,9 +1409,9 @@ async def get_onboarding():
         )
         + "/data/ONBOARDING.md",
         "agent_prompt": (
-            f"Connect this device to {PRODUCT_NAME}. "
-            f"Open {public}/?tab=setup and copy the client setup prompt, "
-            f"or fetch: {public}/api/client-setup"
+            f"Connect this device to {PRODUCT_NAME} and complete setup. "
+            f"Open {public}/?tab=setup and click Copy setup prompt, "
+            f"or fetch and follow: {public}/api/client-setup"
         ),
         "client_setup_url": f"{public}/api/client-setup",
     }

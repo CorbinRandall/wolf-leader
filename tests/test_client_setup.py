@@ -12,7 +12,7 @@ def test_universal_payload_has_no_niche_labels():
     assert payload["id"] == "universal"
     assert "profiles" not in payload
     assert "unraid" not in prompt
-    assert "corbox" not in prompt
+    assert "private-server" not in prompt
     assert "cursor-unraid" not in prompt
 
 
@@ -25,14 +25,32 @@ def test_agent_prompt_covers_mcp_and_cursor():
     assert "WORKSPACE" in prompt
 
 
+def test_agent_prompt_explains_current_cursor_workflow():
+    prompt = build_agent_prompt()
+    assert "model policy: economy, balanced, or maximum quality" in prompt
+    assert "checkpoint policy" in prompt
+    assert "automatic save hook" in prompt
+    assert "wolf-leader-last-save.json" in prompt
+    assert "deliberate final checkpoint" in prompt
+
+
 def test_payload_reports_server_identity(monkeypatch):
-    monkeypatch.setenv("IDE_STORAGE_PUBLIC_HOST", "100.112.113.15")
-    monkeypatch.setenv("IDE_STORAGE_DEVICE_NAME", "moto")
+    monkeypatch.setenv("IDE_STORAGE_PUBLIC_HOST", "100.64.0.15")
+    monkeypatch.setenv("IDE_STORAGE_DEVICE_NAME", "example-server")
     monkeypatch.delenv("IDE_STORAGE_PUBLIC_URL", raising=False)
     monkeypatch.delenv("IDE_STORAGE_MCP_URL", raising=False)
     payload = client_setup_payload()
-    assert payload["server"]["device_name"] == "moto"
-    assert payload["hub_api"] == "http://100.112.113.15:6971"
+    assert payload["server"]["device_name"] == "example-server"
+    assert payload["hub_api"] == "http://100.64.0.15:6971"
+
+
+def test_copied_prompt_uses_configured_urls(monkeypatch):
+    monkeypatch.setenv("IDE_STORAGE_PUBLIC_URL", "https://hub.example.test")
+    monkeypatch.setenv("IDE_STORAGE_MCP_URL", "https://hub.example.test/mcp")
+    prompt = client_setup_payload()["agent_prompt"]
+    assert "Hub API: https://hub.example.test" in prompt
+    assert "MCP: https://hub.example.test/mcp" in prompt
+    assert "YOUR_HOST" not in prompt
 
 
 def test_legacy_profiles_still_resolve():

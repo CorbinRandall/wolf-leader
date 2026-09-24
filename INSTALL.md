@@ -53,7 +53,7 @@ Edit `.env`:
 IDE_STORAGE_PUBLIC_HOST=100.x.y.z # Tailscale preferred; LAN/hostname also works
 IDE_STORAGE_PUBLIC_URL=http://100.x.y.z:6971
 IDE_STORAGE_MCP_URL=http://100.x.y.z:6972/mcp
-IDE_STORAGE_DEVICE_NAME=moto      # appears in agent pickup prompts
+IDE_STORAGE_DEVICE_NAME=my-server # appears in agent pickup prompts
 ```
 
 Run setup:
@@ -151,7 +151,7 @@ Create `docker-compose.local.yml` for personal overrides without editing committ
 **One-command install (recommended):**
 
 ```bash
-git clone git@github.com:CorbinRandall/wolf-leader.git
+git clone https://github.com/YOUR_GITHUB_USER/wolf-leader.git
 cd wolf-leader
 WOLF_LEADER_API=http://YOUR_HOST:6971 \
 WOLF_LEADER_MCP=http://YOUR_HOST:6972/mcp \
@@ -165,11 +165,11 @@ This installs into `~/.cursor/`:
 |-------|------|
 | `/save` skill | `skills/save/SKILL.md` |
 | MCP | `mcp.json` (`wolf-leader` + legacy `ide-storage` key) |
-| Hooks | `hooks.json`, `hooks/wolf-leader-*.sh` |
+| Hooks | `hooks.json`, `hooks/wolf-leader-*.sh`, background transcript autosave |
 | Rule | `rules/wolf-leader-hub.mdc` |
 | Hub URLs | `wolf-leader.env` |
 
-Reload the Cursor window so `/save` appears in the `/` menu.
+Reload the Cursor window so `/save` and `/new` appear in the `/` menu. The session-start hook recalls project context; the stop hook checkpoints meaningful transcript updates after responses and on stop. Automatic saves are best-effort; check `~/.cursor/wolf-leader-last-save.json` for the latest result and `~/.cursor/wolf-leader-autosave-error.log` for failures. Use `/save` for a deliberate final checkpoint. During onboarding, choose an economy, balanced, or maximum-quality model policy and record it in the workspace `AGENTS.md`.
 
 **Manual / partial setup:**
 

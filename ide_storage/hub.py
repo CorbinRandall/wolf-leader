@@ -60,7 +60,7 @@ def resolve_project(
                 if not val:
                     continue
                 vnorm = normalize_path(val)
-                # A home-directory project such as /Users/name is a useful
+                # A project rooted at a user's home directory is a useful
                 # record, but it must not claim every unrelated workspace.
                 broad = len([part for part in vnorm.split(os.sep) if part]) <= 2
                 if norm == vnorm or (not broad and norm.startswith(vnorm + os.sep)):

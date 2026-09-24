@@ -32,7 +32,7 @@ _SIGNAL_RE = re.compile(
 )
 _AGENT_DENSE_RE = re.compile(
     r"(?i)\b(handoff_tier|pickup_override|agent-brief|SPEC\.yaml|do not redeploy|"
-    r"LXC\s*\d+|bin/deploy|primary_hub|corbox-sshd)\b"
+    r"LXC\s*\d+|bin/deploy|primary_hub)\b"
 )
 _PATH_HEAVY_RE = re.compile(r"(/[^\s]{8,})|(\d{1,3}(?:\.\d{1,3}){3})")
 # Mid-conversation agent voice — not a useful “where we left off” for humans.

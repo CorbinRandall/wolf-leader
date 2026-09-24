@@ -14,6 +14,9 @@ Hub URLs live in `~/.cursor/wolf-leader.env`.
 1. **Start** — MCP `resolve_project({ path: "<workspace>" })` then `recall()` or `get_brief()`. Without MCP: `curl` the brief URL from `GET /api/bootstrap?path=<workspace>`.
 2. **During** — `remember({ type: "decision", content: "..." })` for durable facts.
 3. **Checkpoint** — type **`/save`** (install: `./scripts/install-cursor-client.sh` from wolf-leader repo).
-4. **End** — stop hook auto-syncs; use `/save` before closing for a final checkpoint.
+4. **Automatic checkpoint** — Cursor saves meaningful transcript updates after responses and on stop. This is best-effort; inspect `~/.cursor/wolf-leader-last-save.json` for the latest result or `~/.cursor/wolf-leader-autosave-error.log` for failures.
+5. **End** — use `/save` before closing for a deliberate final checkpoint; automatic saving supplements it.
+
+Follow the model and checkpoint policies recorded in the workspace `AGENTS.md`. If they are missing, ask the owner to choose economy, balanced, or maximum quality and whether background saves should stay enabled.
 
 Do not redeploy stacks when `handoff_tier` is `continue`. Read `on_disk` in SPEC when tier is `orient` or `rebuild`.

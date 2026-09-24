@@ -92,10 +92,10 @@ def test_resolve_pickup_rebases_old_server_brief_url():
     pickup, from_saved = resolve_pickup(
         project,
         default_pickup="auto",
-        brief_url="http://moto:6971/api/projects/x/agent-brief",
+        brief_url="http://example-server:6971/api/projects/x/agent-brief",
     )
     assert from_saved is True
-    assert "http://moto:6971/api/projects/x/agent-brief" in pickup
+    assert "http://example-server:6971/api/projects/x/agent-brief" in pickup
     assert "old-host" not in pickup
 
 

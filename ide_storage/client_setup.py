@@ -31,7 +31,6 @@ BUNDLE_SCRIPTS = (
 LEGACY_PROFILE_IDS = frozenset(
     {
         "cursor-unraid",
-        "cursor-corbox",
         "cursor-generic",
         "claude-code",
     }
@@ -52,21 +51,29 @@ def build_agent_prompt(*, urls: dict[str, str] | None = None) -> str:
     api = urls["api"]
     mcp = urls["mcp"]
 
-    return f"""Connect this device to {PRODUCT_NAME}.
+    return f"""Connect this device to {PRODUCT_NAME} and complete the setup.
 
 Hub API: {api}
 MCP: {mcp}
 
 Works on macOS, Windows, and Linux — local machine or remote host (SSH). Works with any MCP-capable agent (Cursor, Claude Code, Claude Desktop, Gemini CLI, etc.).
 
-## Step 1 — Fetch setup spec (mandatory)
-curl -s "{api}/api/client-setup"
-curl -s "{api}/api/onboarding"
+## Step 1 — Read the current setup instructions
+Fetch and read both endpoints before changing client configuration:
+curl -fsS "{api}/api/client-setup"
+curl -fsS "{api}/api/onboarding"
 
-## Step 2 — Set workspace path
-WORKSPACE = absolute path to the project folder opened in the IDE (use pwd, ask the user, or infer from the workspace root).
+## Step 2 — Identify this client and workspace
+Use the current OS and IDE. Set WORKSPACE to the absolute path of the project folder open in the IDE. For Cursor Remote-SSH, install on the remote machine that owns ~/.cursor and use the remote workspace path. Do not guess a different host or overwrite unrelated client settings.
 
-## Step 3 — Connect MCP (all agents)
+Ask the owner for any setup preference that is not already stated:
+- model policy: economy, balanced, or maximum quality
+- checkpoint policy: automatic background saves (recommended) or explicit saves only
+- a friendly device name
+
+Record these choices in the workspace AGENTS.md after installation. Do not put private addresses, credentials, user names, or machine-specific paths into tracked example files.
+
+## Step 3 — Connect MCP
 Add MCP server `wolf-leader` → {mcp}
 
 Examples:
@@ -76,7 +83,7 @@ Examples:
 
 If the hub runs on another machine, use the LAN/Tailscale URL above — not localhost — unless the hub is on this same machine.
 
-## Step 4 — Cursor client (only if using Cursor)
+## Step 4 — Cursor integration (if this device uses Cursor)
 Run on the machine that owns ~/.cursor (local laptop or Remote-SSH target):
 
 WOLF_LEADER_API={api} \\
@@ -89,19 +96,22 @@ If curl pipe fails:
   mkdir -p /tmp/wl-client && tar xzf /tmp/wl-client.tar.gz -C /tmp/wl-client
   WOLF_LEADER_API={api} WOLF_LEADER_MCP={mcp} WORKSPACE=<WORKSPACE> /tmp/wl-client/scripts/install-cursor-client.sh
 
-Reload the Cursor window. /save and /new should appear in the slash menu.
+This installs /save and /new skills, MCP, a session-start recall hook, an automatic save hook, and the Wolf Leader rule. It merges the Wolf Leader entries into existing Cursor configuration. Keep existing MCP servers and hooks. If the owner selected explicit saves only, disable the Wolf Leader stop hook after installation and document that choice in AGENTS.md.
 
-## Step 5 — Verify
+Reload the Cursor window. Confirm /save and /new appear in the slash menu. Check ~/.cursor/wolf-leader-last-save.json for the most recent successful automatic checkpoint and ~/.cursor/wolf-leader-autosave-error.log if a save failed.
+
+## Step 5 — Verify setup
 curl -s "{api}/health"
 MCP: resolve_project + recall — or curl "{api}/api/bootstrap?path=<WORKSPACE>"
 Place AGENTS.md in the workspace root (included in the hub client bundle).
 
 ## Step 6 — Every session
-Start: resolve_project({{ path: "<WORKSPACE>" }}) → recall() or get_brief()
-During: remember() for durable decisions
-End: /save (Cursor) or MCP save_session
+Start: let the session-start hook inject Wolf Leader context; confirm the matching project with resolve_project({{ path: "<WORKSPACE>" }}) and recall() or get_brief() before project work.
+During: remember() for durable decisions.
+In the background: Cursor's automatic save hook checkpoints meaningful transcript updates after responses and on stop. It is best-effort; check the last-save status if needed.
+End: use /save (Cursor) or MCP save_session for a deliberate final checkpoint. Automatic saving supplements this explicit checkpoint.
 
-Report: OS, agent/IDE, WORKSPACE used, MCP connected, hub health OK, and whether /save is available.
+Report: OS, agent/IDE, friendly device name, WORKSPACE used, selected model and checkpoint policies, MCP connected, the exact API and MCP URLs configured, hub health, hooks installed, /save and /new availability, and automatic-save status. Fix setup errors before finishing.
 """
 
 
@@ -111,8 +121,8 @@ def client_setup_payload(*, legacy_profile: str | None = None) -> dict[str, Any]
         "id": "universal",
         "label": "Any device · any agent",
         "description": (
-            "One setup flow for macOS, Windows, Linux, local or remote. "
-            "Cursor, Claude Code, Claude Desktop, Gemini CLI, or any MCP client."
+            "Complete setup flow for macOS, Windows, Linux, local or remote. "
+            "Cursor, Claude Code, Claude Desktop, Gemini CLI, or any MCP client. Includes Cursor recall and background checkpoint hooks."
         ),
         "workspace": "<your project root>",
         "server": runtime_config().as_dict(),

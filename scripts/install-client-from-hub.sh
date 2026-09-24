@@ -17,7 +17,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$WOLF_LEADER_API" ]]; then
-  echo "ERROR: set WOLF_LEADER_API (hub REST URL, e.g. http://192.168.1.230:6971)" >&2
+  echo "ERROR: set WOLF_LEADER_API (hub REST URL, e.g. http://YOUR_HOST:6971)" >&2
   exit 1
 fi
 

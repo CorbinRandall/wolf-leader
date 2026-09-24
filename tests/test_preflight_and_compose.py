@@ -65,7 +65,7 @@ def test_pickup_compose_maintain_unobservable():
         "ide-storage",
         handoff_tier="continue",
         continue_mode="compose_maintain",
-        brief_url="http://192.168.1.221:6971/api/projects/ide-storage/agent-brief",
+        brief_url="http://192.0.2.21:6971/api/projects/ide-storage/agent-brief",
         preflight={
             "observed_deploy_state": "unknown",
             "docker_check": "unavailable",

@@ -4,6 +4,8 @@
 
 Replace `YOUR_HOST` with your server's reachable address (LAN IP, hostname, or Tailscale).
 
+The Setup tab's **Copy setup prompt** button does this automatically. Its copied prompt is generated from `IDE_STORAGE_PUBLIC_URL` and `IDE_STORAGE_MCP_URL`, so installers receive this hub's live URLs rather than the `YOUR_HOST` examples below.
+
 | Resource | URL / path |
 |----------|------------|
 | **This doc (web)** | http://YOUR_HOST:6971/?tab=setup |
@@ -53,8 +55,9 @@ No git clone on the client — the hub serves the install bundle.
 |------|--------|
 | 1 | Open http://YOUR_HOST:6971/?tab=setup |
 | 2 | Click **Copy setup prompt** and paste into Cursor, Claude Code, Gemini, or any MCP-capable agent |
-| 3 | Agent connects MCP, runs the hub install script (Cursor), and verifies health |
-| 4 | Reload Cursor if needed; `/save` and `/new` should appear in the slash menu |
+| 3 | Agent fetches setup instructions, identifies IDE and workspace, connects MCP, and verifies hub health |
+| 4 | For Cursor, install adds `/save`, `/new`, session-start recall, automatic saves after responses and on stop, and the Wolf Leader rule; reload Cursor and verify |
+| 5 | Choose a model policy (economy, balanced, or maximum quality), checkpoint policy, and friendly device name; the agent records them in the workspace `AGENTS.md` |
 
 API:
 
@@ -80,13 +83,14 @@ Works on **macOS, Windows, and Linux** — local or remote (SSH). Use the hub's 
 ```
 Connect this workspace to Wolf Leader and finish setup.
 
-1. Fetch and read: http://YOUR_HOST:6971/api/onboarding
-2. Add MCP `wolf-leader` → `http://YOUR_HOST:6972/mcp`
-3. Place AGENTS.md in workspace root (copy from hub data/AGENTS.md)
+1. Fetch and read: http://YOUR_HOST:6971/api/onboarding and http://YOUR_HOST:6971/api/client-setup
+2. Identify OS, IDE, config-owning machine, and absolute workspace path; preserve existing client configuration
+3. Add MCP `wolf-leader` → `http://YOUR_HOST:6972/mcp`
 4. Import agent transcripts not yet in the hub
-5. Install `/save` skill on each Cursor workspace (optional)
-6. Call resolve_project + recall before any project work
-7. Type `/save` after meaningful work
+5. For Cursor, run the hub installer and reload; verify skills and recall/autosave hooks
+6. Place AGENTS.md in workspace root (copy from hub data/AGENTS.md)
+7. Call resolve_project + recall before project work
+8. Use `/save` after meaningful work; the Cursor hook also checkpoints meaningful transcript updates
 ```
 
 ### MCP tools
@@ -167,7 +171,7 @@ This installs:
 
 - **`/save` skill** → `~/.cursor/skills/save/` (reload Cursor window after install)
 - **MCP** → `~/.cursor/mcp.json` (`wolf-leader` server)
-- **Hooks** — `sessionStart` bootstrap recall + `stop` auto-save
+- **Hooks** — `sessionStart`/`beforeSubmitPrompt` recall + automatic saves after responses and on stop
 - **Rule** — `wolf-leader-hub.mdc` (recall / remember / save)
 - **`AGENTS.md`** symlink in workspace root (optional `WORKSPACE=/root`)
 

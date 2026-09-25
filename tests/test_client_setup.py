@@ -1,7 +1,11 @@
 """Tests for universal client setup API."""
+import io
+import tarfile
+
 from ide_storage.client_setup import (
     LEGACY_PROFILE_IDS,
     build_agent_prompt,
+    build_client_bundle,
     client_setup_payload,
 )
 
@@ -32,6 +36,19 @@ def test_agent_prompt_explains_current_cursor_workflow():
     assert "automatic save hook" in prompt
     assert "wolf-leader-last-save.json" in prompt
     assert "deliberate final checkpoint" in prompt
+
+
+def test_agent_prompt_explains_codex_save_skill():
+    prompt = build_agent_prompt()
+    assert "Codex integration" in prompt
+    assert "examples/codex/skills/save" in prompt
+    assert "$CODEX_HOME/skills/save" in prompt
+    assert "MCP `save_session`" in prompt
+
+
+def test_client_bundle_contains_codex_save_skill():
+    with tarfile.open(fileobj=io.BytesIO(build_client_bundle()), mode="r:gz") as archive:
+        assert "examples/codex/skills/save/SKILL.md" in archive.getnames()
 
 
 def test_payload_reports_server_identity(monkeypatch):

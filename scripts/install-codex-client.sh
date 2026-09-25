@@ -46,7 +46,7 @@ mkdir -p \
   "$CODEX_DIR/hooks" \
   "$CODEX_DIR/lib"
 
-install_one 644 "$SOURCE/skills/save/SKILL.md" "$AGENT_SKILLS_DIR/save/SKILL.md"
+install_one 644 "$ROOT/examples/codex/skills/save/SKILL.md" "$AGENT_SKILLS_DIR/save/SKILL.md"
 install_one 755 "$SOURCE/skills/save/scripts/save-session.sh" "$AGENT_SKILLS_DIR/save/scripts/save-session.sh"
 install_one 755 "$SOURCE/skills/save/scripts/save-session.py" "$AGENT_SKILLS_DIR/save/scripts/save-session.py"
 install_one 755 "$SOURCE/skills/save/scripts/save-session-curl.sh" "$AGENT_SKILLS_DIR/save/scripts/save-session-curl.sh"

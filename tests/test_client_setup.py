@@ -40,6 +40,17 @@ def test_agent_prompt_requires_verified_save_and_autosave_setup():
     assert "deliberate final checkpoint" in prompt
 
 
+def test_agent_prompt_explains_codex_save_setup():
+    prompt = build_agent_prompt()
+    assert "mandatory for Cursor and Codex" in prompt
+    assert "trust all three Wolf Leader hooks" in prompt
+
+
+def test_client_bundle_contains_codex_save_skill():
+    with tarfile.open(fileobj=io.BytesIO(build_client_bundle()), mode="r:gz") as archive:
+        assert "examples/codex/skills/save/SKILL.md" in archive.getnames()
+
+
 def test_payload_reports_server_identity(monkeypatch):
     monkeypatch.setenv("IDE_STORAGE_PUBLIC_HOST", "100.64.0.15")
     monkeypatch.setenv("IDE_STORAGE_DEVICE_NAME", "example-server")

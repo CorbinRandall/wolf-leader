@@ -11,6 +11,7 @@ from ide_storage.runtime_config import runtime_config
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CURSOR_EXAMPLES = REPO_ROOT / "examples" / "cursor"
+CODEX_EXAMPLES = REPO_ROOT / "examples" / "codex"
 INSTALL_SCRIPT = REPO_ROOT / "scripts" / "install-cursor-client.sh"
 INSTALL_FROM_HUB = REPO_ROOT / "scripts" / "install-client-from-hub.sh"
 VERIFY_SCRIPT = REPO_ROOT / "scripts" / "verify-cursor-client.sh"
@@ -100,18 +101,27 @@ This installs /save and /new skills, MCP, a session-start recall hook, an automa
 
 Reload the Cursor window. Confirm /save and /new appear in the slash menu. Check ~/.cursor/wolf-leader-last-save.json for the most recent successful automatic checkpoint and ~/.cursor/wolf-leader-autosave-error.log if a save failed.
 
-## Step 5 — Verify setup
+## Step 5 — Codex integration (if this device uses Codex)
+Download and extract the client bundle, then copy `examples/codex/skills/save`
+to `$CODEX_HOME/skills/save` (normally `~/.codex/skills/save`). Preserve all
+existing Codex skills and configuration. The skill uses MCP `save_session` and
+the live `/api/save-project-guide`; it does not use Cursor transcript scripts.
+
+Reload Codex. Confirm the `save` skill is available. Invoke it with `$save`,
+`/save`, or “save this” according to the client UI.
+
+## Step 6 — Verify setup
 curl -s "{api}/health"
 MCP: resolve_project + recall — or curl "{api}/api/bootstrap?path=<WORKSPACE>"
 Place AGENTS.md in the workspace root (included in the hub client bundle).
 
-## Step 6 — Every session
+## Step 7 — Every session
 Start: let the session-start hook inject Wolf Leader context; confirm the matching project with resolve_project({{ path: "<WORKSPACE>" }}) and recall() or get_brief() before project work.
 During: remember() for durable decisions.
 In the background: Cursor's automatic save hook checkpoints meaningful transcript updates after responses and on stop. It is best-effort; check the last-save status if needed.
 End: use /save (Cursor) or MCP save_session for a deliberate final checkpoint. Automatic saving supplements this explicit checkpoint.
 
-Report: OS, agent/IDE, friendly device name, WORKSPACE used, selected model and checkpoint policies, MCP connected, the exact API and MCP URLs configured, hub health, hooks installed, /save and /new availability, and automatic-save status. Fix setup errors before finishing.
+Report: OS, agent/IDE, friendly device name, WORKSPACE used, selected model and checkpoint policies, MCP connected, the exact API and MCP URLs configured, hub health, hooks installed, save/new skill availability, and automatic-save status. Fix setup errors before finishing.
 """
 
 
@@ -147,12 +157,18 @@ def client_setup_payload(*, legacy_profile: str | None = None) -> dict[str, Any]
 
 
 def build_client_bundle() -> bytes:
-    """Tar.gz of examples/cursor + install script + AGENTS.md for hub install."""
+    """Tar.gz of client examples, install scripts, and AGENTS.md."""
     buf = io.BytesIO()
     paths: list[tuple[Path, str]] = []
 
     if CURSOR_EXAMPLES.is_dir():
         for path in CURSOR_EXAMPLES.rglob("*"):
+            if path.is_file():
+                rel = path.relative_to(REPO_ROOT)
+                paths.append((path, str(rel)))
+
+    if CODEX_EXAMPLES.is_dir():
+        for path in CODEX_EXAMPLES.rglob("*"):
             if path.is_file():
                 rel = path.relative_to(REPO_ROOT)
                 paths.append((path, str(rel)))

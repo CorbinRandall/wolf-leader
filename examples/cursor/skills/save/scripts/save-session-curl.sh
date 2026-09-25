@@ -2,7 +2,8 @@
 # Minimal /save via REST when python3 is unavailable (curl-only clients).
 set -euo pipefail
 
-ENV_FILE="${HOME}/.cursor/wolf-leader.env"
+ENV_FILE="${HOME}/.codex/wolf-leader.env"
+[[ -f "$ENV_FILE" ]] || ENV_FILE="${HOME}/.cursor/wolf-leader.env"
 if [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   source "$ENV_FILE"

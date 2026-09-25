@@ -8,6 +8,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "${ROOT}/scripts/lib/wolf-leader-client.sh"
 
 CURSOR_DIR="${CURSOR_DIR:-$HOME/.cursor}"
+AGENT_SKILLS_DIR="${AGENT_SKILLS_DIR:-$HOME/.agents/skills}"
 CURSOR_EXAMPLES="${ROOT}/examples/cursor"
 WORKSPACE="${WORKSPACE:-$HOME}"
 DRY_RUN=0
@@ -32,6 +33,7 @@ Options:
 
 Installs under \$CURSOR_DIR:
   skills/save, skills/new, mcp.json, hooks, rules, wolf-leader.env, AGENTS.md in WORKSPACE
+Also installs portable save/new skills under \$AGENT_SKILLS_DIR for Codex-compatible discovery.
 EOF
 }
 
@@ -89,6 +91,8 @@ if [[ "$DRY_RUN" == 0 ]]; then
   mkdir -p \
     "$CURSOR_DIR/skills/save/scripts" \
     "$CURSOR_DIR/skills/new/scripts" \
+    "$AGENT_SKILLS_DIR/save/scripts" \
+    "$AGENT_SKILLS_DIR/new/scripts" \
     "$CURSOR_DIR/hooks" \
     "$CURSOR_DIR/rules"
   rm -rf "$CURSOR_DIR/skills/save-new"
@@ -111,6 +115,23 @@ run_step "new-project-session.py" install_file 755 \
   "$CURSOR_EXAMPLES/skills/new/scripts/new-project-session.py" "$CURSOR_DIR/skills/new/scripts/new-project-session.py"
 run_step "new-project-session-curl.sh" install_file 755 \
   "$CURSOR_EXAMPLES/skills/new/scripts/new-project-session-curl.sh" "$CURSOR_DIR/skills/new/scripts/new-project-session-curl.sh"
+
+run_step "portable save skill" install_file 644 \
+  "$CURSOR_EXAMPLES/skills/save/SKILL.md" "$AGENT_SKILLS_DIR/save/SKILL.md"
+run_step "portable save runner" install_file 755 \
+  "$CURSOR_EXAMPLES/skills/save/scripts/save-session.sh" "$AGENT_SKILLS_DIR/save/scripts/save-session.sh"
+run_step "portable save python" install_file 755 \
+  "$CURSOR_EXAMPLES/skills/save/scripts/save-session.py" "$AGENT_SKILLS_DIR/save/scripts/save-session.py"
+run_step "portable save curl" install_file 755 \
+  "$CURSOR_EXAMPLES/skills/save/scripts/save-session-curl.sh" "$AGENT_SKILLS_DIR/save/scripts/save-session-curl.sh"
+run_step "portable new skill" install_file 644 \
+  "$CURSOR_EXAMPLES/skills/new/SKILL.md" "$AGENT_SKILLS_DIR/new/SKILL.md"
+run_step "portable new runner" install_file 755 \
+  "$CURSOR_EXAMPLES/skills/new/scripts/new-project-session.sh" "$AGENT_SKILLS_DIR/new/scripts/new-project-session.sh"
+run_step "portable new python" install_file 755 \
+  "$CURSOR_EXAMPLES/skills/new/scripts/new-project-session.py" "$AGENT_SKILLS_DIR/new/scripts/new-project-session.py"
+run_step "portable new curl" install_file 755 \
+  "$CURSOR_EXAMPLES/skills/new/scripts/new-project-session-curl.sh" "$AGENT_SKILLS_DIR/new/scripts/new-project-session-curl.sh"
 
 if [[ "$DRY_RUN" == 1 ]]; then
   echo "  [dry-run] hooks.json merge"

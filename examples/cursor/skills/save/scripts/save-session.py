@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Save current Cursor session to Wolf Leader (existing project only)."""
+"""Save the current local agent session to Wolf Leader (existing project only)."""
 from __future__ import annotations
 
 import json
@@ -13,12 +13,20 @@ from pathlib import Path
 
 MAX_MSG_CHARS = 12000
 DEFAULT_ROOT = Path.home() / ".cursor" / "projects"
+CODEX_ROOTS = (
+    Path.home() / ".codex" / "sessions",
+    Path.home() / ".codex" / "archived_sessions",
+)
 
 
 def load_env() -> tuple[str, Path | None]:
     api = os.environ.get("WOLF_LEADER_API_LOCAL") or os.environ.get("WOLF_LEADER_API") or "http://127.0.0.1:6971"
-    env_file = Path.home() / ".cursor" / "wolf-leader.env"
-    if env_file.is_file():
+    env_files = (
+        Path.home() / ".codex" / "wolf-leader.env",
+        Path.home() / ".cursor" / "wolf-leader.env",
+    )
+    env_file = next((path for path in env_files if path.is_file()), None)
+    if env_file:
         for line in env_file.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line or line.startswith("#") or "=" not in line:
@@ -74,8 +82,17 @@ def parse_transcript(path: Path) -> list[dict[str, str]]:
             entry = json.loads(line)
         except json.JSONDecodeError:
             continue
-        role = entry.get("role")
-        text = extract_text(entry)
+        item = entry
+        if entry.get("type") == "response_item" and isinstance(entry.get("payload"), dict):
+            item = entry["payload"]
+        role = item.get("role")
+        text = extract_text(item)
+        if not text and isinstance(item.get("content"), list):
+            text = "\n".join(
+                block.get("text", "")
+                for block in item["content"]
+                if block.get("type") in ("text", "input_text", "output_text")
+            ).strip()
         if not text:
             continue
         if role == "user":
@@ -101,7 +118,13 @@ def find_transcript(
     *,
     root_hint: Path | None = None,
 ) -> tuple[str, Path] | tuple[None, None]:
-    sid = (session_id or os.environ.get("CURSOR_SESSION_ID") or "").strip()
+    sid = (
+        session_id
+        or os.environ.get("CODEX_THREAD_ID")
+        or os.environ.get("CODEX_SESSION_ID")
+        or os.environ.get("CURSOR_SESSION_ID")
+        or ""
+    ).strip()
     roots: list[Path] = []
     if root_hint:
         roots.append(root_hint)
@@ -132,6 +155,21 @@ def find_transcript(
             candidates.sort(reverse=True)
             _, found_sid, path = candidates[0]
             return found_sid, path
+
+    codex_candidates: list[tuple[float, str, Path]] = []
+    for root in CODEX_ROOTS:
+        if not root.is_dir():
+            continue
+        for path in root.rglob("rollout-*.jsonl"):
+            match = re.search(r"([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$", path.stem)
+            found_sid = match.group(1) if match else path.stem
+            if sid and sid not in (found_sid, path.stem) and sid not in path.name:
+                continue
+            codex_candidates.append((path.stat().st_mtime, found_sid, path))
+    if codex_candidates:
+        codex_candidates.sort(reverse=True)
+        _, found_sid, path = codex_candidates[0]
+        return found_sid, path
     return None, None
 
 
@@ -145,7 +183,7 @@ def title_from_messages(messages: list[dict[str, str]]) -> str:
             text = text[:77] + "..."
         if text:
             return text
-    return "Cursor session"
+    return "Agent session"
 
 
 def guess_project_id(api: str, text: str, slug: str | None) -> int | None:
@@ -154,7 +192,7 @@ def guess_project_id(api: str, text: str, slug: str | None) -> int | None:
         for p in projects.get("projects") or []:
             if p.get("slug") == slug:
                 return int(p["id"])
-    workspace = os.environ.get("CURSOR_WORKSPACE") or str(Path.cwd())
+    workspace = os.environ.get("WOLF_LEADER_WORKSPACE") or os.environ.get("CURSOR_WORKSPACE") or str(Path.cwd())
     try:
         result = api_json(
             "POST",
@@ -172,7 +210,7 @@ def guess_project_id(api: str, text: str, slug: str | None) -> int | None:
 
 
 def match_hint(api: str, text: str) -> dict:
-    workspace = os.environ.get("CURSOR_WORKSPACE") or str(Path.cwd())
+    workspace = os.environ.get("WOLF_LEADER_WORKSPACE") or os.environ.get("CURSOR_WORKSPACE") or str(Path.cwd())
     try:
         return api_json(
             "POST",
@@ -209,14 +247,14 @@ def save_via_remote_upload(
 ) -> dict:
     sid, path = find_transcript(session_id, root_hint=root_hint)
     if not path:
-        raise RuntimeError("No local Cursor transcript found under ~/.cursor/projects")
+        raise RuntimeError("No local agent transcript found under ~/.cursor/projects or ~/.codex/sessions")
 
     messages = parse_transcript(path)
     if not messages:
         raise RuntimeError(f"Transcript empty: {path}")
 
     title = title_from_messages(messages)
-    workspace = os.environ.get("CURSOR_WORKSPACE") or str(Path.cwd())
+    workspace = os.environ.get("WOLF_LEADER_WORKSPACE") or os.environ.get("CURSOR_WORKSPACE") or str(Path.cwd())
     text = "\n".join(m.get("content", "") for m in messages)
 
     # Preferred fallback: drive the FULL save pipeline by uploading the parsed
@@ -252,9 +290,9 @@ def save_via_remote_upload(
         {
             "title": title,
             "workspace_path": workspace,
-            "device_name": os.environ.get("WOLF_LEADER_DEVICE") or "cursor-client",
+            "device_name": os.environ.get("WOLF_LEADER_DEVICE") or "agent-client",
             "session_id": sid,
-            "content": f"Synced {len(messages)} messages from local Cursor transcript",
+            "content": f"Synced {len(messages)} messages from local agent transcript",
             "messages": messages,
         },
     )
@@ -296,7 +334,11 @@ def save_via_remote_upload(
 
 def main() -> int:
     slug = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else None
-    session_id = os.environ.get("CURSOR_SESSION_ID")
+    session_id = (
+        os.environ.get("CODEX_THREAD_ID")
+        or os.environ.get("CODEX_SESSION_ID")
+        or os.environ.get("CURSOR_SESSION_ID")
+    )
     api, root_hint = load_env()
 
     try:

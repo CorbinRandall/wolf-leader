@@ -25,7 +25,7 @@ git clone git@github.com:YOU/wolf-leader.git && cd wolf-leader
 
 Open **http://YOUR_HOST:6971** → Setup tab → **Copy setup prompt**. The copied prompt uses the live `IDE_STORAGE_PUBLIC_URL` and `IDE_STORAGE_MCP_URL` from your private `.env`, so you can paste it directly into an AI IDE without replacing placeholders.
 
-The onboarding agent asks each owner to choose a friendly device name, a model policy (economy, balanced, or maximum quality), and whether to keep background checkpoints enabled. Those choices belong in the workspace's private/local `AGENTS.md`, not in the public examples.
+The onboarding agent asks each owner to choose a friendly device name and model policy. Automatic checkpoints are installed by default. Cursor and Codex setup is not complete until `/save`, `/new`, and the save hooks are verified; Codex users must also trust the installed hooks in Settings → Hooks. Those choices belong in the workspace's private/local `AGENTS.md`, not in the public examples.
 
 **Full guide:** [INSTALL.md](INSTALL.md)
 

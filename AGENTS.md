@@ -9,10 +9,10 @@ Use the running hub's Setup tab. **Copy setup prompt** returns an agent prompt c
 During setup:
 
 1. Identify the OS, IDE, configuration-owning machine, and absolute workspace path.
-2. Ask the owner for a friendly device name, a model policy (economy, balanced, or maximum quality), and whether to use automatic background saves.
+2. Ask the owner for a friendly device name and a model policy (economy, balanced, or maximum quality). Install automatic background saves unless the owner explicitly opts out.
 3. Connect the `wolf-leader` MCP server using the exact URL supplied by the hub.
 4. Preserve existing MCP servers, hooks, and client settings.
-5. For Cursor, run the hub-served installer, reload the window, and verify `/save`, `/new`, recall hooks, and save hooks.
+5. For Cursor or Codex, run the matching hub-served installer, reload the client, and verify `/save`, `/new`, recall hooks, and save hooks. Codex hooks must be reviewed and trusted in Settings → Hooks.
 6. Record owner choices in the workspace `AGENTS.md`. Keep private addresses, credentials, usernames, and machine paths out of tracked examples.
 
 ## Every session
@@ -24,5 +24,6 @@ During setup:
 5. Use `/save` or MCP `save_session` for a deliberate final checkpoint.
 
 Automatic saves are best-effort. Cursor clients write the latest result to `~/.cursor/wolf-leader-last-save.json` and failures to `~/.cursor/wolf-leader-autosave-error.log`.
+Codex clients use the equivalent files under `~/.codex/`.
 
 The distributable agent guide is in `examples/AGENTS.md`. The full install guide is `INSTALL.md`.

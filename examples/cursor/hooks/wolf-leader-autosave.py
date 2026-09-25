@@ -5,6 +5,7 @@ import json, os, re, subprocess, sys, urllib.request
 from pathlib import Path
 
 API=(os.environ.get("WOLF_LEADER_API_LOCAL") or os.environ.get("WOLF_LEADER_API") or "http://127.0.0.1:6971").rstrip("/")
+CLIENT_DIR=Path(os.environ.get("WOLF_LEADER_CLIENT_DIR") or (Path.home()/".cursor"))
 
 def call(method, path, body=None, timeout=180):
     data=json.dumps(body).encode() if body is not None else None
@@ -83,12 +84,12 @@ def main():
     result=call("POST","/api/save-project",{"session_id":sid,"slug":slug,"workspace_path":cwd,"title":title,
         "content":f"Automatic checkpoint with {len(messages)} messages.","messages":messages,
         "occurred_at":messages[0].get("created_at")})
-    Path.home().joinpath(".cursor/wolf-leader-last-save.json").write_text(json.dumps(result,indent=2))
+    CLIENT_DIR.joinpath("wolf-leader-last-save.json").write_text(json.dumps(result,indent=2))
     print('{"continue":true}')
 
 if __name__=="__main__":
     try: main()
     except Exception as exc:
-        try: Path.home().joinpath(".cursor/wolf-leader-autosave-error.log").write_text(str(exc))
+        try: CLIENT_DIR.joinpath("wolf-leader-autosave-error.log").write_text(str(exc))
         except Exception: pass
         print('{"continue":true}')

@@ -12,6 +12,7 @@ elif [[ -f "${HOME}/.cursor/lib/wolf-leader-client.sh" ]]; then
 fi
 
 CURSOR_DIR="${CURSOR_DIR:-$HOME/.cursor}"
+AGENT_SKILLS_DIR="${AGENT_SKILLS_DIR:-$HOME/.agents/skills}"
 FAIL=0
 WARN=0
 
@@ -38,6 +39,9 @@ check "save curl fallback" "$CURSOR_DIR/skills/save/scripts/save-session-curl.sh
 check "new skill" "$CURSOR_DIR/skills/new/SKILL.md"
 check "new project script" "$CURSOR_DIR/skills/new/scripts/new-project-session.sh"
 check "new curl fallback" "$CURSOR_DIR/skills/new/scripts/new-project-session-curl.sh"
+check "portable save skill" "$AGENT_SKILLS_DIR/save/SKILL.md"
+check "portable save runner" "$AGENT_SKILLS_DIR/save/scripts/save-session.sh"
+check "portable new skill" "$AGENT_SKILLS_DIR/new/SKILL.md"
 check "recall hook" "$CURSOR_DIR/hooks/wolf-leader-recall.sh"
 check "save hook" "$CURSOR_DIR/hooks/wolf-leader-save.sh"
 check "hub rule" "$CURSOR_DIR/rules/wolf-leader-hub.mdc"

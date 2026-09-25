@@ -56,8 +56,9 @@ No git clone on the client — the hub serves the install bundle.
 | 1 | Open http://YOUR_HOST:6971/?tab=setup |
 | 2 | Click **Copy setup prompt** and paste into Cursor, Claude Code, Gemini, or any MCP-capable agent |
 | 3 | Agent fetches setup instructions, identifies IDE and workspace, connects MCP, and verifies hub health |
-| 4 | For Cursor, install adds `/save`, `/new`, session-start recall, automatic saves after responses and on stop, and the Wolf Leader rule; reload Cursor and verify |
-| 5 | Choose a model policy (economy, balanced, or maximum quality), checkpoint policy, and friendly device name; the agent records them in the workspace `AGENTS.md` |
+| 4 | For Cursor or Codex, install the matching client integration. It adds `/save`, `/new`, recall, and automatic saving. Reload and run the verifier |
+| 5 | In Codex, review and trust the three Wolf Leader hooks in Settings → Hooks; untrusted hooks do not run |
+| 6 | Complete one test checkpoint and confirm it reached the hub before reporting setup complete |
 
 API:
 
@@ -70,6 +71,7 @@ One-liner (Cursor — set `WORKSPACE` to your project root):
 ```bash
 WOLF_LEADER_API=http://YOUR_HOST:6971 \
 WOLF_LEADER_MCP=http://YOUR_HOST:6972/mcp \
+WOLF_LEADER_CLIENT=cursor \
 WORKSPACE="$PWD" \
   bash -c "$(curl -fsSL http://YOUR_HOST:6971/api/client-setup/install.sh)"
 ```
@@ -87,10 +89,11 @@ Connect this workspace to Wolf Leader and finish setup.
 2. Identify OS, IDE, config-owning machine, and absolute workspace path; preserve existing client configuration
 3. Add MCP `wolf-leader` → `http://YOUR_HOST:6972/mcp`
 4. Import agent transcripts not yet in the hub
-5. For Cursor, run the hub installer and reload; verify skills and recall/autosave hooks
+5. For Cursor or Codex, run the hub installer with WOLF_LEADER_CLIENT set correctly, reload, and verify skills and hooks
 6. Place AGENTS.md in workspace root (copy from hub data/AGENTS.md)
 7. Call resolve_project + recall before project work
-8. Use `/save` after meaningful work; the Cursor hook also checkpoints meaningful transcript updates
+8. In Codex, trust the Wolf Leader hooks in Settings → Hooks
+9. Complete a test save and confirm it appears in the hub
 ```
 
 ### MCP tools
@@ -155,27 +158,30 @@ On the **machine where the hub runs**, MCP can use `http://127.0.0.1:6972/mcp`. 
 
 ---
 
-## Phase 2 — Cursor client (recommended)
+## Phase 2 — Cursor or Codex client
 
 Install skills, MCP, hooks, and rules in one step from a wolf-leader checkout:
 
 ```bash
 WOLF_LEADER_API=http://YOUR_HOST:6971 \
 WOLF_LEADER_MCP=http://YOUR_HOST:6972/mcp \
-./scripts/install-cursor-client.sh
+WOLF_LEADER_CLIENT=cursor \
+  bash -c "$(curl -fsSL http://YOUR_HOST:6971/api/client-setup/install.sh)"
 
-./scripts/verify-cursor-client.sh
+# For Codex, use WOLF_LEADER_CLIENT=codex instead.
 ```
 
-This installs:
+This installs and verifies:
 
-- **`/save` skill** → `~/.cursor/skills/save/` (reload Cursor window after install)
+- **`/save` and `/new` skills** → the client skill directory
 - **MCP** → `~/.cursor/mcp.json` (`wolf-leader` server)
-- **Hooks** — `sessionStart`/`beforeSubmitPrompt` recall + automatic saves after responses and on stop
+- **Hooks** — session/prompt recall plus automatic saves when a turn stops
 - **Rule** — `wolf-leader-hub.mdc` (recall / remember / save)
 - **`AGENTS.md`** symlink in workspace root (optional `WORKSPACE=/root`)
 
-Source files live in `examples/cursor/`. See INSTALL.md for details.
+Source files live in `examples/cursor/` with the Codex hook template in `examples/codex/`. See INSTALL.md for details.
+
+Codex requires a one-time trust review after files are installed. Reload Codex, open **Settings → Hooks**, and trust all three Wolf Leader hooks. Then rerun `scripts/verify-codex-client.sh`. Do not call setup complete until the verifier passes and a test checkpoint is visible in Wolf Leader.
 
 ---
 

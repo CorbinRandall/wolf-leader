@@ -155,9 +155,11 @@ git clone https://github.com/YOUR_GITHUB_USER/wolf-leader.git
 cd wolf-leader
 WOLF_LEADER_API=http://YOUR_HOST:6971 \
 WOLF_LEADER_MCP=http://YOUR_HOST:6972/mcp \
-./scripts/install-cursor-client.sh
-./scripts/verify-cursor-client.sh
+WOLF_LEADER_CLIENT=cursor \
+  bash -c "$(curl -fsSL http://YOUR_HOST:6971/api/client-setup/install.sh)"
 ```
+
+Use `WOLF_LEADER_CLIENT=codex` for Codex. The hub bundle contains separate installers and verifiers because Codex and Cursor use different skill locations and hook schemas.
 
 This installs into `~/.cursor/`:
 
@@ -170,6 +172,8 @@ This installs into `~/.cursor/`:
 | Hub URLs | `wolf-leader.env` |
 
 Reload the Cursor window so `/save` and `/new` appear in the `/` menu. The session-start hook recalls project context; the stop hook checkpoints meaningful transcript updates after responses and on stop. Automatic saves are best-effort; check `~/.cursor/wolf-leader-last-save.json` for the latest result and `~/.cursor/wolf-leader-autosave-error.log` for failures. Use `/save` for a deliberate final checkpoint. During onboarding, choose an economy, balanced, or maximum-quality model policy and record it in the workspace `AGENTS.md`.
+
+For Codex, reload the app, open **Settings → Hooks**, and trust the installed `SessionStart`, `UserPromptSubmit`, and `Stop` hooks. Codex skips untrusted hooks. Rerun `scripts/verify-codex-client.sh`, then complete one test save and confirm it appears in the hub. Setup is incomplete until those checks pass.
 
 **Manual / partial setup:**
 

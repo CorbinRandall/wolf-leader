@@ -1,7 +1,11 @@
 """Tests for universal client setup API."""
+import io
+import tarfile
+
 from ide_storage.client_setup import (
     LEGACY_PROFILE_IDS,
     build_agent_prompt,
+    build_client_bundle,
     client_setup_payload,
 )
 
@@ -25,12 +29,14 @@ def test_agent_prompt_covers_mcp_and_cursor():
     assert "WORKSPACE" in prompt
 
 
-def test_agent_prompt_explains_current_cursor_workflow():
+def test_agent_prompt_requires_verified_save_and_autosave_setup():
     prompt = build_agent_prompt()
     assert "model policy: economy, balanced, or maximum quality" in prompt
-    assert "checkpoint policy" in prompt
+    assert "Automatic background saves are part of standard setup" in prompt
+    assert "WOLF_LEADER_CLIENT=<cursor-or-codex>" in prompt
     assert "automatic save hook" in prompt
-    assert "wolf-leader-last-save.json" in prompt
+    assert "trust all three Wolf Leader hooks" in prompt
+    assert "one test checkpoint reaches the hub" in prompt
     assert "deliberate final checkpoint" in prompt
 
 
@@ -59,3 +65,12 @@ def test_legacy_profiles_still_resolve():
         assert payload["legacy_profile"] == legacy_id
         assert payload["id"] == "universal"
         assert "deprecated" in payload
+
+
+def test_client_bundle_contains_cursor_and_codex_installers():
+    with tarfile.open(fileobj=io.BytesIO(build_client_bundle()), mode="r:gz") as archive:
+        names = set(archive.getnames())
+    assert "scripts/install-cursor-client.sh" in names
+    assert "scripts/install-codex-client.sh" in names
+    assert "scripts/verify-codex-client.sh" in names
+    assert "examples/codex/hooks.json.template" in names

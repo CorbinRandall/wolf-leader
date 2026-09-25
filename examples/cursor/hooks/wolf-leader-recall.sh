@@ -2,13 +2,15 @@
 # sessionStart: inject Wolf Leader bootstrap context for the workspace.
 set -euo pipefail
 
-ENV_FILE="${HOME}/.cursor/wolf-leader.env"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CLIENT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ENV_FILE="${CLIENT_DIR}/wolf-leader.env"
 if [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   source "$ENV_FILE"
 fi
 
-LIB="${HOME}/.cursor/lib/wolf-leader-client.sh"
+LIB="${CLIENT_DIR}/lib/wolf-leader-client.sh"
 if [[ -f "$LIB" ]]; then
   # shellcheck source=/dev/null
   source "$LIB"

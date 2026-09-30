@@ -491,7 +491,7 @@ function projectMatchesKanbanSearch(project) {
 function renderKanbanCard(project) {
   const status = kanbanStatus(project.status);
   const options = state.kanbanColumns.map((column) =>
-    `<option value="${column.status}"${column.status === status ? " selected" : ""}>${column.label}</option>`
+    `<option value="${escapeHtml(column.status)}"${column.status === status ? " selected" : ""}>${escapeHtml(column.label)}</option>`
   ).join("");
   return `
     <article class="kanban-card" draggable="true" data-kanban-project="${project.id}">
@@ -528,6 +528,52 @@ function bindKanbanEvents() {
     });
   });
 
+  $$('[data-column-drag-handle]').forEach((handle) => {
+    let dragging = false;
+    const sourceStatus = handle.dataset.columnDragHandle;
+    const clearDrag = () => $$(".kanban-column").forEach((column) =>
+      column.classList.remove("column-dragging", "column-drop-before", "column-drop-after")
+    );
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      dragging = true;
+      handle.setPointerCapture(event.pointerId);
+      handle.closest(".kanban-column").classList.add("column-dragging");
+    });
+    handle.addEventListener("pointermove", (event) => {
+      if (!dragging) return;
+      const board = $("#kanban-board");
+      const bounds = board.getBoundingClientRect();
+      if (event.clientX > bounds.right - 35) board.scrollLeft += 15;
+      if (event.clientX < bounds.left + 35) board.scrollLeft -= 15;
+      clearDrag();
+      handle.closest(".kanban-column").classList.add("column-dragging");
+      const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(".kanban-column");
+      if (target && target.dataset.kanbanStatus !== sourceStatus) {
+        const before = event.clientX < target.getBoundingClientRect().left + target.offsetWidth / 2;
+        target.classList.add(before ? "column-drop-before" : "column-drop-after");
+      }
+    });
+    handle.addEventListener("pointerup", (event) => {
+      if (!dragging) return;
+      dragging = false;
+      const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(".kanban-column");
+      clearDrag();
+      if (target && target.dataset.kanbanStatus !== sourceStatus) {
+        const before = event.clientX < target.getBoundingClientRect().left + target.offsetWidth / 2;
+        reorderKanbanColumn(sourceStatus, target.dataset.kanbanStatus, before);
+      }
+    });
+    handle.addEventListener("pointercancel", () => { dragging = false; clearDrag(); });
+    handle.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+      event.preventDefault();
+      const index = state.kanbanColumns.findIndex((column) => column.status === sourceStatus);
+      const neighbor = state.kanbanColumns[index + (event.key === "ArrowLeft" ? -1 : 1)];
+      if (neighbor) reorderKanbanColumn(sourceStatus, neighbor.status, event.key === "ArrowLeft");
+    });
+  });
+
   $$("[data-kanban-status]").forEach((column) => {
     column.addEventListener("dragover", (event) => {
       event.preventDefault();
@@ -535,11 +581,11 @@ function bindKanbanEvents() {
       column.classList.add("drop-target");
     });
     column.addEventListener("dragleave", (event) => {
-      if (!column.contains(event.relatedTarget)) column.classList.remove("drop-target");
+      if (!column.contains(event.relatedTarget)) column.classList.remove("drop-target", "column-drop-target");
     });
     column.addEventListener("drop", async (event) => {
       event.preventDefault();
-      column.classList.remove("drop-target");
+      column.classList.remove("drop-target", "column-drop-target");
       const projectId = Number(event.dataTransfer.getData("text/plain"));
       if (projectId) await moveProject(projectId, column.dataset.kanbanStatus);
     });
@@ -549,6 +595,51 @@ function bindKanbanEvents() {
     select.addEventListener("click", (event) => event.stopPropagation());
     select.addEventListener("change", async () => moveProject(+select.dataset.kanbanSelect, select.value));
   });
+}
+
+async function reorderKanbanColumn(sourceStatus, targetStatus, before = true) {
+  if (!sourceStatus || sourceStatus === targetStatus) return;
+  const previous = [...state.kanbanColumns];
+  const moving = previous.find((column) => column.status === sourceStatus);
+  if (!moving) return;
+  const ordered = previous.filter((column) => column.status !== sourceStatus);
+  const targetIndex = ordered.findIndex((column) => column.status === targetStatus);
+  if (targetIndex < 0) return;
+  ordered.splice(targetIndex + (before ? 0 : 1), 0, moving);
+  const scrollLeft = $("#kanban-board").scrollLeft;
+  state.kanbanColumns = ordered;
+  renderKanban();
+  $("#kanban-board").scrollLeft = scrollLeft;
+  try {
+    const data = await api("/api/kanban/columns-order", { method: "PUT", body: JSON.stringify({ statuses: ordered.map((column) => column.status) }) });
+    state.kanbanColumns = data.columns;
+    showToast("Column order saved");
+  } catch (error) {
+    state.kanbanColumns = previous; renderKanban(); showToast(`Could not reorder columns: ${error.message}`);
+  }
+}
+
+function beginInlineColumnRename(status) {
+  const title = document.querySelector(`[data-column-title="${CSS.escape(status)}"]`);
+  const column = state.kanbanColumns.find((item) => item.status === status);
+  if (!title || !column) return;
+  const input = document.createElement("input");
+  input.className = "kanban-title-input";
+  input.value = column.label;
+  title.replaceWith(input);
+  input.focus(); input.select();
+  let finished = false;
+  const finish = async (save) => {
+    if (finished) return; finished = true;
+    const label = input.value.trim();
+    if (!save || !label || label === column.label) return renderKanban();
+    try {
+      const data = await api(`/api/kanban/columns/${status}`, { method: "PUT", body: JSON.stringify({ label }) });
+      state.kanbanColumns = data.columns; renderKanban(); showToast("Column renamed");
+    } catch (error) { renderKanban(); showToast(`Could not rename column: ${error.message}`); }
+  };
+  input.addEventListener("keydown", (event) => { if (event.key === "Enter") finish(true); if (event.key === "Escape") finish(false); });
+  input.addEventListener("blur", () => finish(true));
 }
 
 function renderKanban() {
@@ -561,10 +652,10 @@ function renderKanban() {
       <section class="kanban-column" data-kanban-status="${column.status}" aria-labelledby="kanban-${column.status}">
         <header class="kanban-column-header">
           <div>
-            <h3 id="kanban-${column.status}">${column.label}</h3>
-            <p>${column.description}</p>
+            <div class="kanban-title-line"><button type="button" class="column-drag-handle" data-column-drag-handle="${column.status}" aria-label="Drag ${escapeHtml(column.label)} column" title="Drag to reorder, or use left/right arrow keys"><span></span><span></span></button><h3 id="kanban-${column.status}"><button type="button" class="kanban-column-title" data-column-title="${column.status}" title="Double-click to rename">${escapeHtml(column.label)}</button></h3></div>
+            <p>${escapeHtml(column.description || "")}</p>
           </div>
-          <div class="kanban-column-actions"><span class="kanban-count" aria-label="${items.length} projects">${items.length}</span><button type="button" class="btn-link" data-edit-column="${column.status}">Edit</button><button type="button" class="btn-link danger-link" data-delete-column="${column.status}">Delete</button></div>
+          <div class="kanban-column-actions"><span class="kanban-count" aria-label="${items.length} projects">${items.length}</span><button type="button" class="btn-link danger-link" data-delete-column="${column.status}">Delete</button></div>
         </header>
         <div class="kanban-card-list">
           ${items.length ? items.map(renderKanbanCard).join("") : `<p class="kanban-empty">Drop a project here</p>`}
@@ -572,18 +663,36 @@ function renderKanban() {
       </section>`;
   }).join("");
   bindKanbanEvents();
-  $$('[data-edit-column]').forEach((button) => button.addEventListener("click", async () => {
-    const column = state.kanbanColumns.find((item) => item.status === button.dataset.editColumn);
-    const label = prompt("Column name", column.label); if (label === null) return;
-    const description = prompt("Short description", column.description || ""); if (description === null) return;
-    const data = await api(`/api/kanban/columns/${column.status}`, { method: "PUT", body: JSON.stringify({ label, description }) }); state.kanbanColumns = data.columns; renderKanban();
-  }));
+  $$('[data-column-title]').forEach((button) => button.addEventListener("dblclick", () => beginInlineColumnRename(button.dataset.columnTitle)));
   $$('[data-delete-column]').forEach((button) => button.addEventListener("click", async () => {
     const column = state.kanbanColumns.find((item) => item.status === button.dataset.deleteColumn);
     if (state.kanbanColumns.length === 1) return showToast("Keep at least one column");
-    const moveTo = state.kanbanColumns.find((item) => item.status !== column.status)?.status;
-    if (!confirm(`Delete ${column.label}? Its projects move to ${kanbanStatusLabel(moveTo)}.`)) return;
-    const data = await api(`/api/kanban/columns/${column.status}?move_to=${encodeURIComponent(moveTo)}`, { method: "DELETE" }); state.kanbanColumns = data.columns; await loadData();
+    const section = button.closest(".kanban-column");
+    if (section.querySelector(".kanban-delete-confirm")) return;
+    const form = document.createElement("form");
+    form.className = "kanban-delete-confirm";
+    form.innerHTML = `<p>Delete ${escapeHtml(column.label)}? Projects will be kept.</p>
+      <label>Move projects to<select name="move_to">${state.kanbanColumns.filter((item) => item.status !== column.status).map((item) => `<option value="${escapeHtml(item.status)}">${escapeHtml(item.label)}</option>`).join("")}</select></label>
+      <div class="kanban-delete-actions"><button type="button" class="btn btn-secondary">Cancel</button><button type="submit" class="btn btn-danger">Delete column</button></div>
+      <p role="alert"></p>`;
+    section.querySelector(".kanban-column-header").after(form);
+    form.querySelector('[type="button"]').addEventListener("click", () => { form.remove(); button.focus(); });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const submit = form.querySelector('[type="submit"]');
+      submit.disabled = true;
+      try {
+        const moveTo = form.elements.move_to.value;
+        const data = await api(`/api/kanban/columns/${column.status}?move_to=${encodeURIComponent(moveTo)}`, { method: "DELETE" });
+        state.kanbanColumns = data.columns;
+        await loadData();
+        showToast("Column deleted; projects kept");
+      } catch (error) {
+        form.querySelector('[role="alert"]').textContent = `Could not delete column: ${error.message}`;
+        submit.disabled = false;
+      }
+    });
+    form.querySelector("select").focus();
   }));
 }
 
@@ -1084,11 +1193,19 @@ $("#copy-onboarding-url-btn").addEventListener("click", async () => {
 });
 
 $$(".tab").forEach((t) => t.addEventListener("click", () => switchTab(t.dataset.tab)));
-$("#add-kanban-column-btn").addEventListener("click", () => { $("#add-kanban-column-form").classList.toggle("hidden"); $("#kanban-column-name").focus(); });
+$("#add-kanban-column-btn").addEventListener("click", () => {
+  const form = $("#add-kanban-column-form");
+  const opening = form.classList.contains("hidden");
+  form.classList.toggle("hidden", !opening);
+  $("#add-kanban-column-btn").setAttribute("aria-expanded", String(opening));
+  if (opening) $("#kanban-column-name").focus();
+});
 $("#add-kanban-column-form").addEventListener("submit", async (event) => {
-  event.preventDefault(); const label = $("#kanban-column-name").value.trim(); if (!label) return;
-  const data = await api("/api/kanban/columns", { method: "POST", body: JSON.stringify({ label, description: $("#kanban-column-description").value.trim() }) });
-  state.kanbanColumns = data.columns; event.currentTarget.reset(); event.currentTarget.classList.add("hidden"); renderKanban();
+  event.preventDefault(); const form = event.currentTarget; const label = $("#kanban-column-name").value.trim(); if (!label) return;
+  try {
+    const data = await api("/api/kanban/columns", { method: "POST", body: JSON.stringify({ label, description: $("#kanban-column-description").value.trim() }) });
+    state.kanbanColumns = data.columns; form.reset(); form.classList.add("hidden"); $("#add-kanban-column-btn").setAttribute("aria-expanded", "false"); renderKanban(); showToast(`${label} column added`);
+  } catch (error) { showToast(`Could not add column: ${error.message}`); }
 });
 function searchKindsForTab(tab) {
   if (tab === "projects" || tab === "kanban") return "project";

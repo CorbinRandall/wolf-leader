@@ -10,7 +10,9 @@ HEALTH_URL="${WOLF_LEADER_PHONE_HEALTH_URL:-http://127.0.0.1:6971/health}"
 
 fail() { echo "Phone update failed: $*" >&2; exit 1; }
 
-[[ -x "$APP_DIR/.venv/bin/python" ]] || fail "missing Python environment at $APP_DIR/.venv"
+# Debian's interpreter symlink is intentionally resolved inside PRoot. Termux
+# itself may report that link as non-executable even though the venv is healthy.
+[[ -e "$APP_DIR/.venv/bin/python" || -L "$APP_DIR/.venv/bin/python" ]] || fail "missing Python environment at $APP_DIR/.venv"
 command -v proot-distro >/dev/null 2>&1 || fail "proot-distro is required for the phone runtime"
 command -v sv >/dev/null 2>&1 || fail "runit (sv) is required for the phone runtime"
 [[ -d "$SERVICE_DIR" ]] || fail "service directory not found: $SERVICE_DIR"

@@ -115,6 +115,28 @@ Requires Python 3.11+ (uses [`uv`](https://github.com/astral-sh/uv) if present, 
 `python3 -m venv`). Binds to `127.0.0.1` by default; override `HOST` / `MCP_HOST` /
 `IDE_STORAGE_PUBLIC_URL` / `IDE_STORAGE_MCP_URL` to expose on a LAN or Tailscale.
 
+### Android phone (Termux + Debian PRoot)
+
+For a phone-hosted hub, run the one-time migration after the native service and
+its `.env`, `data`, and `.venv` already exist:
+
+```bash
+ssh moto 'bash ~/apps/wolf-leader/scripts/deploy-phone.sh main'
+```
+
+It converts a copied installation into a Git checkout without touching the
+database or private settings, saves the old folder as a recovery backup, and
+installs a post-pull hook. From then on, production updates are simply:
+
+```bash
+ssh moto 'cd ~/apps/wolf-leader && git pull --ff-only origin main'
+```
+
+That pull refreshes lean runtime dependencies, restarts the supervised service,
+and waits for its local health check. Set `WOLF_LEADER_PHONE_DIR`,
+`WOLF_LEADER_PHONE_SERVICE_DIR`, or `WOLF_LEADER_PHONE_REPO` when your Termux
+layout differs from the defaults.
+
 ## Environment variables
 
 See [`.env.example`](.env.example). Minimum:

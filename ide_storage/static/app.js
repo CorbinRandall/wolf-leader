@@ -1,13 +1,14 @@
 const API = window.location.origin;
 
-const KANBAN_COLUMNS = [
+const DEFAULT_KANBAN_COLUMNS = [
   { status: "backlog", label: "Backlog", description: "Ideas and work waiting to start" },
   { status: "in_progress", label: "In progress", description: "Projects currently being worked on" },
   { status: "done", label: "Done for now", description: "Completed or paused indefinitely" },
 ];
 
 let state = {
-  tab: "projects",
+  tab: "kanban",
+  kanbanColumns: DEFAULT_KANBAN_COLUMNS,
   chats: [],
   archivedChats: [],
   projects: [],
@@ -55,13 +56,14 @@ function chatTitle(c) {
 }
 
 function kanbanStatus(status) {
-  if (status === "backlog") return "backlog";
-  if (status === "done" || status === "archived") return "done";
-  return "in_progress";
+  if (state.kanbanColumns.some((column) => column.status === status)) return status;
+  if (status === "done" || status === "archived") return state.kanbanColumns.find((column) => column.status === "done")?.status || state.kanbanColumns[0]?.status;
+  if (status === "backlog") return state.kanbanColumns.find((column) => column.status === "backlog")?.status || state.kanbanColumns[0]?.status;
+  return state.kanbanColumns.find((column) => column.status === "in_progress")?.status || state.kanbanColumns[0]?.status;
 }
 
 function kanbanStatusLabel(status) {
-  return KANBAN_COLUMNS.find((column) => column.status === kanbanStatus(status))?.label || "In progress";
+  return state.kanbanColumns.find((column) => column.status === kanbanStatus(status))?.label || "In progress";
 }
 
 function showToast(msg) {
@@ -127,6 +129,7 @@ function switchTab(tab) {
   else if (tab === "setup") showSetup();
   else if (tab === "kanban") showKanban();
   else if (tab === "skills") showSkills();
+  else if (tab === "projects") showProjects();
 }
 
 async function runGlobalSearch(q) {
@@ -309,17 +312,31 @@ function renderSidebar() {
 }
 
 async function loadData() {
-  const [chats, archived, projects] = await Promise.all([
+  const [chats, archived, projects, kanban] = await Promise.all([
     api("/api/chats?limit=500"),
     api("/api/chats?limit=500&include_archived=true&status=archived"),
     api("/api/projects?limit=200"),
+    api("/api/kanban/columns"),
   ]);
   state.chats = chats.chats || [];
   state.archivedChats = archived.chats || [];
   state.projects = projects.projects || [];
+  state.kanbanColumns = kanban.columns || DEFAULT_KANBAN_COLUMNS;
   renderSidebar();
   if (state.tab === "kanban") renderKanban();
+  if (state.tab === "projects") renderProjects();
 }
+
+function renderProjects() {
+  const list = $("#projects-list");
+  if (!list) return;
+  const q = ($("#search").value || "").toLowerCase().trim();
+  const projects = state.projects.filter((p) => !q || [p.name, p.description, p.slug].filter(Boolean).join(" ").toLowerCase().includes(q));
+  list.innerHTML = projects.map((p) => `<button class="project-row" type="button" data-project-row="${p.id}"><span><strong>${escapeHtml(p.name)}</strong><small>${escapeHtml(p.description || "No description yet.")}</small></span><em>${escapeHtml(kanbanStatusLabel(p.status))}</em></button>`).join("") || `<p class="muted">No projects found.</p>`;
+  $$('[data-project-row]').forEach((button) => button.addEventListener("click", () => selectProject(+button.dataset.projectRow)));
+}
+
+function showProjects() { hideViews(); $("#projects-view").classList.remove("hidden"); renderProjects(); setUrl({ tab: "projects" }); }
 
 // --- Home ---
 async function showHome() {
@@ -473,7 +490,7 @@ function projectMatchesKanbanSearch(project) {
 
 function renderKanbanCard(project) {
   const status = kanbanStatus(project.status);
-  const options = KANBAN_COLUMNS.map((column) =>
+  const options = state.kanbanColumns.map((column) =>
     `<option value="${column.status}"${column.status === status ? " selected" : ""}>${column.label}</option>`
   ).join("");
   return `
@@ -538,7 +555,7 @@ function renderKanban() {
   const board = $("#kanban-board");
   if (!board) return;
   const projects = state.projects.filter(projectMatchesKanbanSearch);
-  board.innerHTML = KANBAN_COLUMNS.map((column) => {
+  board.innerHTML = state.kanbanColumns.map((column) => {
     const items = projects.filter((project) => kanbanStatus(project.status) === column.status);
     return `
       <section class="kanban-column" data-kanban-status="${column.status}" aria-labelledby="kanban-${column.status}">
@@ -547,7 +564,7 @@ function renderKanban() {
             <h3 id="kanban-${column.status}">${column.label}</h3>
             <p>${column.description}</p>
           </div>
-          <span class="kanban-count" aria-label="${items.length} projects">${items.length}</span>
+          <div class="kanban-column-actions"><span class="kanban-count" aria-label="${items.length} projects">${items.length}</span><button type="button" class="btn-link" data-edit-column="${column.status}">Edit</button><button type="button" class="btn-link danger-link" data-delete-column="${column.status}">Delete</button></div>
         </header>
         <div class="kanban-card-list">
           ${items.length ? items.map(renderKanbanCard).join("") : `<p class="kanban-empty">Drop a project here</p>`}
@@ -555,6 +572,19 @@ function renderKanban() {
       </section>`;
   }).join("");
   bindKanbanEvents();
+  $$('[data-edit-column]').forEach((button) => button.addEventListener("click", async () => {
+    const column = state.kanbanColumns.find((item) => item.status === button.dataset.editColumn);
+    const label = prompt("Column name", column.label); if (label === null) return;
+    const description = prompt("Short description", column.description || ""); if (description === null) return;
+    const data = await api(`/api/kanban/columns/${column.status}`, { method: "PUT", body: JSON.stringify({ label, description }) }); state.kanbanColumns = data.columns; renderKanban();
+  }));
+  $$('[data-delete-column]').forEach((button) => button.addEventListener("click", async () => {
+    const column = state.kanbanColumns.find((item) => item.status === button.dataset.deleteColumn);
+    if (state.kanbanColumns.length === 1) return showToast("Keep at least one column");
+    const moveTo = state.kanbanColumns.find((item) => item.status !== column.status)?.status;
+    if (!confirm(`Delete ${column.label}? Its projects move to ${kanbanStatusLabel(moveTo)}.`)) return;
+    const data = await api(`/api/kanban/columns/${column.status}?move_to=${encodeURIComponent(moveTo)}`, { method: "DELETE" }); state.kanbanColumns = data.columns; await loadData();
+  }));
 }
 
 function showKanban() {
@@ -1054,6 +1084,12 @@ $("#copy-onboarding-url-btn").addEventListener("click", async () => {
 });
 
 $$(".tab").forEach((t) => t.addEventListener("click", () => switchTab(t.dataset.tab)));
+$("#add-kanban-column-btn").addEventListener("click", () => { $("#add-kanban-column-form").classList.toggle("hidden"); $("#kanban-column-name").focus(); });
+$("#add-kanban-column-form").addEventListener("submit", async (event) => {
+  event.preventDefault(); const label = $("#kanban-column-name").value.trim(); if (!label) return;
+  const data = await api("/api/kanban/columns", { method: "POST", body: JSON.stringify({ label, description: $("#kanban-column-description").value.trim() }) });
+  state.kanbanColumns = data.columns; event.currentTarget.reset(); event.currentTarget.classList.add("hidden"); renderKanban();
+});
 function searchKindsForTab(tab) {
   if (tab === "projects" || tab === "kanban") return "project";
   if (tab === "archive") return "memory,chat,message";
@@ -1104,17 +1140,13 @@ $("#search").addEventListener("keydown", (e) => {
     switchTab("projects");
     await selectProject(+params.get("project"));
   } else {
-    const tab = params.get("tab") || "projects";
+    const tab = params.get("tab") || "kanban";
     switchTab(tab);
     if (state.tab === "home") showHome();
     else if (state.tab === "setup") showSetup();
     else if (state.tab === "kanban") showKanban();
     else if (state.tab === "skills") showSkills();
-    else if (state.tab === "projects") {
-      hideViews();
-      $("#empty-state").classList.remove("hidden");
-      $("#empty-state").querySelector("p").textContent =
-        "Select a project — agent brief and memories are the canonical context.";
-    } else hideViews(), $("#empty-state").classList.remove("hidden");
+    else if (state.tab === "projects") showProjects();
+    else hideViews(), $("#empty-state").classList.remove("hidden");
   }
 })();

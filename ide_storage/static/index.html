@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/styles.css?v=skills-library-2" />
+  <link rel="stylesheet" href="/static/styles.css?v=workspace-tabs-1" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
@@ -72,8 +72,15 @@
             <h2>Project board</h2>
             <p class="setup-lead">Drag projects between columns to update their status.</p>
           </div>
+          <button type="button" id="add-kanban-column-btn" class="btn btn-secondary">Add column</button>
         </header>
+        <form id="add-kanban-column-form" class="kanban-add-form hidden"><input id="kanban-column-name" placeholder="Column name" required /><input id="kanban-column-description" placeholder="Short description (optional)" /><button class="btn btn-primary">Add</button></form>
         <div id="kanban-board" class="kanban-board" aria-label="Project status board"></div>
+      </div>
+
+      <div id="projects-view" class="view projects-view hidden">
+        <header class="view-header"><div><h2>Projects</h2><p class="setup-lead">A quick, readable index of every project.</p></div></header>
+        <div id="projects-list" class="projects-list"></div>
       </div>
 
       <div id="skills-view" class="view skills-view hidden">
@@ -193,6 +200,6 @@
   </dialog>
 
   <div id="toast" class="toast hidden"></div>
-  <script src="/static/app.js?v=skills-library-2"></script>
+  <script src="/static/app.js?v=workspace-tabs-1"></script>
 </body>
 </html>

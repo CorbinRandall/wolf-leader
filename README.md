@@ -10,6 +10,8 @@ Runs on **any Docker host**: Raspberry Pi, Windows, Linux, macOS, Unraid, cloud 
 ## Features
 
 - **Web UI** — browse projects, memories, archived sessions; copy agent prompts
+- **Kanban + cleanup** — move projects between backlog, in progress, and done; review and merge duplicate records
+- **Skills library** — browse, download, and share complete portable user skills across IDEs
 - **MCP server** — `set_project`, `recall`, `remember`, `get_brief`, `save_session`, …
 - **Typed checkpoints** — `SPEC.yaml` + `AGENT_BRIEF.md` per project with handoff tiers (`continue` / `orient` / `rebuild`)
 - **Continue modes** — compose deploy/maintain, server daemons, client setup, integration, investigation
@@ -53,6 +55,16 @@ The onboarding agent asks each owner to choose a friendly device name and model 
 3. **Checkpoint** — type `/save` or MCP `save_session`
 
 Copy `data/AGENTS.md` into workspace roots after first run (see `examples/AGENTS.md`).
+
+## Skills library
+
+The Skills tab stores complete personal skill folders, including `SKILL.md` and any supporting scripts, references, assets, or agent metadata. Publish the portable user skills found on a workstation with:
+
+```bash
+python scripts/sync-skills-to-hub.py --hub http://YOUR_HOST:6971
+```
+
+Use **Copy install prompt** in the Skills tab to hand another IDE or agent the exact download and installation steps. Use **Copy publish prompt** to tell an IDE how to package and send one of its personal skills back to Wolf Leader, or use **Download all** for a ZIP containing every published skill. System and plugin-provided skills are intentionally left with their provider.
 
 ## Compose layouts
 

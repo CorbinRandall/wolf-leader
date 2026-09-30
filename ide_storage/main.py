@@ -143,6 +143,17 @@ class ProjectUpdate(BaseModel):
     tags: Optional[List[str]] = None
 
 
+class ProjectMerge(BaseModel):
+    target_id: int
+    source_ids: List[int]
+
+
+class SkillImport(BaseModel):
+    name: str
+    archive_base64: str
+    overwrite: bool = False
+
+
 class ProjectMdUpdate(BaseModel):
     content: str
 
@@ -918,6 +929,42 @@ async def list_projects(
         return {"projects": projects, "count": len(projects)}
 
 
+@app.get("/api/projects/duplicates")
+async def project_duplicates():
+    """Find conservative exact-normalized duplicate project groups."""
+    from ide_storage.project_duplicates import list_duplicate_projects
+
+    groups = list_duplicate_projects()
+    return {"groups": groups, "count": len(groups)}
+
+
+@app.post("/api/projects/merge")
+async def merge_duplicate_projects(body: ProjectMerge):
+    """Merge duplicate records after the user chooses the canonical project."""
+    from ide_storage.embed_index import delete_project_embeddings, sync_dirty
+    from ide_storage.project_duplicates import merge_projects
+
+    try:
+        report = merge_projects(body.target_id, body.source_ids)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    for project_id in body.source_ids:
+        delete_project_embeddings(project_id)
+
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM projects WHERE id = ?", (body.target_id,))
+        target = dict(cur.fetchone())
+    ensure_project_md_from_db(target)
+    regenerate_index()
+    report["embeddings"] = sync_dirty(project_id=body.target_id)
+    report["message"] = f"Merged {report['removed_count']} duplicate project(s) into {report['target_name']}"
+    return report
+
+
 @app.get("/api/projects/{project_id}")
 async def get_project(project_id: int):
     """Get a specific project by ID."""
@@ -1046,6 +1093,76 @@ async def delete_project(project_id: int):
 
     regenerate_index()
     return {"message": "Project deleted successfully"}
+
+
+# Portable skill library endpoints
+@app.get("/api/skills")
+async def api_list_skills():
+    from ide_storage.runtime_config import runtime_config
+    from ide_storage.skill_registry import install_prompt, list_skills, publish_prompt
+
+    public = runtime_config().public_url
+    skills = list_skills()
+    return {
+        "skills": skills,
+        "count": len(skills),
+        "bundle_url": f"{public}/api/skills/export.zip",
+        "install_prompt": install_prompt(public),
+        "publish_prompt": publish_prompt(public),
+    }
+
+
+@app.get("/api/skills/export.zip")
+async def api_export_skills():
+    from ide_storage.skill_registry import bundle_archive
+
+    return Response(
+        content=bundle_archive(),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="wolf-leader-skills.zip"'},
+    )
+
+
+@app.post("/api/skills/import")
+async def api_import_skill(body: SkillImport):
+    from ide_storage.skill_registry import import_skill
+
+    try:
+        skill = import_skill(body.name, body.archive_base64, body.overwrite)
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=f"Skill already exists: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"skill": skill, "message": f"Imported {skill['name']}"}
+
+
+@app.get("/api/skills/{skill_name}/download")
+async def api_download_skill(skill_name: str):
+    from ide_storage.skill_registry import skill_archive
+
+    try:
+        content = skill_archive(skill_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Skill not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(
+        content=content,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{skill_name}.zip"'},
+    )
+
+
+@app.get("/api/skills/{skill_name}")
+async def api_get_skill(skill_name: str):
+    from ide_storage.skill_registry import get_skill
+
+    try:
+        return get_skill(skill_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Skill not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/projects/{project_id}/chats")

@@ -19,6 +19,11 @@ def test_columns_add_edit_delete_and_move_projects(tmp_path, monkeypatch):
     edited = asyncio.run(main.update_kanban_column(status, main.KanbanColumnUpdate(label="Waiting on others")))
     assert edited["column"]["label"] == "Waiting on others"
 
+    reordered = asyncio.run(
+        main.reorder_kanban_columns(main.KanbanColumnOrder(statuses=[status, "backlog", "in_progress", "done"]))
+    )
+    assert reordered["columns"][0]["status"] == status
+
     with db_conn() as conn:
         conn.execute(
             "INSERT INTO projects (name, path, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",

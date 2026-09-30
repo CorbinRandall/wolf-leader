@@ -160,6 +160,10 @@ class KanbanColumnUpdate(BaseModel):
     description: Optional[str] = None
 
 
+class KanbanColumnOrder(BaseModel):
+    statuses: List[str]
+
+
 DEFAULT_KANBAN_COLUMNS = [
     {"status": "backlog", "label": "Backlog", "description": "Ideas and work waiting to start"},
     {"status": "in_progress", "label": "In progress", "description": "Projects currently being worked on"},
@@ -171,14 +175,14 @@ def _kanban_columns() -> list[dict]:
     with db_conn() as conn:
         row = conn.execute("SELECT value FROM app_settings WHERE key = 'kanban_columns'").fetchone()
     if not row:
-        return DEFAULT_KANBAN_COLUMNS
+        return [dict(column) for column in DEFAULT_KANBAN_COLUMNS]
     try:
         columns = json.loads(row["value"])
         if isinstance(columns, list) and columns and all(isinstance(item, dict) and item.get("status") and item.get("label") for item in columns):
             return columns
     except (TypeError, json.JSONDecodeError):
         pass
-    return DEFAULT_KANBAN_COLUMNS
+    return [dict(column) for column in DEFAULT_KANBAN_COLUMNS]
 
 
 def _save_kanban_columns(columns: list[dict]) -> None:
@@ -943,6 +947,17 @@ async def update_kanban_column(status: str, body: KanbanColumnUpdate):
         column["description"] = body.description.strip()
     _save_kanban_columns(columns)
     return {"column": column, "columns": columns}
+
+
+@app.put("/api/kanban/columns-order")
+async def reorder_kanban_columns(body: KanbanColumnOrder):
+    columns = _kanban_columns()
+    by_status = {column["status"]: column for column in columns}
+    if len(body.statuses) != len(columns) or set(body.statuses) != set(by_status):
+        raise HTTPException(status_code=400, detail="Column order must include every column exactly once")
+    ordered = [by_status[status] for status in body.statuses]
+    _save_kanban_columns(ordered)
+    return {"columns": ordered}
 
 
 @app.delete("/api/kanban/columns/{status}")

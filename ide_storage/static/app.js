@@ -22,6 +22,9 @@ let state = {
   searchResults: null,
   searchMode: "keyword",
   clientSetupCache: null,
+  skills: [],
+  skillsLibrary: null,
+  activeSkillId: null,
 };
 
 const $ = (s) => document.querySelector(s);
@@ -117,11 +120,13 @@ function switchTab(tab) {
   state.searchResults = null;
   $("#search").value = "";
   $("#search").placeholder = searchPlaceholderForTab(tab);
+  $("#duplicate-projects-btn").classList.toggle("hidden", !["projects", "kanban"].includes(tab));
   $$(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab));
   renderSidebar();
   if (tab === "home") showHome();
   else if (tab === "setup") showSetup();
   else if (tab === "kanban") showKanban();
+  else if (tab === "skills") showSkills();
 }
 
 async function runGlobalSearch(q) {
@@ -231,6 +236,22 @@ function renderSidebar() {
     return;
   }
 
+  if (state.tab === "skills") {
+    const items = filteredSkills();
+    list.innerHTML = items.length
+      ? items.map((skill) => `
+        <button type="button" class="chat-item${skill.id === state.activeSkillId ? " active" : ""}" data-sidebar-skill="${escapeHtml(skill.id)}">
+          <div class="chat-item-title">${escapeHtml(skill.name)}</div>
+          <div class="chat-item-meta"><span>${skill.file_count} files</span><span>${formatBytes(skill.size_bytes)}</span></div>
+        </button>`).join("")
+      : `<div class="loading">No skills found</div>`;
+    list.querySelectorAll("[data-sidebar-skill]").forEach((button) =>
+      button.addEventListener("click", () => selectSkill(button.dataset.sidebarSkill))
+    );
+    $("#list-count").textContent = `${items.length} skills`;
+    return;
+  }
+
   if (state.tab === "projects") {
     const items = state.projects.filter((p) => !q || [p.name, p.slug, p.compose_path].join(" ").toLowerCase().includes(q));
     list.innerHTML = items.length
@@ -330,6 +351,117 @@ async function showSetup() {
   $("#setup-content").innerHTML = md(state.onboardingCache.content);
   setUrl({ tab: "setup" });
 }
+
+// --- Skills library ---
+function formatBytes(bytes) {
+  const value = Number(bytes) || 0;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function filteredSkills() {
+  const q = ($("#search").value || "").toLowerCase().trim();
+  return state.skills.filter((skill) => !q || [skill.name, skill.description, skill.id]
+    .filter(Boolean).join(" ").toLowerCase().includes(q));
+}
+
+function skillInstructions(content) {
+  return (content || "").replace(/^---\s*\r?\n[\s\S]*?\r?\n---\s*\r?\n/, "");
+}
+
+function renderSkills() {
+  const grid = $("#skills-grid");
+  if (!grid) return;
+  const items = filteredSkills();
+  grid.innerHTML = items.length
+    ? items.map((skill) => `
+      <article class="skill-card${skill.id === state.activeSkillId ? " active" : ""}">
+        <button type="button" class="skill-card-open" data-skill="${escapeHtml(skill.id)}">
+          <span class="skill-card-icon" aria-hidden="true">◇</span>
+          <span class="skill-card-copy">
+            <strong>${escapeHtml(skill.name)}</strong>
+            <span>${escapeHtml(skill.description || "Portable agent workflow")}</span>
+          </span>
+          <span class="skill-card-meta">${skill.file_count} files · ${formatBytes(skill.size_bytes)}</span>
+        </button>
+      </article>`).join("")
+    : `<div class="empty-library"><h3>No skills yet</h3><p>Sync user skills from a connected client to fill this library.</p></div>`;
+  grid.querySelectorAll("[data-skill]").forEach((button) =>
+    button.addEventListener("click", () => selectSkill(button.dataset.skill))
+  );
+}
+
+async function showSkills() {
+  hideViews();
+  $("#skills-view").classList.remove("hidden");
+  setUrl({ tab: "skills" });
+  if (!state.skillsLibrary) {
+    state.skillsLibrary = await api("/api/skills");
+    state.skills = state.skillsLibrary.skills || [];
+  }
+  renderSidebar();
+  renderSkills();
+}
+
+async function selectSkill(skillId) {
+  state.activeSkillId = skillId;
+  renderSidebar();
+  renderSkills();
+  const detail = await api(`/api/skills/${encodeURIComponent(skillId)}`);
+  $("#skill-detail").classList.remove("hidden");
+  $("#skill-detail-title").textContent = detail.name;
+  $("#skill-detail-meta").textContent = `${detail.file_count} files · ${formatBytes(detail.size_bytes)} · ${detail.files.join(", ")}`;
+  $("#skill-detail-content").innerHTML = md(skillInstructions(detail.content));
+  $("#download-skill-btn").href = `/api/skills/${encodeURIComponent(skillId)}/download`;
+  $("#skill-detail").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+$("#copy-skills-install-btn").addEventListener("click", async () => {
+  if (!state.skillsLibrary) state.skillsLibrary = await api("/api/skills");
+  await copyText(state.skillsLibrary.install_prompt, "Skills install prompt");
+});
+
+$("#copy-skills-publish-btn").addEventListener("click", async () => {
+  if (!state.skillsLibrary) state.skillsLibrary = await api("/api/skills");
+  await copyText(state.skillsLibrary.publish_prompt, "Skills publish prompt");
+});
+
+// --- Duplicate projects ---
+$("#duplicate-projects-btn").addEventListener("click", async () => {
+  const data = await api("/api/projects/duplicates");
+  if (!data.groups?.length) {
+    showToast("No duplicate projects found");
+    return;
+  }
+  const group = data.groups[0];
+  const rows = group.projects.map((project) => `
+    <option value="${project.id}">${escapeHtml(project.name)} · ${project.chat_count || 0} sessions · ${project.memory_count || 0} memories</option>`
+  ).join("");
+  const summary = group.projects.map((project) => `
+    <div class="duplicate-project-row">
+      <strong>${escapeHtml(project.name)}</strong>
+      <span>Slug: ${escapeHtml(project.slug || "none")}</span>
+      <span>Path: ${escapeHtml(project.path || "none")}</span>
+      <span>Compose: ${escapeHtml(project.compose_path || "none")}</span>
+      <span>${project.chat_count || 0} sessions · ${project.memory_count || 0} memories · ${project.snippet_count || 0} snippets</span>
+    </div>`).join("");
+  openModal("Merge duplicate projects", `
+    <p class="modal-note">Found ${data.count} duplicate group${data.count === 1 ? "" : "s"}. Choose the record to keep. Linked sessions, memories, and snippets from the others will move into it.</p>
+    <div class="duplicate-projects">${summary}</div>
+    <label>Keep this project<select name="target_id">${rows}</select></label>
+    <p class="modal-note">Original project files remain on disk for recovery. This removes only the extra project records after their linked data is moved.</p>
+  `, async (form) => {
+    const targetId = +form.target_id;
+    const sourceIds = group.projects.map((project) => project.id).filter((id) => id !== targetId);
+    const report = await api("/api/projects/merge", {
+      method: "POST",
+      body: JSON.stringify({ target_id: targetId, source_ids: sourceIds }),
+    });
+    await loadData();
+    showToast(report.message);
+  }, { saveLabel: "Merge projects" });
+});
 
 // --- Kanban ---
 function projectMatchesKanbanSearch(project) {
@@ -610,18 +742,25 @@ async function selectChat(id) {
 // --- Modals ---
 const modal = $("#modal");
 
-function openModal(title, fields, onSave) {
+function openModal(title, fields, onSave, options = {}) {
   $("#modal-title").textContent = title;
   $("#modal-body").innerHTML = fields;
+  $("#modal-form button[type=submit]").textContent = options.saveLabel || "Save";
   modal.showModal();
   $("#modal-form").onsubmit = async (e) => {
     e.preventDefault();
+    const submitButton = $("#modal-form button[type=submit]");
+    submitButton.disabled = true;
     const data = {};
     $("#modal-body").querySelectorAll("[name]").forEach((el) => {
       data[el.name] = el.value;
     });
-    await onSave(data);
-    modal.close();
+    try {
+      await onSave(data);
+      modal.close();
+    } finally {
+      submitButton.disabled = false;
+    }
   };
 }
 
@@ -923,6 +1062,7 @@ function searchKindsForTab(tab) {
 
 function searchPlaceholderForTab(tab) {
   if (tab === "projects" || tab === "kanban") return "Search projects…";
+  if (tab === "skills") return "Search skills…";
   if (tab === "archive") return "Search memories, sessions…";
   return "Search…";
 }
@@ -931,10 +1071,11 @@ let _searchTimer = null;
 $("#search").addEventListener("input", () => {
   clearTimeout(_searchTimer);
   const q = ($("#search").value || "").trim();
-  if (state.tab === "kanban") {
+  if (state.tab === "kanban" || state.tab === "skills") {
     state.searchResults = null;
     renderSidebar();
-    renderKanban();
+    if (state.tab === "kanban") renderKanban();
+    else renderSkills();
     return;
   }
   if (q.length >= 3) {
@@ -968,6 +1109,7 @@ $("#search").addEventListener("keydown", (e) => {
     if (state.tab === "home") showHome();
     else if (state.tab === "setup") showSetup();
     else if (state.tab === "kanban") showKanban();
+    else if (state.tab === "skills") showSkills();
     else if (state.tab === "projects") {
       hideViews();
       $("#empty-state").classList.remove("hidden");

@@ -216,6 +216,7 @@ body {
   cursor: pointer;
   border: 1px solid var(--border);
   transition: background 0.15s, border-color 0.15s;
+  text-decoration: none;
 }
 
 .btn-primary {
@@ -342,12 +343,13 @@ body {
 
 .tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.25rem;
   margin-bottom: 0.75rem;
 }
 
 .tab {
-  flex: 1;
+  flex: 1 1 calc(33.333% - 0.25rem);
   padding: 0.4rem 0.5rem;
   font: inherit;
   font-size: 0.75rem;
@@ -576,6 +578,11 @@ body {
   border: 0;
 }
 
+.sidebar-tool {
+  width: 100%;
+  margin-top: 0.55rem;
+}
+
 .kanban-view {
   max-width: none;
   min-height: 100%;
@@ -714,6 +721,117 @@ body {
   text-align: center;
 }
 
+.skills-view { max-width: 1120px; }
+.skills-header { align-items: flex-start; }
+.skills-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.8rem;
+  margin-bottom: 1.5rem;
+}
+.skill-card {
+  min-width: 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color 0.15s, transform 0.15s;
+}
+.skill-card:hover,
+.skill-card.active {
+  border-color: var(--accent-dim);
+  transform: translateY(-1px);
+}
+.skill-card-open {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2rem 0.75rem;
+  width: 100%;
+  min-height: 150px;
+  padding: 1rem;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.skill-card-open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+.skill-card-icon {
+  color: var(--accent);
+  font-size: 1.2rem;
+  line-height: 1.2;
+}
+.skill-card-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.skill-card-copy strong { font-size: 0.95rem; }
+.skill-card-copy span {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.skill-card-meta {
+  grid-column: 2;
+  align-self: end;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+.skill-detail {
+  scroll-margin-top: 1rem;
+  padding-top: 0.25rem;
+}
+.skill-detail-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 0.75rem;
+}
+.empty-library {
+  grid-column: 1 / -1;
+  padding: 3rem 1rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  text-align: center;
+}
+.empty-library h3 { color: var(--text); margin-bottom: 0.35rem; }
+
+.modal-note {
+  margin-bottom: 0.9rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+.duplicate-projects {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.duplicate-project-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.65rem 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.78rem;
+}
+.duplicate-project-row span { color: var(--text-muted); }
+
 .message-actions { display: flex; align-items: center; gap: 0.25rem; }
 
 .modal {
@@ -754,4 +872,6 @@ body {
   .split-pane { grid-template-columns: 1fr; }
   .kanban-board { grid-template-columns: repeat(3, minmax(260px, 82vw)); }
   .kanban-column { min-height: 320px; }
+  .skills-grid { grid-template-columns: 1fr; }
+  .skills-header, .skill-detail-header { align-items: stretch; flex-direction: column; }
 }

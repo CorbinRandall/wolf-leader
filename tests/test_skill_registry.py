@@ -76,3 +76,13 @@ def test_publish_prompt_contains_hub_upload_and_verification_urls():
     assert "GET http://wolf-leader.local:6971/api/skills/SKILL_ID" in prompt
     assert '"overwrite":true' in prompt
     assert "Do not upload system skills" in prompt
+    assert "If http://wolf-leader.local:6971 is unreachable" in prompt
+    assert "Do not substitute a guessed hostname" in prompt
+
+
+def test_install_prompt_documents_network_fallback():
+    from ide_storage.skill_registry import install_prompt
+
+    prompt = install_prompt("http://wolf-leader.local:6971")
+    assert "If http://wolf-leader.local:6971 is unreachable" in prompt
+    assert "configured for this device" in prompt

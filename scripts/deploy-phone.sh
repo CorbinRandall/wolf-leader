@@ -36,11 +36,16 @@ git clone --branch "$BRANCH" --single-branch "$REPO" "$STAGING"
 # A pre-Git phone install may already contain the only copies of its database,
 # settings, and native virtual environment. Bring those forward untouched.
 if [[ -d "$APP_DIR" ]]; then
-  for item in .env data .venv; do
+  for item in .env .venv; do
     if [[ -e "$APP_DIR/$item" ]]; then
       cp -a "$APP_DIR/$item" "$STAGING/$item"
     fi
   done
+  # The clone already contains tracked seed files under data/. Copy the
+  # contents, not the directory itself, so live data does not become data/data.
+  if [[ -d "$APP_DIR/data" ]]; then
+    cp -a "$APP_DIR/data/." "$STAGING/data/"
+  fi
 fi
 
 git -C "$STAGING" config core.hooksPath .githooks

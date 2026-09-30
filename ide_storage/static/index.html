@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/styles.css?v=human-summaries-2" />
+  <link rel="stylesheet" href="/static/styles.css?v=kanban-1" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
@@ -23,6 +23,7 @@
         </div>
         <nav class="tabs" id="nav-tabs">
           <button type="button" class="tab" data-tab="projects">Projects</button>
+          <button type="button" class="tab" data-tab="kanban">Kanban</button>
           <button type="button" class="tab" data-tab="home">Home</button>
           <button type="button" class="tab" data-tab="setup">Setup</button>
           <button type="button" class="tab" data-tab="archive">Library</button>
@@ -61,6 +62,16 @@
         <p id="client-setup-desc" class="setup-lead muted"></p>
         <p class="setup-lead">Paste the setup prompt into any agent (Cursor, Claude Code, Gemini, etc.) on any OS. The hub serves the install bundle — no git clone on the client.</p>
         <div id="setup-content" class="md-content"></div>
+      </div>
+
+      <div id="kanban-view" class="view kanban-view hidden">
+        <header class="view-header kanban-header">
+          <div>
+            <h2>Project board</h2>
+            <p class="setup-lead">Drag projects between columns to update their status.</p>
+          </div>
+        </header>
+        <div id="kanban-board" class="kanban-board" aria-label="Project status board"></div>
       </div>
 
       <div id="project-view" class="view hidden">
@@ -155,6 +166,6 @@
   </dialog>
 
   <div id="toast" class="toast hidden"></div>
-  <script src="/static/app.js?v=human-summaries-2"></script>
+  <script src="/static/app.js?v=kanban-1"></script>
 </body>
 </html>

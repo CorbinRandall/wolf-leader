@@ -1,5 +1,11 @@
 const API = window.location.origin;
 
+const KANBAN_COLUMNS = [
+  { status: "backlog", label: "Backlog", description: "Ideas and work waiting to start" },
+  { status: "in_progress", label: "In progress", description: "Projects currently being worked on" },
+  { status: "done", label: "Done for now", description: "Completed or paused indefinitely" },
+];
+
 let state = {
   tab: "projects",
   chats: [],
@@ -43,6 +49,16 @@ function escapeHtml(s) {
 
 function chatTitle(c) {
   return c.title || (c.content || "").slice(0, 60) || `Chat #${c.id}`;
+}
+
+function kanbanStatus(status) {
+  if (status === "backlog") return "backlog";
+  if (status === "done" || status === "archived") return "done";
+  return "in_progress";
+}
+
+function kanbanStatusLabel(status) {
+  return KANBAN_COLUMNS.find((column) => column.status === kanbanStatus(status))?.label || "In progress";
 }
 
 function showToast(msg) {
@@ -105,6 +121,7 @@ function switchTab(tab) {
   renderSidebar();
   if (tab === "home") showHome();
   else if (tab === "setup") showSetup();
+  else if (tab === "kanban") showKanban();
 }
 
 async function runGlobalSearch(q) {
@@ -205,6 +222,15 @@ function renderSidebar() {
     return;
   }
 
+  if (state.tab === "kanban") {
+    const q = ($("#search").value || "").toLowerCase().trim();
+    const count = state.projects.filter((p) => !q || [p.name, p.slug, p.description, p.compose_path]
+      .filter(Boolean).join(" ").toLowerCase().includes(q)).length;
+    list.innerHTML = `<div class="sidebar-hint">Drag a project card to change its status. Select a card to open the full project.</div>`;
+    $("#list-count").textContent = `${count} projects`;
+    return;
+  }
+
   if (state.tab === "projects") {
     const items = state.projects.filter((p) => !q || [p.name, p.slug, p.compose_path].join(" ").toLowerCase().includes(q));
     list.innerHTML = items.length
@@ -271,6 +297,7 @@ async function loadData() {
   state.archivedChats = archived.chats || [];
   state.projects = projects.projects || [];
   renderSidebar();
+  if (state.tab === "kanban") renderKanban();
 }
 
 // --- Home ---
@@ -302,6 +329,125 @@ async function showSetup() {
   await loadClientSetup();
   $("#setup-content").innerHTML = md(state.onboardingCache.content);
   setUrl({ tab: "setup" });
+}
+
+// --- Kanban ---
+function projectMatchesKanbanSearch(project) {
+  const q = ($("#search").value || "").toLowerCase().trim();
+  if (!q) return true;
+  return [project.name, project.slug, project.description, project.compose_path]
+    .filter(Boolean).join(" ").toLowerCase().includes(q);
+}
+
+function renderKanbanCard(project) {
+  const status = kanbanStatus(project.status);
+  const options = KANBAN_COLUMNS.map((column) =>
+    `<option value="${column.status}"${column.status === status ? " selected" : ""}>${column.label}</option>`
+  ).join("");
+  return `
+    <article class="kanban-card" draggable="true" data-kanban-project="${project.id}">
+      <div class="kanban-card-topline">
+        <h3><button type="button" class="kanban-card-open" data-kanban-open="${project.id}">${escapeHtml(project.name)}</button></h3>
+        <span class="kanban-drag-handle" aria-hidden="true">⠿</span>
+      </div>
+      ${project.description ? `<p>${escapeHtml(project.description)}</p>` : ""}
+      <div class="kanban-card-meta">
+        <span>${project.memory_count || 0} memories</span>
+        <span>${project.chat_count || 0} sessions</span>
+      </div>
+      <label class="kanban-status-control">
+        <span class="sr-only">Move ${escapeHtml(project.name)}</span>
+        <select data-kanban-select="${project.id}" aria-label="Status for ${escapeHtml(project.name)}">${options}</select>
+      </label>
+    </article>`;
+}
+
+function bindKanbanEvents() {
+  $$("[data-kanban-project]").forEach((card) => {
+    card.addEventListener("click", (event) => {
+      if (event.target.closest("select")) return;
+      selectProject(+card.dataset.kanbanProject);
+    });
+    card.addEventListener("dragstart", (event) => {
+      card.classList.add("dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", card.dataset.kanbanProject);
+    });
+    card.addEventListener("dragend", () => {
+      card.classList.remove("dragging");
+      $$(".kanban-column").forEach((column) => column.classList.remove("drop-target"));
+    });
+  });
+
+  $$("[data-kanban-status]").forEach((column) => {
+    column.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      column.classList.add("drop-target");
+    });
+    column.addEventListener("dragleave", (event) => {
+      if (!column.contains(event.relatedTarget)) column.classList.remove("drop-target");
+    });
+    column.addEventListener("drop", async (event) => {
+      event.preventDefault();
+      column.classList.remove("drop-target");
+      const projectId = Number(event.dataTransfer.getData("text/plain"));
+      if (projectId) await moveProject(projectId, column.dataset.kanbanStatus);
+    });
+  });
+
+  $$('[data-kanban-select]').forEach((select) => {
+    select.addEventListener("click", (event) => event.stopPropagation());
+    select.addEventListener("change", async () => moveProject(+select.dataset.kanbanSelect, select.value));
+  });
+}
+
+function renderKanban() {
+  const board = $("#kanban-board");
+  if (!board) return;
+  const projects = state.projects.filter(projectMatchesKanbanSearch);
+  board.innerHTML = KANBAN_COLUMNS.map((column) => {
+    const items = projects.filter((project) => kanbanStatus(project.status) === column.status);
+    return `
+      <section class="kanban-column" data-kanban-status="${column.status}" aria-labelledby="kanban-${column.status}">
+        <header class="kanban-column-header">
+          <div>
+            <h3 id="kanban-${column.status}">${column.label}</h3>
+            <p>${column.description}</p>
+          </div>
+          <span class="kanban-count" aria-label="${items.length} projects">${items.length}</span>
+        </header>
+        <div class="kanban-card-list">
+          ${items.length ? items.map(renderKanbanCard).join("") : `<p class="kanban-empty">Drop a project here</p>`}
+        </div>
+      </section>`;
+  }).join("");
+  bindKanbanEvents();
+}
+
+function showKanban() {
+  hideViews();
+  $("#kanban-view").classList.remove("hidden");
+  renderKanban();
+  setUrl({ tab: "kanban" });
+}
+
+async function moveProject(projectId, status) {
+  const project = state.projects.find((item) => item.id === projectId);
+  if (!project || kanbanStatus(project.status) === status) return;
+  const previousStatus = project.status;
+  project.status = status;
+  renderKanban();
+  renderSidebar();
+  try {
+    await api(`/api/projects/${projectId}`, { method: "PUT", body: JSON.stringify({ status }) });
+    showToast(`${project.name} moved to ${kanbanStatusLabel(status)}`);
+  } catch (error) {
+    project.status = previousStatus;
+    renderKanban();
+    renderSidebar();
+    showToast(`Could not move ${project.name}: ${error.message}`);
+  }
 }
 
 // --- Project ---
@@ -539,7 +685,11 @@ $("#edit-project-btn").addEventListener("click", () => {
     <label>Compose path<input name="compose_path" value="${escapeHtml(p.compose_path || "")}" /></label>
     <label>Path<input name="path" value="${escapeHtml(p.path || "")}" /></label>
     <label>Description<textarea name="description" rows="4">${escapeHtml(p.description || "")}</textarea></label>
-    <label>Status<select name="status"><option value="active"${p.status !== "archived" ? " selected" : ""}>active</option><option value="archived"${p.status === "archived" ? " selected" : ""}>archived</option></select></label>
+    <label>Status<select name="status">
+      <option value="backlog"${kanbanStatus(p.status) === "backlog" ? " selected" : ""}>Backlog</option>
+      <option value="in_progress"${kanbanStatus(p.status) === "in_progress" ? " selected" : ""}>In progress</option>
+      <option value="done"${kanbanStatus(p.status) === "done" ? " selected" : ""}>Done for now</option>
+    </select></label>
   `, async (data) => {
     await api(`/api/projects/${p.id}`, { method: "PUT", body: JSON.stringify(data) });
     await loadData();
@@ -766,13 +916,13 @@ $("#copy-onboarding-url-btn").addEventListener("click", async () => {
 
 $$(".tab").forEach((t) => t.addEventListener("click", () => switchTab(t.dataset.tab)));
 function searchKindsForTab(tab) {
-  if (tab === "projects") return "project";
+  if (tab === "projects" || tab === "kanban") return "project";
   if (tab === "archive") return "memory,chat,message";
   return null; // all
 }
 
 function searchPlaceholderForTab(tab) {
-  if (tab === "projects") return "Search projects…";
+  if (tab === "projects" || tab === "kanban") return "Search projects…";
   if (tab === "archive") return "Search memories, sessions…";
   return "Search…";
 }
@@ -781,6 +931,12 @@ let _searchTimer = null;
 $("#search").addEventListener("input", () => {
   clearTimeout(_searchTimer);
   const q = ($("#search").value || "").trim();
+  if (state.tab === "kanban") {
+    state.searchResults = null;
+    renderSidebar();
+    renderKanban();
+    return;
+  }
   if (q.length >= 3) {
     _searchTimer = setTimeout(() => runGlobalSearch(q), 350);
   } else {
@@ -811,6 +967,7 @@ $("#search").addEventListener("keydown", (e) => {
     switchTab(tab);
     if (state.tab === "home") showHome();
     else if (state.tab === "setup") showSetup();
+    else if (state.tab === "kanban") showKanban();
     else if (state.tab === "projects") {
       hideViews();
       $("#empty-state").classList.remove("hidden");

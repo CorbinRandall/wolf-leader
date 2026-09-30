@@ -14,6 +14,9 @@ from ide_storage.skill_registry import (
     publish_prompt,
     skill_archive,
 )
+from ide_storage.skill_registry import _parse_manifest
+from fastapi.testclient import TestClient
+from ide_storage.main import app
 
 
 @pytest.fixture
@@ -78,6 +81,8 @@ def test_publish_prompt_contains_hub_upload_and_verification_urls():
     assert "Do not upload system skills" in prompt
     assert "If http://wolf-leader.local:6971 is unreachable" in prompt
     assert "Do not substitute a guessed hostname" in prompt
+    assert '"access_token":"TOKEN"' in prompt
+    assert "IDE_STORAGE_SKILLS_WRITE_TOKEN" in prompt
 
 
 def test_install_prompt_documents_network_fallback():
@@ -86,3 +91,59 @@ def test_install_prompt_documents_network_fallback():
     prompt = install_prompt("http://wolf-leader.local:6971")
     assert "If http://wolf-leader.local:6971 is unreachable" in prompt
     assert "configured for this device" in prompt
+
+
+def test_parse_folded_description():
+    manifest = """---
+name: example
+description: >-
+  A folded description for a skill.
+  It spans multiple YAML lines.
+---
+"""
+    assert _parse_manifest(manifest, "fallback") == (
+        "example",
+        "A folded description for a skill. It spans multiple YAML lines.",
+    )
+
+
+def test_import_rejects_duplicate_archive_paths(skills_root):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive_file:
+        archive_file.writestr("demo/SKILL.md", "---\nname: demo\n---\n")
+        archive_file.writestr("demo/SKILL.md", "duplicate")
+    archive = base64.b64encode(buffer.getvalue()).decode("ascii")
+    with pytest.raises(ValueError):
+        import_skill("demo", archive)
+
+
+def test_import_endpoint_requires_configured_token(skills_root, monkeypatch):
+    monkeypatch.setenv("IDE_STORAGE_SKILLS_WRITE_TOKEN", "expected-secret")
+    archive = _archive({"demo/SKILL.md": "---\nname: demo\n---\n"})
+    with TestClient(app) as client:
+        denied = client.post("/api/skills/import", json={"name": "demo", "archive_base64": archive})
+        assert denied.status_code == 401
+        allowed = client.post(
+            "/api/skills/import",
+            json={"name": "demo", "archive_base64": archive, "access_token": "expected-secret"},
+        )
+        assert allowed.status_code == 200
+        assert allowed.json()["skill"]["id"] == "demo"
+
+
+def test_publish_helper_requires_https_when_token_is_set(tmp_path, monkeypatch):
+    import importlib.util
+    from pathlib import Path
+
+    script = Path(__file__).parents[1] / "scripts" / "sync-skills-to-hub.py"
+    spec = importlib.util.spec_from_file_location("sync_skills_to_hub", script)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    skill = tmp_path / "demo"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text("---\nname: demo\n---\n")
+    monkeypatch.setenv("IDE_STORAGE_SKILLS_WRITE_TOKEN", "secret")
+    with pytest.raises(RuntimeError, match="HTTPS"):
+        module.publish_skill("http://wolf-leader.local:6971", "demo", skill)

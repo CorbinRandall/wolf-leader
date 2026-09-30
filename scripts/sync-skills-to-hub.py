@@ -10,6 +10,7 @@ import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -57,11 +58,15 @@ def archive_skill(path: Path) -> bytes:
 
 
 def publish_skill(hub: str, name: str, path: Path) -> dict:
+    access_token = os.environ.get("IDE_STORAGE_SKILLS_WRITE_TOKEN", "").strip()
+    if access_token and urllib.parse.urlsplit(hub).scheme.lower() != "https":
+        raise RuntimeError("Use an HTTPS --hub URL when IDE_STORAGE_SKILLS_WRITE_TOKEN is set")
     payload = json.dumps(
         {
             "name": name,
             "archive_base64": base64.b64encode(archive_skill(path)).decode("ascii"),
             "overwrite": True,
+            "access_token": access_token,
         }
     ).encode("utf-8")
     request = urllib.request.Request(

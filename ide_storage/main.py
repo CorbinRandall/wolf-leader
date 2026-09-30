@@ -5,6 +5,7 @@ import logging
 import os
 import json
 import re
+import hmac
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 
@@ -200,6 +201,7 @@ class SkillImport(BaseModel):
     name: str
     archive_base64: str
     overwrite: bool = False
+    access_token: str | None = None
 
 
 class ProjectMdUpdate(BaseModel):
@@ -1241,6 +1243,12 @@ async def api_export_skills():
 
 @app.post("/api/skills/import")
 async def api_import_skill(body: SkillImport):
+    expected_token = os.environ.get("IDE_STORAGE_SKILLS_WRITE_TOKEN", "").strip()
+    if expected_token and (
+        not body.access_token or not hmac.compare_digest(body.access_token, expected_token)
+    ):
+        raise HTTPException(status_code=401, detail="Invalid or missing skills write token")
+
     from ide_storage.skill_registry import import_skill
 
     try:

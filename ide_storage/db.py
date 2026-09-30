@@ -131,6 +131,14 @@ def init_db() -> None:
         _add_column(cur, "projects", "compose_path", "TEXT")
         _add_column(cur, "projects", "tags", "TEXT")
 
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS snippets (

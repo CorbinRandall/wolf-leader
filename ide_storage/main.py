@@ -3,6 +3,8 @@ Wolf Leader REST API — AI project storage (chats, projects, memories, briefs).
 """
 import logging
 import os
+import json
+import re
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 
@@ -146,6 +148,48 @@ class ProjectUpdate(BaseModel):
 class ProjectMerge(BaseModel):
     target_id: int
     source_ids: List[int]
+
+
+class KanbanColumnCreate(BaseModel):
+    label: str
+    description: Optional[str] = ""
+
+
+class KanbanColumnUpdate(BaseModel):
+    label: Optional[str] = None
+    description: Optional[str] = None
+
+
+DEFAULT_KANBAN_COLUMNS = [
+    {"status": "backlog", "label": "Backlog", "description": "Ideas and work waiting to start"},
+    {"status": "in_progress", "label": "In progress", "description": "Projects currently being worked on"},
+    {"status": "done", "label": "Done for now", "description": "Completed or paused indefinitely"},
+]
+
+
+def _kanban_columns() -> list[dict]:
+    with db_conn() as conn:
+        row = conn.execute("SELECT value FROM app_settings WHERE key = 'kanban_columns'").fetchone()
+    if not row:
+        return DEFAULT_KANBAN_COLUMNS
+    try:
+        columns = json.loads(row["value"])
+        if isinstance(columns, list) and columns and all(isinstance(item, dict) and item.get("status") and item.get("label") for item in columns):
+            return columns
+    except (TypeError, json.JSONDecodeError):
+        pass
+    return DEFAULT_KANBAN_COLUMNS
+
+
+def _save_kanban_columns(columns: list[dict]) -> None:
+    now = datetime.utcnow().isoformat()
+    with db_conn() as conn:
+        conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES ('kanban_columns', ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            (json.dumps(columns), now),
+        )
+        conn.commit()
 
 
 class SkillImport(BaseModel):
@@ -862,6 +906,63 @@ async def query_chat(
 
 
 # Project endpoints
+@app.get("/api/kanban/columns")
+async def get_kanban_columns():
+    return {"columns": _kanban_columns()}
+
+
+@app.post("/api/kanban/columns")
+async def add_kanban_column(body: KanbanColumnCreate):
+    label = body.label.strip()
+    if not label:
+        raise HTTPException(status_code=400, detail="A column needs a name")
+    base = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")[:40] or "column"
+    columns = _kanban_columns()
+    used = {column["status"] for column in columns}
+    status, suffix = base, 2
+    while status in used:
+        status = f"{base}_{suffix}"
+        suffix += 1
+    column = {"status": status, "label": label, "description": (body.description or "").strip()}
+    columns.append(column)
+    _save_kanban_columns(columns)
+    return {"column": column, "columns": columns}
+
+
+@app.put("/api/kanban/columns/{status}")
+async def update_kanban_column(status: str, body: KanbanColumnUpdate):
+    columns = _kanban_columns()
+    column = next((item for item in columns if item["status"] == status), None)
+    if not column:
+        raise HTTPException(status_code=404, detail="Column not found")
+    if body.label is not None:
+        if not body.label.strip():
+            raise HTTPException(status_code=400, detail="A column needs a name")
+        column["label"] = body.label.strip()
+    if body.description is not None:
+        column["description"] = body.description.strip()
+    _save_kanban_columns(columns)
+    return {"column": column, "columns": columns}
+
+
+@app.delete("/api/kanban/columns/{status}")
+async def delete_kanban_column(status: str, move_to: str):
+    columns = _kanban_columns()
+    if len(columns) <= 1:
+        raise HTTPException(status_code=400, detail="Keep at least one board column")
+    if status == move_to or move_to not in {item["status"] for item in columns}:
+        raise HTTPException(status_code=400, detail="Choose another column for existing projects")
+    if status not in {item["status"] for item in columns}:
+        raise HTTPException(status_code=404, detail="Column not found")
+    now = datetime.utcnow().isoformat()
+    with db_conn() as conn:
+        conn.execute("UPDATE projects SET status = ?, updated_at = ? WHERE status = ?", (move_to, now, status))
+        conn.commit()
+    columns = [item for item in columns if item["status"] != status]
+    _save_kanban_columns(columns)
+    return {"columns": columns}
+
+
 @app.post("/api/projects")
 async def create_project(project: ProjectCreate):
     """Create a new project."""

@@ -16,7 +16,7 @@ Runs on **any Docker host**: Raspberry Pi, Windows, Linux, macOS, Unraid, cloud 
 - **Typed checkpoints** — `SPEC.yaml` + `AGENT_BRIEF.md` per project with handoff tiers (`continue` / `orient` / `rebuild`)
 - **Continue modes** — compose deploy/maintain, server daemons, client setup, integration, investigation
 - **`/save` pipeline** — auto-extract memories, refresh briefs, archive sessions
-- **Markdown backbone** — `data/projects/{slug}/PROJECT.md` + git-friendly layout (runtime data gitignored)
+- **Markdown handoff** — editable `PROJECT.md` notes plus generated `SPEC.yaml` and `AGENT_BRIEF.md` per project (runtime data gitignored)
 
 ## Quick start
 
@@ -58,11 +58,14 @@ Copy `data/AGENTS.md` into workspace roots after first run (see `examples/AGENTS
 
 ## Skills library
 
-The Skills tab stores complete personal skill folders, including `SKILL.md` and any supporting scripts, references, assets, or agent metadata. Publish the portable user skills found on a workstation with:
+The Skills tab stores complete personal skill folders, including `SKILL.md` and any supporting scripts, references, assets, or agent metadata. Hub owners can protect imports with the optional private `IDE_STORAGE_SKILLS_WRITE_TOKEN`; when set, clients must send it with imports. Use HTTPS for remote clients; local trusted-network requests may use HTTP. Publish user skills from a workstation with:
 
 ```bash
-python scripts/sync-skills-to-hub.py --hub http://YOUR_HOST:6971
+IDE_STORAGE_SKILLS_WRITE_TOKEN="<token from private hub config>" \
+  python scripts/sync-skills-to-hub.py --hub https://YOUR_HOST
 ```
+
+Keep this token private. Do not paste it into prompts, skill files, or shell history; use a protected environment file or secret manager for repeated publishing. Without a configured token, skill imports keep the existing trusted-network behavior.
 
 Use **Copy install prompt** in the Skills tab to hand another IDE or agent the exact download and installation steps. Use **Copy publish prompt** to tell an IDE how to package and send one of its personal skills back to Wolf Leader, or use **Download all** for a ZIP containing every published skill. System and plugin-provided skills are intentionally left with their provider.
 
@@ -145,6 +148,7 @@ See [`.env.example`](.env.example). Minimum:
 - `IDE_STORAGE_PUBLIC_URL` — how clients reach the Web UI / brief URLs
 - `IDE_STORAGE_MCP_URL` — MCP endpoint for agents
 - `IDE_STORAGE_DEVICE_NAME` — server identity used in pickup prompts
+- `IDE_STORAGE_SKILLS_WRITE_TOKEN` — optional write token for skill imports; generate a long random secret and keep it in `.env` to require authentication
 
 Optional: `CURSOR_TRANSCRIPTS_ROOT`, `COMPOSE_MANAGER_ROOT`, `IDE_STORAGE_HOST_LABEL`
 
@@ -166,6 +170,8 @@ Legacy chat/snippet endpoints remain available — see inline docs in `ide_stora
 ## Data & privacy
 
 **Do not commit** `data/ide-work.db` or `data/projects/*` (except `_example/`). Your project memory stays in `./data` on the host.
+
+SQLite is authoritative for project records, sessions, messages, and typed memories. `PROJECT.md` is the user-editable notes file. `SPEC.yaml` and `AGENT_BRIEF.md` are generated handoff views and may be rebuilt from the structured records; do not use them as the only copy of important decisions.
 
 Back up `./data` to preserve everything.
 

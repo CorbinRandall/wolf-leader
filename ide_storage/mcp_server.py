@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import time
 from typing import Any, Dict, List, Optional
 
 from fastmcp import Context, FastMCP
@@ -25,6 +26,8 @@ mcp = FastMCP(
 # Active project is per-session, not global: concurrent clients (multiple devices
 # /IDEs) each hit this one server, so a shared global would bleed across sessions.
 _active_by_session: Dict[str, Dict[str, Any]] = {}
+_ACTIVE_SESSION_TTL_SECONDS = 24 * 60 * 60
+_ACTIVE_SESSION_MAX_ENTRIES = 4096
 
 
 def _sess_key(ctx: Optional[Context]) -> str:
@@ -33,9 +36,26 @@ def _sess_key(ctx: Optional[Context]) -> str:
 
 
 def _get_active(ctx: Optional[Context]) -> Dict[str, Any]:
-    return _active_by_session.setdefault(
-        _sess_key(ctx), {"project_id": None, "slug": None, "path": None}
-    )
+    now = time.monotonic()
+    key = _sess_key(ctx)
+    stale = [
+        item for item, value in _active_by_session.items()
+        if now - value.get("last_seen", 0) > _ACTIVE_SESSION_TTL_SECONDS
+    ]
+    for item in stale:
+        _active_by_session.pop(item, None)
+    state = _active_by_session.get(key)
+    if state is None:
+        if len(_active_by_session) >= _ACTIVE_SESSION_MAX_ENTRIES:
+            oldest = min(
+                _active_by_session,
+                key=lambda item: _active_by_session[item].get("last_seen", 0),
+            )
+            _active_by_session.pop(oldest, None)
+        state = {"project_id": None, "slug": None, "path": None}
+        _active_by_session[key] = state
+    state["last_seen"] = now
+    return state
 
 
 @mcp.tool

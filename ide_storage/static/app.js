@@ -119,6 +119,7 @@ function hideViews() {
 // --- Navigation ---
 function switchTab(tab) {
   state.tab = tab;
+  document.body.dataset.tab = tab;
   state.searchResults = null;
   $("#search").value = "";
   $("#search").placeholder = searchPlaceholderForTab(tab);
@@ -129,7 +130,7 @@ function switchTab(tab) {
   else if (tab === "setup") showSetup();
   else if (tab === "kanban") showKanban();
   else if (tab === "skills") showSkills();
-  else if (tab === "projects") showProjects();
+  else if (tab === "projects") showClassicProjects();
 }
 
 async function runGlobalSearch(q) {
@@ -334,6 +335,13 @@ function renderProjects() {
   const projects = state.projects.filter((p) => !q || [p.name, p.description, p.slug].filter(Boolean).join(" ").toLowerCase().includes(q));
   list.innerHTML = projects.map((p) => `<button class="project-row" type="button" data-project-row="${p.id}"><span><strong>${escapeHtml(p.name)}</strong><small>${escapeHtml(p.description || "No description yet.")}</small></span><em>${escapeHtml(kanbanStatusLabel(p.status))}</em></button>`).join("") || `<p class="muted">No projects found.</p>`;
   $$('[data-project-row]').forEach((button) => button.addEventListener("click", () => selectProject(+button.dataset.projectRow)));
+}
+
+function showClassicProjects() {
+  hideViews();
+  if (state.activeProjectId) $("#project-view").classList.remove("hidden");
+  else $("#empty-state").classList.remove("hidden");
+  setUrl(state.activeProjectId ? { project: state.activeProjectId, tab: "projects" } : { tab: "projects" });
 }
 
 function showProjects() { hideViews(); $("#projects-view").classList.remove("hidden"); renderProjects(); setUrl({ tab: "projects" }); }
@@ -1263,7 +1271,7 @@ $("#search").addEventListener("keydown", (e) => {
     else if (state.tab === "setup") showSetup();
     else if (state.tab === "kanban") showKanban();
     else if (state.tab === "skills") showSkills();
-    else if (state.tab === "projects") showProjects();
+    else if (state.tab === "projects") showClassicProjects();
     else hideViews(), $("#empty-state").classList.remove("hidden");
   }
 })();

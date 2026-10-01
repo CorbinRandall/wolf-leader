@@ -935,14 +935,52 @@ body {
   .skills-header, .skill-detail-header { align-items: stretch; flex-direction: column; }
 }
 
-/* Classic Projects tab: left sidebar list + detail pane */
-body[data-tab="projects"] .app { display: flex; }
-body[data-tab="projects"] .sidebar { position: sticky; top: 0; width: var(--sidebar-width); min-width: var(--sidebar-width); height: 100vh; border-right: 1px solid var(--border); border-bottom: 0; }
-body[data-tab="projects"] .sidebar-header { display: block; padding: 1.25rem 1rem 0.75rem; border-bottom: 1px solid var(--border); }
-body[data-tab="projects"] .tabs { flex-wrap: wrap; gap: 0.25rem; margin-bottom: 0.75rem; overflow-x: visible; }
-body[data-tab="projects"] .tab { flex: 1 1 calc(33.333% - 0.25rem); padding: 0.4rem 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
-body[data-tab="projects"] .tab.active { background: var(--bg-hover); border: 1px solid var(--accent); }
-body[data-tab="projects"] #search { width: 100%; }
-body[data-tab="projects"] .sidebar > .chat-list { display: block; }
-body[data-tab="projects"] .sidebar-footer { display: block; }
-body[data-tab="projects"] .main { flex: 1; min-height: 100vh; }
+/* Projects tab: keep the shared top bar, then restore the classic list + detail split. */
+body[data-tab="projects"] .app {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100vh;
+  overflow: hidden;
+}
+body[data-tab="projects"] .sidebar { display: contents; }
+body[data-tab="projects"] .sidebar-header { grid-column: 1 / -1; grid-row: 1; }
+body[data-tab="projects"] .sidebar > .chat-list {
+  display: block;
+  grid-column: 1;
+  grid-row: 2;
+  min-height: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+}
+body[data-tab="projects"] .sidebar-footer {
+  display: flex;
+  grid-column: 1;
+  grid-row: 3;
+  border-right: 1px solid var(--border);
+}
+body[data-tab="projects"] .main {
+  grid-column: 2;
+  grid-row: 2 / 4;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  overflow-y: auto;
+}
+
+@media (max-width: 760px) {
+  body[data-tab="projects"] .app {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(160px, 35vh) auto minmax(0, 1fr);
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+  body[data-tab="projects"] .sidebar-header,
+  body[data-tab="projects"] .sidebar > .chat-list,
+  body[data-tab="projects"] .sidebar-footer,
+  body[data-tab="projects"] .main { grid-column: 1; }
+  body[data-tab="projects"] .sidebar > .chat-list { grid-row: 2; border-right: 0; border-bottom: 1px solid var(--border); }
+  body[data-tab="projects"] .sidebar-footer { grid-row: 3; border-right: 0; }
+  body[data-tab="projects"] .main { grid-row: 4; overflow: visible; }
+}

@@ -105,10 +105,10 @@ async function api(path, opts = {}) {
 function setUrl(params) {
   const u = new URLSearchParams();
   if (params.chat) u.set("chat", params.chat);
-  if (params.project) u.set("project", params.project);
   if (params.tab && params.tab !== "home") u.set("tab", params.tab);
+  const path = params.projectSlug ? `/${encodeURIComponent(params.projectSlug)}` : "/";
   const qs = u.toString();
-  history.replaceState(null, "", qs ? `?${qs}` : location.pathname);
+  history.replaceState(null, "", `${path}${qs ? `?${qs}` : ""}`);
 }
 
 function hideViews() {
@@ -341,7 +341,8 @@ function showClassicProjects() {
   hideViews();
   if (state.activeProjectId) $("#project-view").classList.remove("hidden");
   else $("#empty-state").classList.remove("hidden");
-  setUrl(state.activeProjectId ? { project: state.activeProjectId, tab: "projects" } : { tab: "projects" });
+  const project = state.projects.find((item) => item.id === state.activeProjectId);
+  setUrl(project?.slug ? { projectSlug: project.slug } : { tab: "projects" });
 }
 
 function showProjects() { hideViews(); $("#projects-view").classList.remove("hidden"); renderProjects(); setUrl({ tab: "projects" }); }
@@ -736,7 +737,8 @@ async function selectProject(id) {
   renderSidebar();
   hideViews();
   $("#project-view").classList.remove("hidden");
-  setUrl({ project: id, tab: "projects" });
+  const selectedProject = state.projects.find((item) => item.id === id);
+  setUrl(selectedProject?.slug ? { projectSlug: selectedProject.slug } : { tab: "projects" });
   switchTab("projects");
 
   const [project, ctx, mdData, memories, chatsData] = await Promise.all([
@@ -1258,7 +1260,14 @@ $("#search").addEventListener("keydown", (e) => {
 (async function init() {
   await loadData();
   const params = new URLSearchParams(location.search);
-  if (params.get("chat")) {
+  const pathSlug = decodeURIComponent(location.pathname.replace(/^\/+|\/+$/g, ""));
+  const pathProject = pathSlug && !pathSlug.includes("/")
+    ? state.projects.find((project) => project.slug === pathSlug)
+    : null;
+  if (pathProject) {
+    switchTab("projects");
+    await selectProject(pathProject.id);
+  } else if (params.get("chat")) {
     switchTab("archive");
     await selectChat(+params.get("chat"));
   } else if (params.get("project")) {

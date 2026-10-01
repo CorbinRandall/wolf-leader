@@ -6,7 +6,9 @@ set -euo pipefail
 APP_DIR="${WOLF_LEADER_PHONE_DIR:-$HOME/apps/wolf-leader}"
 SERVICE_DIR="${WOLF_LEADER_PHONE_SERVICE_DIR:-${PREFIX:-/data/data/com.termux/files/usr}/var/service/wolf-leader}"
 PROOT_DISTRO="${WOLF_LEADER_PHONE_DISTRO:-debian}"
-HEALTH_URL="${WOLF_LEADER_PHONE_HEALTH_URL:-http://127.0.0.1:6971/health}"
+CONFIGURED_PORT="$(sed -n 's/^PORT=//p' "$APP_DIR/.env" 2>/dev/null | tail -n 1 | tr -d '\r')"
+[[ "$CONFIGURED_PORT" =~ ^[0-9]+$ ]] || CONFIGURED_PORT=6971
+HEALTH_URL="${WOLF_LEADER_PHONE_HEALTH_URL:-http://127.0.0.1:${CONFIGURED_PORT}/health}"
 
 fail() { echo "Phone update failed: $*" >&2; exit 1; }
 

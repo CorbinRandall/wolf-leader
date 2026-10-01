@@ -1926,6 +1926,21 @@ async def health():
     return {"status": "healthy", "service": SERVICE_ID, "product": PRODUCT_NAME}
 
 
+@app.get("/{project_slug}")
+async def project_web_ui(project_slug: str):
+    """Serve the web UI at a project's human-readable slug URL."""
+    project = hub.resolve_project_key(project_slug)
+    if not project or project.get("slug") != project_slug:
+        raise HTTPException(status_code=404, detail="Project not found")
+    index = STATIC_DIR / "index.html"
+    if index.is_file():
+        return FileResponse(
+            index,
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
+    raise HTTPException(status_code=404, detail="Web UI not found")
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 6971))
     host = os.environ.get("HOST", "0.0.0.0")

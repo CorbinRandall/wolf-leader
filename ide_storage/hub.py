@@ -45,6 +45,20 @@ def resolve_project(
         if not path:
             return None
 
+        # Alias table first (any machine's spelling of the same folder), then the
+        # legacy longest-prefix loop over projects.path / compose_path.
+        from .paths import resolve_project_id_by_path
+
+        try:
+            alias_pid = resolve_project_id_by_path(path)
+        except Exception:
+            alias_pid = None
+        if alias_pid is not None:
+            cur.execute("SELECT * FROM projects WHERE id = ?", (alias_pid,))
+            row = cur.fetchone()
+            if row:
+                return dict(row)
+
         norm = normalize_path(path)
         cur.execute(
             """
@@ -60,14 +74,57 @@ def resolve_project(
                 if not val:
                     continue
                 vnorm = normalize_path(val)
-                # A project rooted at a user's home directory is a useful
-                # record, but it must not claim every unrelated workspace.
-                broad = len([part for part in vnorm.split(os.sep) if part]) <= 2
-                if norm == vnorm or (not broad and norm.startswith(vnorm + os.sep)):
+                if norm == vnorm or norm.startswith(vnorm + os.sep):
                     if len(vnorm) > best_len:
                         best = project
                         best_len = len(vnorm)
         return best
+
+
+def create_project_for_path(
+    path: str,
+    name: Optional[str] = None,
+    slug: Optional[str] = None,
+    device_name: Optional[str] = None,
+    description: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Create a project for a workspace folder (idempotent: returns the match if one exists)."""
+    from .paths import register_project_path, to_hub_path
+
+    existing = resolve_project(path=path)
+    if existing:
+        return {**existing, "created": False}
+
+    base = re.split(r"[\\/]+", path.strip().rstrip("\\/"))[-1] or "project"
+    name = (name or base.replace("_", " ").replace("-", " ").strip().title() or "Project")[:120]
+    slug_base = re.sub(r"[^a-z0-9]+", "-", (slug or base).lower()).strip("-")[:60] or "project"
+    now = datetime.utcnow().isoformat()
+    hub_path = to_hub_path(path) or path
+    with db_conn() as conn:
+        cur = conn.cursor()
+        final = slug_base
+        n = 2
+        while True:
+            cur.execute("SELECT 1 FROM projects WHERE slug = ?", (final,))
+            if not cur.fetchone():
+                break
+            final = f"{slug_base}-{n}"
+            n += 1
+        cur.execute(
+            """
+            INSERT INTO projects (name, path, description, slug, status, created_at, updated_at, metadata)
+            VALUES (?, ?, ?, ?, 'active', ?, ?, ?)
+            """,
+            (
+                name, hub_path, description or f"Created by an agent from {path}", final, now, now,
+                json.dumps({"created_by": "agent", "device_name": device_name}),
+            ),
+        )
+        pid = int(cur.lastrowid)
+        conn.commit()
+    register_project_path(pid, path, kind="workspace", device_name=device_name)
+    project = resolve_project(project_id=pid) or {"id": pid, "slug": final, "name": name}
+    return {**project, "created": True}
 
 
 def resolve_project_key(key: str) -> Optional[Dict[str, Any]]:
@@ -396,7 +453,10 @@ def list_projects_hub(limit: int = 100) -> List[Dict[str, Any]]:
             """,
             (limit,),
         )
-        return [dict(r) for r in cur.fetchall()]
+        rows = [dict(r) for r in cur.fetchall()]
+    from .owners import attach_owners
+
+    return attach_owners(rows)
 
 
 def save_session(
@@ -422,6 +482,7 @@ def save_session(
         transcript_mtime=transcript_mtime,
     )
 
+    explicit_project = project_id is not None
     if project_id is None and workspace_path:
         proj = resolve_project(path=workspace_path)
         if proj:
@@ -431,10 +492,20 @@ def save_session(
         cur = conn.cursor()
         existing_id = None
         if session_id:
-            cur.execute("SELECT id, occurred_at, created_at FROM chats WHERE session_id = ?", (session_id,))
+            cur.execute(
+                "SELECT id, project_id, occurred_at, created_at FROM chats WHERE session_id = ?",
+                (session_id,),
+            )
             row = cur.fetchone()
             if row:
                 existing_id = row["id"]
+                # A chat keeps the project it was first filed under; only an
+                # explicit project_id moves it. Re-guessing on every checkpoint
+                # is how chats drifted into look-alike projects.
+                from .import_all_transcripts import CATCH_ALL_PROJECT_ID
+
+                if not explicit_project and row["project_id"] not in (None, CATCH_ALL_PROJECT_ID):
+                    project_id = row["project_id"]
                 # Keep earlier occurred_at if we already know a better session time.
                 existing_occ = (row["occurred_at"] or "").strip()
                 if existing_occ and (not occurred or existing_occ <= occurred):
@@ -451,8 +522,8 @@ def save_session(
             )
             chat_id = existing_id
             action = "updated"
-            # A hook sends the complete current transcript after each turn.
-            # Replace the old snapshot so repeated autosaves stay idempotent.
+            # Re-saving the same session replaces its transcript, so routine
+            # checkpoints from a running chat never duplicate messages.
             if messages:
                 cur.execute("DELETE FROM messages WHERE chat_id = ?", (chat_id,))
         else:

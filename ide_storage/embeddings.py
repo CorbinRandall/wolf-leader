@@ -1,4 +1,8 @@
-"""Optional CPU ONNX embeddings via fastembed (all-MiniLM-L6-v2)."""
+"""CPU ONNX embeddings via fastembed (all-MiniLM-L6-v2), stored in pgvector.
+
+Embeddings are ON by default for this hub. Set IDE_STORAGE_EMBEDDINGS_ENABLED=0
+only for a deliberately keyword-only deployment (tests do this).
+"""
 from __future__ import annotations
 
 import os
@@ -14,12 +18,8 @@ _load_error: str | None = None
 
 
 def embeddings_enabled() -> bool:
-    return os.environ.get("IDE_STORAGE_EMBEDDINGS_ENABLED", "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
+    raw = os.environ.get("IDE_STORAGE_EMBEDDINGS_ENABLED", "1").strip().lower()
+    return raw not in ("0", "false", "no", "off", "")
 
 
 def embed_model_name() -> str:
@@ -72,6 +72,16 @@ def _get_model():
         cache = _cache_dir()
         if cache:
             kwargs["cache_dir"] = cache
+        # Inside an LXC/cgroup os.cpu_count() reports the host's cores; onnxruntime
+        # then tries to pin threads to CPUs it cannot use. Pin the thread count.
+        threads = os.environ.get("IDE_STORAGE_EMBED_THREADS", "").strip()
+        if threads.isdigit() and int(threads) > 0:
+            kwargs["threads"] = int(threads)
+        else:
+            try:
+                kwargs["threads"] = max(1, min(4, len(os.sched_getaffinity(0))))
+            except (AttributeError, OSError):
+                kwargs["threads"] = max(1, min(4, os.cpu_count() or 1))
         _model = TextEmbedding(**kwargs)
         _model_name = name
         _load_error = None

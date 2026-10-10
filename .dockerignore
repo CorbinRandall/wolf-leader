@@ -1,0 +1,28 @@
+# Keep the build context small: reference dumps and local toolchains never ship.
+.git
+.venv
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.idea
+.vscode
+.env
+.env.*
+!.env.example
+data/ide-work.db*
+data/logs
+data/*.pid
+data/transcript*.jsonl
+
+# vendored upstream fumadocs monorepo + design-system dumps (only halo.css is used, already copied into wiki/app)
+fumadocs
+Halo Fumadocs Design System
+arc5k
+
+# wiki: built in its own stage; never copy local installs/builds
+wiki/node_modules
+wiki/.next
+wiki/out
+wiki/.source
+wiki/next-env.d.ts

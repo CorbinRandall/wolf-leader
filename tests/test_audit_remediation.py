@@ -223,7 +223,8 @@ def test_parse_kinds():
 # --- D3: embed_texts alignment contract ----------------------------------------
 
 def test_embed_texts_returns_none_when_disabled(monkeypatch):
-    monkeypatch.delenv("IDE_STORAGE_EMBEDDINGS_ENABLED", raising=False)
+    # Embeddings are ON by default for this hub; disabling must be explicit.
+    monkeypatch.setenv("IDE_STORAGE_EMBEDDINGS_ENABLED", "0")
     from ide_storage.embeddings import embed_texts
 
     assert embed_texts(["a", "b"]) is None

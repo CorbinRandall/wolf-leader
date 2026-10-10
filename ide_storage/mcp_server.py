@@ -17,8 +17,11 @@ mcp = FastMCP(
     name=PRODUCT_NAME,
     instructions=(
         f"{PRODUCT_DESCRIPTION} "
-        "ALWAYS call resolve_project or set_project, then recall at session start. "
-        "Call remember for decisions/constraints. Call save_session at session end."
+        "Background memory for the user; they never type commands for it. "
+        "Start: resolve_project(path) then recall(). If unmatched, tell the user in one line and ask "
+        "before create_project(path). During work: remember() each decision/constraint/fix; "
+        "save_session() after each meaningful step and at least every ~8 turns (same session_id = update). "
+        "Mention what was saved in one short line; surface any error or ambiguity and ask."
     ),
 )
 
@@ -78,6 +81,37 @@ def resolve_project(path: str, ctx: Context = None) -> dict:
         "slug": project.get("slug"),
         "name": project.get("name"),
         "compose_path": project.get("compose_path"),
+    }
+
+
+@mcp.tool
+def create_project(
+    path: str,
+    name: Optional[str] = None,
+    slug: Optional[str] = None,
+    device_name: Optional[str] = None,
+    ctx: Context = None,
+) -> dict:
+    """
+    Create a project for a workspace folder when resolve_project found none, and make it active.
+    Name/slug default to the folder name. Idempotent: returns the existing match if one appears.
+    Ask the user before calling this (one line: "No project for <folder>; create '<name>'?").
+    """
+    try:
+        project = hub.create_project_for_path(path, name=name, slug=slug, device_name=device_name)
+    except Exception as e:
+        logger.exception("create_project failed")
+        return {"ok": False, "error": str(e)}
+    active = _get_active(ctx)
+    active["project_id"] = project["id"]
+    active["slug"] = project.get("slug")
+    active["path"] = path
+    return {
+        "ok": True,
+        "created": bool(project.get("created")),
+        "project_id": project["id"],
+        "slug": project.get("slug"),
+        "name": project.get("name"),
     }
 
 
@@ -215,9 +249,11 @@ def save_session(
     ctx: Context = None,
 ) -> dict:
     """
-    Save or update a chat session. messages_json: JSON array of {role, content}.
-    occurred_at: ISO time when the conversation happened (logbook order), not save time.
-    Call at session end to persist work to the hub.
+    Checkpoint the current chat (create or update by session_id): stores title + summary content,
+    replaces the transcript if messages_json is given, extracts memories, embeds, refreshes brief,
+    vault note and wiki. Safe to call repeatedly — after each meaningful step and at least every
+    ~8 turns. messages_json: JSON array of {role, content}. occurred_at: ISO time the chat happened.
+    Always pass the real Cursor/Claude session_id so re-saves update instead of duplicating.
     """
     messages = None
     if messages_json:
@@ -241,6 +277,88 @@ def save_session(
     except Exception as e:
         logger.exception("save_session failed")
         return {"ok": False, "error": str(e)}
+
+
+@mcp.tool
+def wolfhowl(
+    title: Optional[str] = None,
+    messages_json: Optional[str] = None,
+    session_id: Optional[str] = None,
+    workspace_path: Optional[str] = None,
+    slug: Optional[str] = None,
+    device_name: Optional[str] = None,
+    git_json: Optional[str] = None,
+    cited_paths_json: Optional[str] = None,
+    ingest_cited: bool = False,
+    ctx: Context = None,
+) -> dict:
+    """
+    Broadcast this session: /save + path alias + git state + embed + file catalog + Obsidian notes.
+    messages_json: JSON array of {role, content}. git_json: {commit, branch, remote, dirty_files, is_repo}.
+    Returns a summary paragraph and offers[] to ask the user about (commit, ingest files, jobs).
+    """
+    from .howl import run_howl
+
+    def _load(raw: Optional[str], what: str):
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            raise ValueError(f"Invalid {what}")
+
+    try:
+        messages = _load(messages_json, "messages_json")
+        git = _load(git_json, "git_json")
+        cited = _load(cited_paths_json, "cited_paths_json")
+        active = _get_active(ctx)
+        report = run_howl(
+            session_id=session_id,
+            slug=slug or active.get("slug"),
+            workspace_path=workspace_path or active.get("path"),
+            title=title,
+            messages=messages,
+            device_name=device_name,
+            git=git,
+            cited_paths=cited,
+            ingest_cited=ingest_cited,
+        )
+        if report.get("project_id"):
+            active["project_id"] = report["project_id"]
+            active["slug"] = report.get("project_slug")
+        return report
+    except Exception as e:
+        logger.exception("wolfhowl failed")
+        return {"ok": False, "error": str(e)}
+
+
+@mcp.tool
+def wolfeat(
+    slug: Optional[str] = None,
+    project_id: Optional[int] = None,
+    workspace_path: Optional[str] = None,
+    device_name: Optional[str] = None,
+    query: Optional[str] = None,
+    ctx: Context = None,
+) -> dict:
+    """
+    Pull the latest context for a project onto this machine: brief, memories, howls (with git SHAs),
+    related notes, open jobs, plus offers[] (git pull, register path, read files, model pull).
+    """
+    from .howl import run_eat
+
+    active = _get_active(ctx)
+    result = run_eat(
+        slug=slug or active.get("slug"),
+        project_id=project_id or active.get("project_id"),
+        workspace_path=workspace_path or active.get("path"),
+        device_name=device_name,
+        query=query,
+    )
+    if result.get("ok"):
+        active["project_id"] = result["project_id"]
+        active["slug"] = result.get("slug")
+    return result
 
 
 def mount_on_fastapi(fastapi_app) -> None:

@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -127,7 +126,6 @@ def distill_project(project_id: int, db_path: Path | None = None) -> dict[str, A
     extract_memories_for_project(project_id, max_new=5)
 
     with db_conn() as conn:
-        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute("SELECT * FROM projects WHERE id = ?", (project_id,))
         project = cur.fetchone()

@@ -4,23 +4,21 @@ from __future__ import annotations
 
 import argparse
 import json
-import sqlite3
 from datetime import datetime
-from pathlib import Path
+from typing import Any
 
-from ide_storage.db import get_db_path
+from ide_storage.db import connect, get_db_path
 from ide_storage.distill_spec import distill_all_specs
 from ide_storage.project_archetypes import SLUG_ARCHETYPES, metadata_patch
 from ide_storage.relink_chats import relink_chat
 from ide_storage.topic_projects import migrate_catch_all_topics
 
-DB_PATH = Path(get_db_path())
+DB_PATH = get_db_path()
 
 
-def apply_metadata(db_path: Path = DB_PATH) -> int:
+def apply_metadata(db_path: Any = DB_PATH) -> int:
     now = datetime.utcnow().isoformat()
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = connect()
     cur = conn.cursor()
     cur.execute("SELECT * FROM projects WHERE COALESCE(status, 'active') != 'archived'")
     updated = 0
@@ -47,12 +45,11 @@ def apply_metadata(db_path: Path = DB_PATH) -> int:
     return updated
 
 
-def fix_manual_relinks(db_path: Path = DB_PATH) -> list[dict]:
+def fix_manual_relinks(db_path: Any = DB_PATH) -> list[dict]:
     from ide_storage.relink_chats import MANUAL_LINKS
 
     now = datetime.utcnow().isoformat()
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = connect()
     cur = conn.cursor()
     results = []
     for chat_id in MANUAL_LINKS:
@@ -66,7 +63,7 @@ def fix_manual_relinks(db_path: Path = DB_PATH) -> list[dict]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Apply Wolf Leader project archetypes")
-    parser.add_argument("--db", type=Path, default=DB_PATH)
+    parser.add_argument("--db", default=DB_PATH, help="ignored; set DATABASE_URL instead")
     parser.add_argument("--skip-distill", action="store_true")
     args = parser.parse_args()
 

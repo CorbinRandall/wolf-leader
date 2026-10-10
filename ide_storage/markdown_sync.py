@@ -92,7 +92,9 @@ def regenerate_index() -> str:
         "IDE_STORAGE_COMPOSE_PATH",
         "/boot/config/plugins/compose.manager/projects/wolf-leader",
     )
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    from ide_storage.localtime import now_display
+
+    now = now_display()
 
     with db_conn() as conn:
         cur = conn.cursor()

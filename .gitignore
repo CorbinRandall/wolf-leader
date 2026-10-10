@@ -1,11 +1,11 @@
-# Local configuration — never commit secrets or host-specific URLs
+# Local configuration - never commit secrets or host-specific URLs
 .env
 .env.bak
 .env.local
 .env.*.local
 docker-compose.local.yml
 
-# Runtime data — your homelab memory stays private
+# Runtime data - your homelab memory stays private
 data/ide-work.db
 data/ide-work.db-*
 data/logs/
@@ -25,6 +25,36 @@ data/projects/*
 !data/projects/_example/
 !data/projects/_example/**
 
+# Wiki (Fumadocs) - generated content + build output
+wiki/node_modules/
+wiki/.next/
+wiki/out/
+wiki/content/docs/**
+!wiki/content/docs/index.md
+wiki/.source/
+wiki/next-env.d.ts
+wiki/*.tsbuildinfo
+
+# Local reference material, vendored repos and unrelated archives
+fumadocs/
+Halo Fumadocs Design System/
+GridMaster5K-0.20/
+GridMaster5K-0.20.zip
+arc5k/
+arc5k.zip
+talk-simply/
+talk-simply.zip
+
+# Repo-local editor/agent config (examples live under examples/cursor/)
+/.cursor/
+
+# Build / installer output
+dist/
+installer/windows/Output/
+*.dmg
+installer/mac/WolfLeaderApp/.build/
+installer/mac/WolfLeaderApp/.swiftpm/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -43,7 +73,5 @@ name
 .DS_Store
 Thumbs.db
 
-# Legacy one-off scripts (optional local utilities)
-migrate.py
-save_chat.sh
-store_current_chat.py
+# Personal planning notes
+docs/arch-review/

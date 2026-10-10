@@ -3,12 +3,11 @@ from __future__ import annotations
 
 import json
 import re
-import sqlite3
 from pathlib import Path
 from typing import Any
 
 from ide_storage.hub import normalize_path, resolve_project
-from ide_storage.db import db_file
+from ide_storage.db import connect, db_file
 from ide_storage.import_all_transcripts import (
     CATCH_ALL_PROJECT_ID,
     _explicit_project_id,
@@ -118,9 +117,8 @@ def conversation_text(
     )
 
 
-def _slug_rows(db_path: Path) -> list[dict[str, Any]]:
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+def _slug_rows(db_path: Any = None) -> list[dict[str, Any]]:
+    conn = connect()
     cur = conn.cursor()
     cur.execute(
         """

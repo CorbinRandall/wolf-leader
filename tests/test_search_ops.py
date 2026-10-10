@@ -15,7 +15,7 @@ def test_reciprocal_rank_fusion_boosts_overlap():
 
 
 def test_hybrid_search_keyword_only_when_embeddings_disabled(monkeypatch):
-    monkeypatch.delenv("IDE_STORAGE_EMBEDDINGS_ENABLED", raising=False)
+    monkeypatch.setenv("IDE_STORAGE_EMBEDDINGS_ENABLED", "0")
     result = hybrid_search("nonexistent-query-xyz", limit=5)
     assert result["mode"] == "keyword"
     assert result["count"] == 0

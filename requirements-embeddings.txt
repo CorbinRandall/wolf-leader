@@ -1,6 +1,5 @@
-# Optional semantic search deps — CPU ONNX embeddings + SQLite vector store.
-# Installed only when building with INCLUDE_EMBEDDINGS=1 (and enabled at runtime
-# via IDE_STORAGE_EMBEDDINGS_ENABLED=1). Both are lazily imported, so the app
-# runs fine in keyword-only mode without these installed.
+# Semantic search deps — CPU ONNX embeddings (all-MiniLM-L6-v2). Vectors live in
+# Postgres (pgvector), so this is the only extra package. Installed by default in
+# the Docker image (INCLUDE_EMBEDDINGS=1); set IDE_STORAGE_EMBEDDINGS_ENABLED=0
+# for a deliberately keyword-only hub.
 fastembed>=0.4.0,<0.8.0
-sqlite-vec>=0.1.6

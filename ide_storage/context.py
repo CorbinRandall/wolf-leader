@@ -19,11 +19,11 @@ def get_service_config() -> Dict[str, str]:
         ),
         "compose_path": compose_path,
         "db_path_host": os.environ.get(
-            "IDE_STORAGE_DB_PATH_HOST",
-            os.path.join(compose_path, "data", "ide-work.db"),
+            "IDE_STORAGE_PGDATA_HOST",
+            "/var/lib/wolf-postgres",
         ),
         "db_path_container": os.environ.get(
-            "IDE_STORAGE_DB_PATH", "/data/ide-work.db"
+            "DATABASE_URL", "postgresql://wolf@postgres:5432/wolf_leader"
         ),
         "cursor_transcripts_root": os.environ.get(
             "CURSOR_TRANSCRIPTS_ROOT",
@@ -128,8 +128,8 @@ def format_agent_context_text(ctx: Dict[str, Any]) -> str:
             f"### {PRODUCT_NAME} service",
             f"- **Container:** `{svc['container_name']}`",
             f"- **Compose folder:** `{svc['compose_path']}`",
-            f"- **Database (host):** `{paths['database_host']}`",
-            f"- **Database (container):** `{paths['database_container']}`",
+            f"- **Postgres data (host):** `{paths['database_host']}`",
+            f"- **Database URL (container):** `{paths['database_container']}`",
             f"- **Web UI:** {urls['web']}",
             "",
             "### How to load full context",
@@ -141,9 +141,9 @@ def format_agent_context_text(ctx: Dict[str, Any]) -> str:
             f"   ```",
             f"   curl -s '{urls['api_messages']}'",
             f"   ```",
-            "3. Or read from SQLite on the host:",
+            "3. Or query Postgres directly on the hub:",
             f"   ```",
-            f"   sqlite3 {paths['database_host']} "
+            f"   docker compose exec postgres psql -U wolf wolf_leader -c "
             f"\"SELECT role, content FROM messages WHERE chat_id={ctx['chat_id']} ORDER BY id\"",
             f"   ```",
         ]

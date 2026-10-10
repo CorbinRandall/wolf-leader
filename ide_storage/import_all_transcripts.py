@@ -6,14 +6,14 @@ import argparse
 import json
 import os
 import re
-import sqlite3
 import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from ide_storage.import_transcript import API_URL, clean_user, extract_text, parse_transcript
-from ide_storage.db import db_file, get_db_path
+from ide_storage.db import connect, db_file, get_db_path  # noqa: F401
 
 TRANSCRIPTS_ROOT = Path(
     os.environ.get("CURSOR_TRANSCRIPTS_ROOT", "/root/.cursor/projects/root/agent-transcripts")
@@ -56,10 +56,11 @@ GENERIC_DB_TOKENS = {
 }
 
 
-def existing_session_ids(db_path: Path) -> set[str]:
-    if not db_path.exists():
+def existing_session_ids(db_path: Any = None) -> set[str]:
+    try:
+        conn = connect()
+    except Exception:
         return set()
-    conn = sqlite3.connect(db_path)
     try:
         cur = conn.cursor()
         cur.execute("SELECT session_id FROM chats WHERE session_id IS NOT NULL")
@@ -109,7 +110,7 @@ def _strip_hub_paste(text: str) -> str:
     return text.strip()
 
 
-def _explicit_project_id(text: str, db_path: Path | None) -> int | None:
+def _explicit_project_id(text: str, db_path: Any = None) -> int | None:
     """Honor **Project:** Name (`slug`) from pasted hub context."""
     m = re.search(r"\*\*Project:\*\*[^`\n]*`([a-z0-9][a-z0-9-]*)`", text, re.I)
     if not m:
@@ -118,9 +119,10 @@ def _explicit_project_id(text: str, db_path: Path | None) -> int | None:
             return int(m.group(1))
         return None
     slug = m.group(1).lower()
-    if not db_path or not db_path.exists():
+    try:
+        conn = connect()
+    except Exception:
         return None
-    conn = sqlite3.connect(db_path)
     try:
         cur = conn.cursor()
         cur.execute(
@@ -133,13 +135,14 @@ def _explicit_project_id(text: str, db_path: Path | None) -> int | None:
         conn.close()
 
 
-def load_db_project_rules(db_path: Path) -> list[tuple[int, re.Pattern[str]]]:
+def load_db_project_rules(db_path: Any = None) -> list[tuple[int, re.Pattern[str]]]:
     """Build match rules from project slug, name, and description in the hub DB."""
-    if not db_path.exists():
-        return []
     rules: list[tuple[int, re.Pattern[str]]] = []
     known = {project_id for project_id, _ in PROJECT_RULES}
-    conn = sqlite3.connect(db_path)
+    try:
+        conn = connect()
+    except Exception:
+        return []
     try:
         cur = conn.cursor()
         cur.execute(
@@ -165,7 +168,7 @@ def load_db_project_rules(db_path: Path) -> list[tuple[int, re.Pattern[str]]]:
     return rules
 
 
-def guess_project_id(text: str, db_path: Path | None = None) -> int | None:
+def guess_project_id(text: str, db_path: Any = None) -> int | None:
     """Pick one project from transcript text using scored full-text matching."""
     explicit = _explicit_project_id(text, db_path)
     if explicit is not None:
@@ -197,7 +200,7 @@ def import_transcript(
     *,
     api_url: str,
     skip_ids: set[str],
-    db_path: Path | None = None,
+    db_path: Any = None,
     dry_run: bool = False,
     device_name: str = "unraid-server",
     workspace_path: str = "/root",
@@ -265,7 +268,7 @@ def discover_transcripts(root: Path, session_id: str | None = None) -> list[Path
 def sync_transcript(
     path: Path,
     *,
-    db_path: Path,
+    db_path: Any = None,
     dry_run: bool = False,
 ) -> dict:
     """Replace messages for an existing chat from its transcript file."""
@@ -290,7 +293,7 @@ def sync_transcript(
         return result
 
     now = datetime.utcnow().isoformat()
-    conn = sqlite3.connect(db_path)
+    conn = connect()
     try:
         cur = conn.cursor()
         cur.execute("SELECT id, project_id FROM chats WHERE session_id = ?", (session_id,))
@@ -342,7 +345,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Bulk import Cursor transcripts")
     parser.add_argument("--root", type=Path, default=TRANSCRIPTS_ROOT)
     parser.add_argument("--api", default=API_URL)
-    parser.add_argument("--db", type=Path, default=None)
+    parser.add_argument("--db", default=None, help="ignored; set DATABASE_URL instead")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--sync", action="store_true", help="Re-sync full messages for chats already in DB")
     parser.add_argument("--session-id", help="Only import/sync this session UUID")

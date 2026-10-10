@@ -5,16 +5,15 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from ide_storage.markdown_sync import ensure_project_md_from_db, regenerate_index
 
-from ide_storage.db import get_db_path
+from ide_storage.db import connect, get_db_path
 
-DB_PATH = Path(get_db_path())
+DB_PATH = get_db_path()  # connection URL; kept for CLI --db compatibility
 CATCH_ALL_PROJECT_ID = 1
 
 TOPIC_PATH = "/root"
@@ -36,7 +35,7 @@ MANUAL_SLUG_LINKS: dict[int, str] = {
 }
 
 
-def _slug_to_id(cur: sqlite3.Cursor, slug: str) -> int | None:
+def _slug_to_id(cur: Any, slug: str) -> int | None:
     cur.execute(
         "SELECT id FROM projects WHERE slug = ? AND COALESCE(status, 'active') != 'archived'",
         (slug,),
@@ -45,7 +44,7 @@ def _slug_to_id(cur: sqlite3.Cursor, slug: str) -> int | None:
     return row[0] if row else None
 
 
-def ensure_topic_project(cur: sqlite3.Cursor, spec: dict[str, Any], now: str) -> int:
+def ensure_topic_project(cur: Any, spec: dict[str, Any], now: str) -> int:
     """Create or update a topic project; return project id."""
     from ide_storage.project_archetypes import metadata_patch
 
@@ -118,12 +117,12 @@ def ensure_topic_project(cur: sqlite3.Cursor, spec: dict[str, Any], now: str) ->
     return cur.lastrowid
 
 
-def topic_project_rules(db_path: Path | None = None) -> list[tuple[int, re.Pattern[str]]]:
+def topic_project_rules(db_path: Any = None) -> list[tuple[int, re.Pattern[str]]]:
     """Runtime rules from TOPIC_SPECS + DB ids (specific patterns before catch-all)."""
-    path = db_path or DB_PATH
-    if not path.exists():
+    try:
+        conn = connect()
+    except Exception:
         return []
-    conn = sqlite3.connect(path)
     try:
         cur = conn.cursor()
         rules: list[tuple[int, re.Pattern[str]]] = []
@@ -137,7 +136,7 @@ def topic_project_rules(db_path: Path | None = None) -> list[tuple[int, re.Patte
         conn.close()
 
 
-def resolve_manual_slug(cur: sqlite3.Cursor, chat_id: int) -> int | None:
+def resolve_manual_slug(cur: Any, chat_id: int) -> int | None:
     slug = MANUAL_SLUG_LINKS.get(chat_id)
     if not slug:
         return None
@@ -145,14 +144,13 @@ def resolve_manual_slug(cur: sqlite3.Cursor, chat_id: int) -> int | None:
 
 
 def migrate_catch_all_topics(
-    db_path: Path = DB_PATH,
+    db_path: Any = DB_PATH,
     *,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """Split catch-all project 1 chats/memories into dedicated topic projects."""
     now = datetime.utcnow().isoformat()
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = connect()
     cur = conn.cursor()
 
     created: list[dict[str, Any]] = []
@@ -265,7 +263,7 @@ def migrate_catch_all_topics(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Create topic projects and migrate catch-all chats")
-    parser.add_argument("--db", type=Path, default=DB_PATH)
+    parser.add_argument("--db", default=DB_PATH, help="ignored; set DATABASE_URL instead")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     result = migrate_catch_all_topics(args.db, dry_run=args.dry_run)

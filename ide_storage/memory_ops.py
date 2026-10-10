@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sqlite3
 from datetime import datetime
 from typing import Any, Optional
 
@@ -490,7 +489,6 @@ def extract_memories_for_project(
     scanned_chats = 0
 
     with db_conn() as conn:
-        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         existing = _load_existing_memories(cur, project_id)
 
@@ -525,7 +523,13 @@ def extract_memories_for_project(
                 (cid,),
             )
             msgs = [dict(r) for r in cur.fetchall()]
-            if not msgs:
+            # The agent's checkpoint summary (chats.content) is the densest signal we
+            # have — background saves pass it without a transcript — so mine it first,
+            # then the assistant turns.
+            cur.execute("SELECT content FROM chats WHERE id = ?", (cid,))
+            row = cur.fetchone()
+            summary = ((row["content"] if row else "") or "").strip()
+            if not msgs and not summary:
                 continue
             scanned_chats += 1
             text = "\n\n".join(
@@ -533,6 +537,11 @@ def extract_memories_for_project(
             )
             if not text:
                 text = "\n\n".join(m["content"] for m in msgs if m.get("content"))
+            if summary and _TYPED_LINE_RE.search(summary):
+                # Agent wrote typed facts on purpose; trust them over transcript heuristics.
+                text = summary
+            elif summary:
+                text = summary + ("\n\n" + text if text else "")
             for cand in extract_from_text(text, chat_id=cid):
                 if len(created) >= max_new:
                     break
@@ -633,7 +642,6 @@ def prune_low_quality_memories(*, dry_run: bool = False) -> dict:
     removed: list[dict] = []
     kept = 0
     with db_conn() as conn:
-        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute("SELECT id, type, content, source_chat_id, project_id FROM memories")
         rows = [dict(r) for r in cur.fetchall()]

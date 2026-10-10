@@ -72,6 +72,14 @@ async def lifespan(app: FastAPI):
     stubs = sync_all_stubs()
     logger.info("Synced %d IDE_CONTEXT.md stubs", len(stubs))
     logger.info("Database initialized")
+    # Mirrors: make sure the vault + wiki reflect Postgres at boot (debounced build).
+    try:
+        from .mirrors import refresh_mirrors
+
+        boot = refresh_mirrors(None)
+        logger.info("Mirrors refreshed at boot: %s", {k: (v if isinstance(v, dict) and v.get("error") else "ok") for k, v in boot.items()})
+    except Exception:  # noqa: BLE001
+        logger.exception("mirror refresh at boot failed")
     yield
 
 
@@ -88,6 +96,17 @@ app.add_middleware(
 
 if STATIC_DIR.is_dir():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+from .api_wolf import router as wolf_router  # noqa: E402
+
+app.include_router(wolf_router)
+
+# Native wiki (Fumadocs static export, Halo theme). Built into wiki/out by the
+# Dockerfile and rebuilt by the hub after saves/howls. Same container, no second
+# web server. check_dir=False so a missing build 404s instead of breaking the API.
+from .wiki_export import OUT_DIR as _WIKI_OUT  # noqa: E402
+
+app.mount("/wiki", StaticFiles(directory=str(_WIKI_OUT), html=True, check_dir=False), name="wiki")
 
 # Pydantic models
 class MessageCreate(BaseModel):
@@ -132,6 +151,7 @@ class ProjectCreate(BaseModel):
     status: Optional[str] = "active"
     compose_path: Optional[str] = None
     tags: Optional[List[str]] = None
+    owner: Optional[str] = None
 
 
 class ProjectUpdate(BaseModel):
@@ -143,6 +163,13 @@ class ProjectUpdate(BaseModel):
     compose_path: Optional[str] = None
     path: Optional[str] = None
     tags: Optional[List[str]] = None
+    owner: Optional[str] = None  # "" clears a hand-set owner
+
+
+class OwnerAssign(BaseModel):
+    owner: str
+    project_ids: Optional[List[int]] = None
+    only_unassigned: bool = False
 
 
 class ProjectMerge(BaseModel):
@@ -202,6 +229,21 @@ class SkillImport(BaseModel):
     overwrite: bool = False
 
 
+class SnippetCreate(BaseModel):
+    title: Optional[str] = None
+    language: Optional[str] = None
+    content: str
+    project_id: Optional[int] = None
+    tags: Optional[List[str]] = None
+
+
+class SnippetUpdate(BaseModel):
+    title: Optional[str] = None
+    language: Optional[str] = None
+    content: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
 class ProjectMdUpdate(BaseModel):
     content: str
 
@@ -251,21 +293,6 @@ class MemoryUpdate(BaseModel):
     type: Optional[str] = None
     content: Optional[str] = None
     semantic_descriptor: Optional[str] = None
-
-
-class SnippetCreate(BaseModel):
-    title: Optional[str] = None
-    language: Optional[str] = None
-    content: str
-    project_id: Optional[int] = None
-    tags: Optional[List[str]] = None
-
-
-class SnippetUpdate(BaseModel):
-    title: Optional[str] = None
-    language: Optional[str] = None
-    content: Optional[str] = None
-    tags: Optional[List[str]] = None
 
 
 @app.get("/")
@@ -983,7 +1010,10 @@ async def create_project(project: ProjectCreate):
     """Create a new project."""
     now = datetime.utcnow().isoformat()
     import json
-    metadata_json = json.dumps(project.metadata) if project.metadata else None
+    metadata = dict(project.metadata or {})
+    if project.owner and project.owner.strip():
+        metadata["owner"] = _known_owner(project.owner)
+    metadata_json = json.dumps(metadata) if metadata else None
     tags_json = json.dumps(project.tags) if project.tags else None
     slug = project.slug or project.name.lower().replace(" ", "-")[:64]
     
@@ -1042,7 +1072,42 @@ async def list_projects(
         cur.execute(query, params)
         rows = cur.fetchall()
         projects = [dict(row) for row in rows]
-        return {"projects": projects, "count": len(projects)}
+    from ide_storage.owners import attach_owners
+
+    attach_owners(projects)
+    return {"projects": projects, "count": len(projects)}
+
+
+def _known_owner(name: str) -> str:
+    from ide_storage.owners import canonical_owner, configured_owners
+
+    owner = canonical_owner(name)
+    if owner is None:
+        raise HTTPException(status_code=400, detail=f"Unknown owner. Choose one of: {', '.join(configured_owners())}")
+    return owner
+
+
+@app.get("/api/owners")
+async def list_owners():
+    """Owners on this hub and how many projects each has ("" = unassigned)."""
+    from ide_storage.owners import owner_summary
+
+    return owner_summary()
+
+
+@app.post("/api/owners/assign")
+async def assign_owner(body: OwnerAssign):
+    """Label several projects at once; ``only_unassigned`` labels every project without an owner."""
+    from ide_storage.owners import set_owner, unassigned_project_ids
+
+    owner = _known_owner(body.owner)
+    ids = list(body.project_ids or [])
+    if body.only_unassigned:
+        unassigned = unassigned_project_ids()
+        ids = [i for i in ids if i in set(unassigned)] if ids else unassigned
+    if not ids:
+        return {"owner": owner, "changed": 0}
+    return {"owner": owner, "changed": set_owner(ids, owner)}
 
 
 @app.get("/api/projects/duplicates")
@@ -1091,8 +1156,10 @@ async def get_project(project_id: int):
         
         if not row:
             raise HTTPException(status_code=404, detail="Project not found")
-        
-        return dict(row)
+
+    from ide_storage.owners import attach_owners
+
+    return attach_owners([dict(row)])[0]
 
 
 @app.put("/api/projects/{project_id}")
@@ -1104,7 +1171,7 @@ async def update_project(project_id: int, project: ProjectUpdate):
     # wipes — otherwise PUTs that omit metadata.semantic_descriptor would silently
     # destroy the project's vector descriptor (real data loss).
     existing_metadata: dict = {}
-    if project.metadata is not None:
+    if project.metadata is not None or project.owner is not None:
         with db_conn() as conn:
             cur = conn.cursor()
             cur.execute("SELECT metadata FROM projects WHERE id = ?", (project_id,))
@@ -1131,8 +1198,13 @@ async def update_project(project_id: int, project: ProjectUpdate):
         updates.append("description = ?")
         params.append(project.description)
     
-    if project.metadata is not None:
-        merged = {**existing_metadata, **project.metadata}
+    if project.metadata is not None or project.owner is not None:
+        merged = {**existing_metadata, **(project.metadata or {})}
+        if project.owner is not None:
+            if project.owner.strip():
+                merged["owner"] = _known_owner(project.owner)
+            else:
+                merged.pop("owner", None)
         updates.append("metadata = ?")
         params.append(json.dumps(merged))
 
@@ -1195,12 +1267,6 @@ async def delete_project(project_id: int):
 
     with db_conn() as conn:
         cur = conn.cursor()
-        # snippets.project_id is a FK with no ON DELETE action; with
-        # foreign_keys=ON a delete would otherwise be blocked. Detach them.
-        cur.execute(
-            "UPDATE snippets SET project_id = NULL WHERE project_id = ?",
-            (project_id,),
-        )
         cur.execute("DELETE FROM projects WHERE id = ?", (project_id,))
         conn.commit()
         
@@ -1792,25 +1858,20 @@ async def delete_memory(memory_id: int):
 # Snippet endpoints
 @app.post("/api/snippets")
 async def create_snippet(snippet: SnippetCreate):
-    """Create a new code snippet."""
     now = datetime.utcnow().isoformat()
-    tags_json = None
-    if snippet.tags:
-        import json
-        tags_json = json.dumps(snippet.tags)
-    
+    tags_json = json.dumps(snippet.tags) if snippet.tags else None
     with db_conn() as conn:
         cur = conn.cursor()
         cur.execute(
             """
             INSERT INTO snippets (title, language, content, project_id, created_at, updated_at, tags)
             VALUES (?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
             """,
-            (snippet.title, snippet.language, snippet.content, snippet.project_id, now, now, tags_json)
+            (snippet.title, snippet.language, snippet.content, snippet.project_id, now, now, tags_json),
         )
-        snippet_id = cur.lastrowid
+        snippet_id = cur.fetchone()["id"]
         conn.commit()
-    
     return {"id": snippet_id, "message": "Snippet created successfully"}
 
 
@@ -1819,111 +1880,96 @@ async def list_snippets(
     project_id: Optional[int] = None,
     language: Optional[str] = None,
     limit: int = 100,
-    offset: int = 0
+    offset: int = 0,
 ):
-    """List snippets with optional filtering."""
     with db_conn() as conn:
         cur = conn.cursor()
-        
         query = "SELECT * FROM snippets WHERE 1=1"
-        params = []
-        
-        if project_id:
+        params: list[Any] = []
+        if project_id is not None:
             query += " AND project_id = ?"
             params.append(project_id)
-        
         if language:
             query += " AND language = ?"
             params.append(language)
-        
         query += " ORDER BY updated_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
-        
         cur.execute(query, params)
-        rows = cur.fetchall()
-        
-        snippets = [dict(row) for row in rows]
-        return {"snippets": snippets, "count": len(snippets)}
+        rows = [dict(row) for row in cur.fetchall()]
+    return {"snippets": rows, "count": len(rows)}
 
 
 @app.get("/api/snippets/{snippet_id}")
 async def get_snippet(snippet_id: int):
-    """Get a specific snippet by ID."""
     with db_conn() as conn:
         cur = conn.cursor()
         cur.execute("SELECT * FROM snippets WHERE id = ?", (snippet_id,))
         row = cur.fetchone()
-        
-        if not row:
-            raise HTTPException(status_code=404, detail="Snippet not found")
-        
-        return dict(row)
+    if not row:
+        raise HTTPException(status_code=404, detail="Snippet not found")
+    return dict(row)
 
 
 @app.put("/api/snippets/{snippet_id}")
 async def update_snippet(snippet_id: int, snippet: SnippetUpdate):
-    """Update a snippet."""
-    import json
-    
-    updates = []
-    params = []
-    
-    if snippet.title is not None:
-        updates.append("title = ?")
-        params.append(snippet.title)
-    
-    if snippet.language is not None:
-        updates.append("language = ?")
-        params.append(snippet.language)
-    
-    if snippet.content is not None:
-        updates.append("content = ?")
-        params.append(snippet.content)
-    
+    updates: list[str] = []
+    params: list[Any] = []
+    for field in ("title", "language", "content"):
+        value = getattr(snippet, field)
+        if value is not None:
+            updates.append(f"{field} = ?")
+            params.append(value)
     if snippet.tags is not None:
         updates.append("tags = ?")
         params.append(json.dumps(snippet.tags))
-    
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
-    
     updates.append("updated_at = ?")
-    params.append(datetime.utcnow().isoformat())
-    params.append(snippet_id)
-    
+    params.extend([datetime.utcnow().isoformat(), snippet_id])
     with db_conn() as conn:
         cur = conn.cursor()
-        cur.execute(
-            f"UPDATE snippets SET {', '.join(updates)} WHERE id = ?",
-            params
-        )
+        cur.execute(f"UPDATE snippets SET {', '.join(updates)} WHERE id = ?", params)
         conn.commit()
-        
-        if cur.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Snippet not found")
-    
+        changed = cur.rowcount
+    if changed == 0:
+        raise HTTPException(status_code=404, detail="Snippet not found")
     return {"message": "Snippet updated successfully"}
 
 
 @app.delete("/api/snippets/{snippet_id}")
 async def delete_snippet(snippet_id: int):
-    """Delete a snippet."""
     with db_conn() as conn:
         cur = conn.cursor()
         cur.execute("DELETE FROM snippets WHERE id = ?", (snippet_id,))
         conn.commit()
-        
-        if cur.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Snippet not found")
-    
+        changed = cur.rowcount
+    if changed == 0:
+        raise HTTPException(status_code=404, detail="Snippet not found")
     return {"message": "Snippet deleted successfully"}
 
 
 # Health check
 @app.get("/health")
 async def health():
-    """Health check endpoint."""
-    return {"status": "healthy", "service": SERVICE_ID, "product": PRODUCT_NAME}
+    """Health check: API up, Postgres reachable, pgvector present, embeddings state."""
+    from ide_storage.db import vector_available
+    from ide_storage.embeddings import embeddings_status
+
+    db_ok = True
+    db_error = None
+    try:
+        with db_conn() as conn:
+            conn.cursor().execute("SELECT 1")
+    except Exception as exc:  # noqa: BLE001
+        db_ok = False
+        db_error = str(exc)
+    return {
+        "status": "healthy" if db_ok else "degraded",
+        "service": SERVICE_ID,
+        "product": PRODUCT_NAME,
+        "database": {"ok": db_ok, "pgvector": vector_available() if db_ok else False, "error": db_error},
+        "embeddings": embeddings_status(),
+    }
 
 
 @app.get("/{project_slug}")

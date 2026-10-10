@@ -1,0 +1,15 @@
+# Shell scripts run inside Linux containers and on client machines: always LF.
+*.sh text eol=lf
+start.sh text eol=lf
+Dockerfile text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text
+*.mdx text
+*.command text eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.iss text eol=crlf
+*.bmp binary
+*.png binary

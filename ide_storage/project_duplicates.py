@@ -169,8 +169,12 @@ def merge_projects(target_id: int, source_ids: list[int]) -> dict[str, Any]:
             ),
         )
 
-        moved = {"chats": 0, "memories": 0, "snippets": 0}
-        for table, label in (("chats", "chats"), ("memories", "memories"), ("snippets", "snippets")):
+        moved = {"chats": 0, "memories": 0, "snippets": 0, "howls": 0, "jobs": 0,
+                 "catalog": 0, "file_chunks": 0, "knowledge_revisions": 0, "paths": 0}
+        for table, label in (
+            ("chats", "chats"), ("memories", "memories"), ("snippets", "snippets"),
+            ("howls", "howls"), ("jobs", "jobs"), ("knowledge_revisions", "knowledge_revisions"),
+        ):
             source_placeholders = ",".join("?" for _ in source_ids)
             cur.execute(
                 f"UPDATE {table} SET project_id = ? WHERE project_id IN ({source_placeholders})",
@@ -178,7 +182,63 @@ def merge_projects(target_id: int, source_ids: list[int]) -> dict[str, Any]:
             )
             moved[label] = cur.rowcount
 
-        source_placeholders = ",".join("?" for _ in source_ids)
+        # Preserve every v2 workspace path while respecting the target's unique constraint.
+        cur.execute(
+            f"""
+            INSERT INTO project_paths (project_id, path, kind, device_name, created_at)
+            SELECT ?, path, kind, device_name, created_at
+            FROM project_paths WHERE project_id IN ({source_placeholders})
+            ON CONFLICT (project_id, path) DO NOTHING
+            """,
+            [target_id, *source_ids],
+        )
+        moved["paths"] = cur.rowcount
+        cur.execute(f"DELETE FROM project_paths WHERE project_id IN ({source_placeholders})", source_ids)
+
+        # Catalog and chunk rows have project-scoped uniqueness. Remove only exact target
+        # duplicates, then move the remaining source rows without losing v2 knowledge.
+        cur.execute(
+            f"""
+            DELETE FROM file_chunks s
+            WHERE s.project_id IN ({source_placeholders})
+              AND EXISTS (SELECT 1 FROM file_chunks t WHERE t.project_id = ?
+                          AND t.path = s.path AND t.chunk_index = s.chunk_index)
+            """,
+            [*source_ids, target_id],
+        )
+        cur.execute(
+            f"UPDATE file_chunks SET project_id = ? WHERE project_id IN ({source_placeholders})",
+            [target_id, *source_ids],
+        )
+        moved["file_chunks"] = cur.rowcount
+
+        cur.execute(
+            f"""
+            UPDATE file_chunks fc
+            SET fs_catalog_id = t.id
+            FROM fs_catalog s, fs_catalog t
+            WHERE fc.fs_catalog_id = s.id
+              AND s.project_id IN ({source_placeholders})
+              AND t.project_id = ?
+              AND t.root_path = s.root_path AND t.rel_path = s.rel_path
+            """,
+            [*source_ids, target_id],
+        )
+        cur.execute(
+            f"""
+            DELETE FROM fs_catalog s
+            WHERE s.project_id IN ({source_placeholders})
+              AND EXISTS (SELECT 1 FROM fs_catalog t WHERE t.project_id = ?
+                          AND t.root_path = s.root_path AND t.rel_path = s.rel_path)
+            """,
+            [*source_ids, target_id],
+        )
+        cur.execute(
+            f"UPDATE fs_catalog SET project_id = ? WHERE project_id IN ({source_placeholders})",
+            [target_id, *source_ids],
+        )
+        moved["catalog"] = cur.rowcount
+
         cur.execute(f"DELETE FROM projects WHERE id IN ({source_placeholders})", source_ids)
         removed_count = cur.rowcount
         conn.commit()

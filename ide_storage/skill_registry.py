@@ -12,8 +12,6 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from .db import db_file
-
 SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 MAX_ARCHIVE_BYTES = 25 * 1024 * 1024
 IGNORED_PARTS = {"__pycache__", ".DS_Store", ".git"}
@@ -21,7 +19,10 @@ IGNORED_PARTS = {"__pycache__", ".DS_Store", ".git"}
 
 def skills_dir() -> Path:
     configured = os.environ.get("IDE_STORAGE_SKILLS_DIR")
-    return Path(configured) if configured else db_file().parent / "skills"
+    if configured:
+        return Path(configured)
+    projects_dir = Path(os.environ.get("IDE_STORAGE_PROJECTS_DIR", "/data/projects"))
+    return projects_dir.parent / "skills"
 
 
 def _parse_manifest(text: str, fallback_name: str) -> tuple[str, str]:

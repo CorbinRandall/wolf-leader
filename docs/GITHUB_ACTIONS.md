@@ -1,15 +1,45 @@
-# GitHub Actions
+# GitHub Actions — CI/CD
 
-The included `CI` workflow runs the test suite on pushes and pull requests. It uses GitHub-hosted runners and needs no repository secrets.
+## What runs automatically
 
-Production deployment is intentionally not included as an automatic workflow. A public fork cannot know another owner's server address, checkout path, runner labels, or deployment command. An automatic self-hosted job with missing private infrastructure waits and eventually appears as a cancelled check.
+| Event | Workflow | Where |
+|-------|----------|-------|
+| Push or PR | **CI** — `pytest` | GitHub cloud runner |
+| Push to `main` | **Deploy** — tests, then prod deploy | Cloud runner + **self-hosted runner on Proxmox** |
 
-## Add deployment for your installation
+Cloud runners cannot reach your LAN. Deploy uses a **self-hosted runner** on Proxmox that runs the same script as `./scripts/deploy-prod.sh`.
 
-1. Verify the app locally and decide which host will run it.
-2. Add a self-hosted GitHub runner for your own repository, or use your hosting provider's deployment action.
-3. Store host-specific values as GitHub repository variables or secrets. Do not commit IP addresses, credentials, usernames, or absolute private paths.
-4. Create a deployment workflow in your fork. Prefer `workflow_dispatch` while setting it up; add a push trigger only after the runner is reliably online.
-5. Keep CI and deployment separate so a missing private runner cannot make healthy code look broken.
+## One-time setup (Proxmox host)
 
-Wolf Leader's local `scripts/setup.sh` and `docker compose up -d --build` commands are the portable deployment foundation. Environment-specific wrappers belong in the installer's private configuration or fork.
+1. Open **Settings → Actions → Runners** in your GitHub repo → **New self-hosted runner** → Linux x64.
+2. Copy the registration token.
+3. On your Proxmox host:
+
+```bash
+cd /opt/wolf-leader
+git pull
+GITHUB_REPO='<owner>/wolf-leader' GITHUB_RUNNER_TOKEN='paste-token-here' ./scripts/install-github-runner.sh
+```
+
+4. Confirm the runner shows **Idle** in GitHub Settings.
+5. Add a repository variable `WOLF_LEADER_VMID` (Settings → Secrets and variables → Actions → Variables) set to the hub container id.
+
+## Daily workflow
+
+```bash
+# Mac — develop, test locally, push
+git push origin main
+# GitHub Actions tests + deploys automatically
+```
+
+Manual deploy still works:
+
+```bash
+WOLF_LEADER_PROXMOX_HOST=root@<proxmox-host> WOLF_LEADER_VMID=<ctid> ./scripts/deploy-prod.sh
+```
+
+## Notes
+
+- Merge to `main` triggers production deploy. Feature branches only run tests.
+- The self-hosted runner needs `/opt/wolf-leader` (git clone) and `pct` access to the hub LXC (`WOLF_LEADER_VMID`).
+- Runner service: `systemctl status actions.runner.*`

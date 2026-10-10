@@ -12,6 +12,9 @@ let state = {
   chats: [],
   archivedChats: [],
   projects: [],
+  owners: [],
+  ownerCounts: {},
+  ownerFilter: "",
   activeChatId: null,
   activeProjectId: null,
   activeChat: null,
@@ -44,7 +47,9 @@ function formatDate(iso) {
   if (!iso) return "—";
   const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
   if (Number.isNaN(d.getTime())) return (iso || "").slice(0, 16).replace("T", " ");
-  return d.toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+  // HH:MM MM/DD/YYYY in the browser's local time.
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())} ${p(d.getMonth() + 1)}/${p(d.getDate())}/${d.getFullYear()}`;
 }
 
 function escapeHtml(s) {
@@ -313,27 +318,68 @@ function renderSidebar() {
 }
 
 async function loadData() {
-  const [chats, archived, projects, kanban] = await Promise.all([
+  const [chats, archived, projects, kanban, owners] = await Promise.all([
     api("/api/chats?limit=500"),
     api("/api/chats?limit=500&include_archived=true&status=archived"),
     api("/api/projects?limit=200"),
     api("/api/kanban/columns"),
+    api("/api/owners").catch(() => ({ owners: [], counts: {} })),
   ]);
+  state.owners = owners.owners || [];
+  state.ownerCounts = owners.counts || {};
+  if (state.ownerFilter && state.ownerFilter !== OWNER_NONE && !state.owners.includes(state.ownerFilter)) state.ownerFilter = "";
   state.chats = chats.chats || [];
   state.archivedChats = archived.chats || [];
   state.projects = projects.projects || [];
   state.kanbanColumns = kanban.columns || DEFAULT_KANBAN_COLUMNS;
+  renderOwnerFilters();
   renderSidebar();
   if (state.tab === "kanban") renderKanban();
   if (state.tab === "projects") renderProjects();
+}
+
+// --- Owners ---
+const OWNER_NONE = "__none__";
+const OWNER_HUES = [215, 150, 30, 280, 340, 185, 55, 0];
+
+function ownerBadge(project) {
+  if (!project.owner) return state.owners.length ? `<span class="owner-badge owner-none">Unassigned</span>` : "";
+  const index = Math.max(0, state.owners.indexOf(project.owner));
+  const title = project.owner_source === "folder" ? ` title="From the ${escapeHtml(project.owner)} folder"` : "";
+  return `<span class="owner-badge" style="--owner-hue: ${OWNER_HUES[index % OWNER_HUES.length]}"${title}>${escapeHtml(project.owner)}</span>`;
+}
+
+function projectMatchesOwner(project) {
+  if (!state.ownerFilter) return true;
+  if (state.ownerFilter === OWNER_NONE) return !project.owner;
+  return project.owner === state.ownerFilter;
+}
+
+function renderOwnerFilters() {
+  const unassigned = state.ownerCounts[""] || 0;
+  const options = [`<option value="">Everyone</option>`]
+    .concat(state.owners.map((owner) => `<option value="${escapeHtml(owner)}">${escapeHtml(owner)} (${state.ownerCounts[owner] || 0})</option>`))
+    .concat(unassigned ? [`<option value="${OWNER_NONE}">Unassigned (${unassigned})</option>`] : [])
+    .join("");
+  $$(".owner-filter").forEach((label) => label.classList.toggle("hidden", !state.owners.length));
+  $$("[data-owner-filter]").forEach((select) => {
+    select.innerHTML = options;
+    select.value = state.ownerFilter;
+    select.onchange = () => {
+      state.ownerFilter = select.value;
+      $$("[data-owner-filter]").forEach((other) => { other.value = state.ownerFilter; });
+      renderKanban();
+      renderProjects();
+    };
+  });
 }
 
 function renderProjects() {
   const list = $("#projects-list");
   if (!list) return;
   const q = ($("#search").value || "").toLowerCase().trim();
-  const projects = state.projects.filter((p) => !q || [p.name, p.description, p.slug].filter(Boolean).join(" ").toLowerCase().includes(q));
-  list.innerHTML = projects.map((p) => `<button class="project-row" type="button" data-project-row="${p.id}"><span><strong>${escapeHtml(p.name)}</strong><small>${escapeHtml(p.description || "No description yet.")}</small></span><em>${escapeHtml(kanbanStatusLabel(p.status))}</em></button>`).join("") || `<p class="muted">No projects found.</p>`;
+  const projects = state.projects.filter(projectMatchesOwner).filter((p) => !q || [p.name, p.description, p.slug, p.owner].filter(Boolean).join(" ").toLowerCase().includes(q));
+  list.innerHTML = projects.map((p) => `<button class="project-row" type="button" data-project-row="${p.id}"><span><strong>${escapeHtml(p.name)}</strong><small>${escapeHtml(p.description || "No description yet.")}</small></span><span class="project-row-side"><em>${escapeHtml(kanbanStatusLabel(p.status))}</em>${ownerBadge(p)}</span></button>`).join("") || `<p class="muted">No projects found.</p>`;
   $$('[data-project-row]').forEach((button) => button.addEventListener("click", () => selectProject(+button.dataset.projectRow)));
 }
 
@@ -512,6 +558,7 @@ function renderKanbanCard(project) {
       <div class="kanban-card-meta">
         <span>${project.memory_count || 0} memories</span>
         <span>${project.chat_count || 0} sessions</span>
+        ${ownerBadge(project)}
       </div>
       <label class="kanban-status-control">
         <span class="sr-only">Move ${escapeHtml(project.name)}</span>
@@ -654,7 +701,7 @@ function beginInlineColumnRename(status) {
 function renderKanban() {
   const board = $("#kanban-board");
   if (!board) return;
-  const projects = state.projects.filter(projectMatchesKanbanSearch);
+  const projects = state.projects.filter(projectMatchesOwner).filter(projectMatchesKanbanSearch);
   board.innerHTML = state.kanbanColumns.map((column) => {
     const items = projects.filter((project) => kanbanStatus(project.status) === column.status);
     return `
@@ -757,6 +804,7 @@ async function selectProject(id) {
   $("#project-title").textContent = project.name;
   $("#project-meta").innerHTML = [
     project.slug && `Slug: ${project.slug}`,
+    project.owner && `Owner: ${project.owner}`,
     briefData?.continue_mode && `Mode: ${briefData.continue_mode}`,
     briefData?.deploy_state && `Deploy: ${briefData.deploy_state}`,
     project.compose_path && `Compose: ${project.compose_path}`,
@@ -964,6 +1012,13 @@ function editMessage(mid, messages) {
   });
 }
 
+function ownerField(p) {
+  const set = p.owner_source === "set" ? p.owner : "";
+  if (!state.owners.length) return `<label>Owner<input name="owner" value="${escapeHtml(set || "")}" placeholder="Nobody" /></label>`;
+  const auto = p.owner_source === "folder" ? `Automatic (${p.owner} folder)` : "Unassigned";
+  return `<label>Owner<select name="owner"><option value="">${escapeHtml(auto)}</option>${state.owners.map((owner) => `<option value="${escapeHtml(owner)}"${owner === set ? " selected" : ""}>${escapeHtml(owner)}</option>`).join("")}</select></label>`;
+}
+
 $("#edit-project-btn").addEventListener("click", () => {
   const p = state.activeProject;
   if (!p) return;
@@ -973,6 +1028,7 @@ $("#edit-project-btn").addEventListener("click", () => {
     <label>Compose path<input name="compose_path" value="${escapeHtml(p.compose_path || "")}" /></label>
     <label>Path<input name="path" value="${escapeHtml(p.path || "")}" /></label>
     <label>Description<textarea name="description" rows="4">${escapeHtml(p.description || "")}</textarea></label>
+    ${ownerField(p)}
     <label>Status<select name="status">
       <option value="backlog"${kanbanStatus(p.status) === "backlog" ? " selected" : ""}>Backlog</option>
       <option value="in_progress"${kanbanStatus(p.status) === "in_progress" ? " selected" : ""}>In progress</option>

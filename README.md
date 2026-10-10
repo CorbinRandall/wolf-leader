@@ -1,190 +1,154 @@
-# Wolf Leader
+<p align="center">
+  <img src="installer/assets/app-icon.png" width="140" alt="Wolf Leader">
+</p>
 
+<h1 align="center">Wolf Leader</h1>
 
-The idea is simple. With all your different AI apps (chats, IDE's, etc.), it can be really hard to keep track of everything. So rather than trying to keep it all within each AI, you'll just save a project for whatever you're working on into this application, it will distill it down to all the needed information. That way you can hand off to other AI tools and even if you lose an important chat- you can have all the context you need! 
+<p align="center">
+  <b>One memory for every AI agent you use. Now on autopilot.</b><br>
+  Self-hosted · works with Cursor, Claude Code and anything that speaks MCP or HTTP
+</p>
 
-Runs on **any Docker host**: Raspberry Pi, Windows, Linux, macOS, Unraid, cloud VM.
+<p align="center">
+  <a href="../../releases/latest"><b>Download for Windows or Mac</b></a> ·
+  <a href="#easy-install">Install</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="AGENTS.md#what-this-fork-does-differently-from-upstream">What's different in this fork</a>
+</p>
 
-**AI Project Storage** for agents — typed memories, `SPEC.yaml` checkpoints, session handoff, and MCP tools for Cursor, Claude Code, CLI workflows, and any client that speaks HTTP or MCP.
+---
 
-## Features
+Every AI chat starts from zero. Wolf Leader fixes that. It keeps a shared memory of your projects
+(decisions, fixes, what's left to do) on a hub you run yourself, so any agent on any machine can
+pick up where the last one stopped.
 
-- **Web UI** — browse projects, memories, archived sessions; copy agent prompts
-- **Kanban + cleanup** — move projects between backlog, in progress, and done; review and merge duplicate records
-- **Skills library** — browse, download, and share complete portable user skills across IDEs
-- **MCP server** — `set_project`, `recall`, `remember`, `get_brief`, `save_session`, …
-- **Typed checkpoints** — `SPEC.yaml` + `AGENT_BRIEF.md` per project with handoff tiers (`continue` / `orient` / `rebuild`)
-- **Continue modes** — compose deploy/maintain, server daemons, client setup, integration, investigation
-- **`/save` pipeline** — auto-extract memories, refresh briefs, archive sessions
-- **Markdown backbone** — `data/projects/{slug}/PROJECT.md` + git-friendly layout (runtime data gitignored)
+v1 got the hard part right: one shared memory for every agent, with briefs and handoffs that just
+work. This update builds on it so the remembering happens on its own.
 
-## Quick start
+<p align="center">
+  <img src="installer/assets/whatsnew-cards.png" width="760" alt="What's new: find any chat, remembers while you work, pick up on any machine, everything you love about v1">
+</p>
+
+## That chat from three weeks ago? Still here.
+
+Open a brand-new chat in any project and ask:
+
+> what did we work on in the billing service around March 3?
+
+Your agent pulls the decisions, fixes and open work from that day and has the whole story in
+seconds. No scrolling through old chats, no pasting context.
+
+## How it works
+
+You don't type commands. The installed rule tells your agent to do this in the background, and it
+mentions each save in one short line:
+
+| When | What the agent does |
+|---|---|
+| Chat starts | Finds the Wolf Leader project for this folder and loads its memories. If there isn't one, it asks before creating it. |
+| Something durable happens | Saves it as a typed memory: `decision`, `constraint`, `problem`, `goal`, `active_work`, `note`, `caveat`. |
+| After each meaningful step (at least every ~8 turns) | Checkpoints the session. Same chat ID means the same record is updated, and the chat stays in its project. |
+| Anything unclear | Hub unreachable, two projects could match, a rename or merge: it tells you and asks. |
+
+Each save runs the full pipeline on the hub: memories, embeddings, the project brief, an Obsidian
+note and the wiki.
+
+### Pick up on any machine
+
+- **`/wolfhowl`** broadcasts a session: save, git state, file catalog and vault notes, then offers to
+  commit, push to your share's git remote and index the files.
+- **`/wolfeat`** pulls the latest context for this project onto another machine: brief, memories,
+  recent howls with their git commits, and missing files from the share.
+
+Project history lives on your own network share (`<share>/wolf-leader/git/<slug>.git`). No GitHub
+account needed.
+
+## Easy install
+
+**Download** the installer from the [latest release](../../releases/latest), or from a clone:
+
+| | |
+|---|---|
+| **Windows** | Double-click `start.bat`. It builds `dist\WolfLeaderSetup-<version>.exe` (installing Inno Setup if needed) and runs it. |
+| **Mac** | Open the `.dmg` and drag **Wolf Leader** to Applications. Setup runs in the app on first launch, then it becomes your dashboard: stats, recent chats, projects, search, shares and updates. From a clone, double-click `start.command` or run `bash installer/mac/build-app.sh` (macOS 14+, Xcode or Command Line Tools). First launch: right-click → Open (macOS 15+: System Settings → Privacy & Security → Open Anyway). |
+
+The wizard takes a few minutes:
+
+1. **Do you already have Wolf Leader?** Connect to an existing hub (recommended), update this
+   computer, or start a new hub here with Docker (experimental).
+2. **What do you want?** Client skills and rule, network shares, Git and Python, Obsidian
+   (recommended), the wiki (highly recommended).
+3. **Ask your AI agent.** Copy the prompt into Cursor, Claude or ChatGPT on this computer. It backs
+   up your current configs, checks what's installed and replies with a strict INI file
+   ([format](installer/CONFIG.md)). Paste or load the reply.
+4. **Share passwords.** Typed into the installer, never into the AI chat.
+5. **Git name and email.** Real or made-up, so local commits never stop to ask for a GitHub login.
+6. **Install.** Setup backs up everything it touches first and leaves a restore script to undo it.
+
+## Run the hub
+
+The hub is a Docker stack: FastAPI REST and web UI on `:6971`, MCP on `:6972/mcp`, Postgres with
+pgvector, and a nightly backup.
 
 ```bash
-git clone git@github.com:YOU/wolf-leader.git && cd wolf-leader
-./scripts/setup.sh
+cp .env.example .env                 # set IDE_STORAGE_PUBLIC_URL to how clients reach the hub
+docker compose -f docker-compose.postgres.yml up -d --build
 ```
 
-Open **http://YOUR_HOST:6971** → Setup tab → **Copy setup prompt**. The copied prompt uses the live `IDE_STORAGE_PUBLIC_URL` and `IDE_STORAGE_MCP_URL` from your private `.env`, so you can paste it directly into an AI IDE without replacing placeholders.
+- **Tested setup:** an always-on box (NAS, Proxmox LXC or Linux server) with an SMB share for the
+  vault, project mirrors, backups and git remotes. Walkthrough: [docs/lxc-hub.md](docs/lxc-hub.md).
+- **Docker on your desktop** works the same way but is experimental: the hub is only up while your
+  computer is.
+- Already have chats? `scripts/wolf-backfill.py` imports existing Cursor and Claude Code sessions
+  into grouped projects.
+- Running the original Wolf Leader? The Mac app's setup spots it from your AI's answer and offers
+  to upgrade the hub first, on this Mac or on the hub computer over SSH (key login only), and
+  Settings > Hub offers Downgrade later. By hand: `bash scripts/wolf-og-migrate.sh` on the hub
+  computer, before installing any client. It moves projects, chats and memories to the new hub,
+  creates the share folders and leaves the original folder untouched.
 
-The onboarding agent asks each owner to choose a friendly device name and model policy. Automatic checkpoints are installed by default. Cursor and Codex setup is not complete until `/save`, `/new`, and the save hooks are verified; Codex users must also trust the installed hooks in Settings → Hooks. Those choices belong in the workspace's private/local `AGENTS.md`, not in the public examples.
+Times shown to humans are local, `HH:MM MM/DD/YYYY`, using `WOLF_TZ`.
 
-**Full guide:** [INSTALL.md](INSTALL.md)
-
-## Ports
-
-| Service | Port | Purpose |
-|---------|------|---------|
-| REST + Web UI | 6971 | API, browser UI, agent brief URLs |
-| MCP | 6972 | Wolf Leader MCP tools (`/mcp`) |
-
-## MCP config (Cursor example)
+## Connect an agent by hand
 
 ```json
 {
   "mcpServers": {
-    "wolf-leader": { "url": "http://YOUR_HOST:6972/mcp" }
+    "wolf-leader": { "url": "http://wolf.local:6972/mcp" }
   }
 }
 ```
 
-## Agent workflow
+Then copy `examples/cursor/rules/wolf-leader-hub.mdc` into `~/.cursor/rules/` and the skills in
+`examples/cursor/skills/` into `~/.cursor/skills/`. The installer does all of this for you.
 
-1. **Start** — `set_project` → `get_brief()` / `recall()`
-2. **Work** — `remember()` for durable decisions
-3. **Checkpoint** — type `/save` or MCP `save_session`
+| Port | Service |
+|---|---|
+| 6971 | REST API, web UI, agent brief URLs, wiki at `/wiki/` |
+| 6972 | MCP tools at `/mcp` |
 
-Copy `data/AGENTS.md` into workspace roots after first run (see `examples/AGENTS.md`).
+Useful endpoints: `GET /health`, `GET /api/search?q=…` (hybrid keyword and vector),
+`GET /api/projects/{slug}/agent-brief`, `POST /api/projects/ensure`.
 
-## Skills library
-
-The Skills tab stores complete personal skill folders, including `SKILL.md` and any supporting scripts, references, assets, or agent metadata. Publish the portable user skills found on a workstation with:
-
-```bash
-python scripts/sync-skills-to-hub.py --hub http://YOUR_HOST:6971
-```
-
-Use **Copy install prompt** in the Skills tab to hand another IDE or agent the exact download and installation steps. Use **Copy publish prompt** to tell an IDE how to package and send one of its personal skills back to Wolf Leader, or use **Download all** for a ZIP containing every published skill. System and plugin-provided skills are intentionally left with their provider.
-
-## Compose layouts
+## Other ways to run
 
 | File | Use |
-|------|-----|
-| `docker-compose.yml` | Portable default — **lean / keyword-only** (Pi, Windows, Linux, …) |
-| `docker-compose.embeddings.yml` | Opt-in semantic search (builds model + enables vectors) |
+|---|---|
+| `docker-compose.postgres.yml` | Recommended: Postgres + pgvector, vault, wiki |
+| `docker-compose.yml` | Lean SQLite, keyword-only search (Pi, small hosts) |
+| `docker-compose.embeddings.yml` | Overlay that adds semantic search to the lean stack |
 | `docker-compose.dev.yml` | Live-mount source for development |
-| `docker-compose.unraid.yml` | Unraid overlay (extra bind mounts) |
-| `docker-compose.local.yml` | Your private overrides (not in git) |
+| `run-local.sh` / `stop-local.sh` | No Docker: Python 3.11+ on one machine |
 
-```bash
-# Portable (lean, keyword-only)
-docker compose up -d --build
+More detail: [INSTALL.md](INSTALL.md).
 
-# With semantic search (heavier image)
-docker compose -f docker-compose.yml -f docker-compose.embeddings.yml up -d --build
+## Your data stays yours
 
-# Unraid
-docker compose -f docker-compose.yml -f docker-compose.unraid.yml up -d --build
+Memories live in the hub's database on your own hardware. Nothing is sent anywhere else. The repo
+never contains runtime data: `.env`, `data/` and the vault are gitignored. Back up the hub's data
+folder (the Postgres stack does this nightly to the share).
 
-# Development
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-```
+## Credits
 
-## Optional: semantic search
-
-The default image is **keyword-only** and ships with no embedding dependencies — keeping it lean on small hardware. Semantic (vector) search is an explicit opt-in:
-
-1. Build with the embedding deps + baked CPU model: `--build-arg INCLUDE_EMBEDDINGS=1` (or use `docker-compose.embeddings.yml`).
-2. Enable at runtime: `IDE_STORAGE_EMBEDDINGS_ENABLED=1` (the overlay sets this).
-3. Backfill existing data once: `python -m ide_storage.backfill_embeddings`.
-
-When enabled, `GET /api/search?q=...` (and MCP `search`) runs **hybrid** keyword + vector search, merging substring hits with semantic matches via Reciprocal Rank Fusion. With embeddings off it transparently falls back to keyword-only. See [INSTALL.md](INSTALL.md#optional-semantic-search) for sizing.
-
-## Run natively (no Docker)
-
-For a single host without Docker — e.g. a Mac without Docker Desktop — you can run
-Wolf Leader directly with Python. It's lighter (no container, no VM) and the Docker
-workflow above is unchanged; this is an optional alternative.
-
-```bash
-./run-local.sh     # first run bootstraps ./.venv, then starts REST :6971 + MCP :6972 on 127.0.0.1
-./stop-local.sh    # stop both
-```
-
-Requires Python 3.11+ (uses [`uv`](https://github.com/astral-sh/uv) if present, else
-`python3 -m venv`). Binds to `127.0.0.1` by default; override `HOST` / `MCP_HOST` /
-`IDE_STORAGE_PUBLIC_URL` / `IDE_STORAGE_MCP_URL` to expose on a LAN or Tailscale.
-
-### Android phone (Termux + Debian PRoot)
-
-For a phone-hosted hub, run the one-time migration after the native service and
-its `.env`, `data`, and `.venv` already exist:
-
-```bash
-ssh moto 'bash ~/apps/wolf-leader/scripts/deploy-phone.sh main'
-```
-
-It converts a copied installation into a Git checkout without touching the
-database or private settings, saves the old folder as a recovery backup, and
-installs a post-pull hook. From then on, production updates are simply:
-
-```bash
-ssh moto 'cd ~/apps/wolf-leader && git pull --ff-only origin main'
-```
-
-That pull refreshes lean runtime dependencies, restarts the supervised service,
-and waits for its local health check. Set `WOLF_LEADER_PHONE_DIR`,
-`WOLF_LEADER_PHONE_SERVICE_DIR`, or `WOLF_LEADER_PHONE_REPO` when your Termux
-layout differs from the defaults.
-
-## Environment variables
-
-See [`.env.example`](.env.example). Minimum:
-
-- `IDE_STORAGE_PUBLIC_HOST` — stable Tailscale name/IP, LAN name/IP, or loopback
-- `IDE_STORAGE_PUBLIC_URL` — how clients reach the Web UI / brief URLs
-- `IDE_STORAGE_MCP_URL` — MCP endpoint for agents
-- `IDE_STORAGE_DEVICE_NAME` — server identity used in pickup prompts
-
-Optional: `CURSOR_TRANSCRIPTS_ROOT`, `COMPOSE_MANAGER_ROOT`, `IDE_STORAGE_HOST_LABEL`
-
-`./scripts/setup.sh` detects Tailscale first, then LAN, and writes `.env` locally.
-To move an existing install to new hardware or networking, run
-`./scripts/configure-runtime.sh --force` (or pass `--host` and `--name`).
-
-## API (selection)
-
-- `GET /health`
-- `GET /api/onboarding`
-- `GET /api/bootstrap?path=…`
-- `GET /api/search?q=…` — hybrid keyword + vector search (keyword-only when embeddings are off)
-- `GET /api/projects/{slug}/agent-brief`
-- `POST /api/projects` — create project
-
-Legacy chat/snippet endpoints remain available — see inline docs in `ide_storage/main.py`.
-
-## Data & privacy
-
-**Do not commit** `data/ide-work.db` or `data/projects/*` (except `_example/`). Your project memory stays in `./data` on the host.
-
-Back up `./data` to preserve everything.
-
-## Private GitHub repo
-
-```bash
-git init && git add . && git status   # confirm no DB or personal projects staged
-git commit -m "Initial release"
-gh repo create wolf-leader --private --source=. --push
-```
-
-## Unraid note
-
-If this folder is deployed via Compose Manager, the running stack is unaffected until you recreate containers. When you choose to update:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.unraid.yml up -d --build
-```
-
-## License
-
-Private / personal use — add a license file if you open-source later.
+Built on [Wolf Leader](https://github.com/CorbinRandall/wolf-leader) by Corbin Randall. See
+[AGENTS.md](AGENTS.md#what-this-fork-does-differently-from-upstream) for what this fork adds.

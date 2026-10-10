@@ -8,7 +8,6 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "${ROOT}/scripts/lib/wolf-leader-client.sh"
 
 CURSOR_DIR="${CURSOR_DIR:-$HOME/.cursor}"
-AGENT_SKILLS_DIR="${AGENT_SKILLS_DIR:-$HOME/.agents/skills}"
 CURSOR_EXAMPLES="${ROOT}/examples/cursor"
 WORKSPACE="${WORKSPACE:-$HOME}"
 DRY_RUN=0
@@ -33,7 +32,6 @@ Options:
 
 Installs under \$CURSOR_DIR:
   skills/save, skills/new, mcp.json, hooks, rules, wolf-leader.env, AGENTS.md in WORKSPACE
-Also installs portable save/new skills under \$AGENT_SKILLS_DIR for Codex-compatible discovery.
 EOF
 }
 
@@ -91,8 +89,8 @@ if [[ "$DRY_RUN" == 0 ]]; then
   mkdir -p \
     "$CURSOR_DIR/skills/save/scripts" \
     "$CURSOR_DIR/skills/new/scripts" \
-    "$AGENT_SKILLS_DIR/save/scripts" \
-    "$AGENT_SKILLS_DIR/new/scripts" \
+    "$CURSOR_DIR/skills/wolfhowl/scripts" \
+    "$CURSOR_DIR/skills/wolfeat/scripts" \
     "$CURSOR_DIR/hooks" \
     "$CURSOR_DIR/rules"
   rm -rf "$CURSOR_DIR/skills/save-new"
@@ -116,34 +114,37 @@ run_step "new-project-session.py" install_file 755 \
 run_step "new-project-session-curl.sh" install_file 755 \
   "$CURSOR_EXAMPLES/skills/new/scripts/new-project-session-curl.sh" "$CURSOR_DIR/skills/new/scripts/new-project-session-curl.sh"
 
-run_step "portable save skill" install_file 644 \
-  "$CURSOR_EXAMPLES/skills/save/SKILL.md" "$AGENT_SKILLS_DIR/save/SKILL.md"
-run_step "portable save runner" install_file 755 \
-  "$CURSOR_EXAMPLES/skills/save/scripts/save-session.sh" "$AGENT_SKILLS_DIR/save/scripts/save-session.sh"
-run_step "portable save python" install_file 755 \
-  "$CURSOR_EXAMPLES/skills/save/scripts/save-session.py" "$AGENT_SKILLS_DIR/save/scripts/save-session.py"
-run_step "portable save curl" install_file 755 \
-  "$CURSOR_EXAMPLES/skills/save/scripts/save-session-curl.sh" "$AGENT_SKILLS_DIR/save/scripts/save-session-curl.sh"
-run_step "portable new skill" install_file 644 \
-  "$CURSOR_EXAMPLES/skills/new/SKILL.md" "$AGENT_SKILLS_DIR/new/SKILL.md"
-run_step "portable new runner" install_file 755 \
-  "$CURSOR_EXAMPLES/skills/new/scripts/new-project-session.sh" "$AGENT_SKILLS_DIR/new/scripts/new-project-session.sh"
-run_step "portable new python" install_file 755 \
-  "$CURSOR_EXAMPLES/skills/new/scripts/new-project-session.py" "$AGENT_SKILLS_DIR/new/scripts/new-project-session.py"
-run_step "portable new curl" install_file 755 \
-  "$CURSOR_EXAMPLES/skills/new/scripts/new-project-session-curl.sh" "$AGENT_SKILLS_DIR/new/scripts/new-project-session-curl.sh"
+run_step "skills/wolfhowl" install_file 644 \
+  "$CURSOR_EXAMPLES/skills/wolfhowl/SKILL.md" "$CURSOR_DIR/skills/wolfhowl/SKILL.md"
+run_step "wolfhowl.sh" install_file 755 \
+  "$CURSOR_EXAMPLES/skills/wolfhowl/scripts/wolfhowl.sh" "$CURSOR_DIR/skills/wolfhowl/scripts/wolfhowl.sh"
+run_step "wolfhowl.py" install_file 755 \
+  "$CURSOR_EXAMPLES/skills/wolfhowl/scripts/wolfhowl.py" "$CURSOR_DIR/skills/wolfhowl/scripts/wolfhowl.py"
+run_step "sync_share.py" install_file 755 \
+  "$CURSOR_EXAMPLES/skills/wolfhowl/scripts/sync_share.py" "$CURSOR_DIR/skills/wolfhowl/scripts/sync_share.py"
 
-if [[ "$DRY_RUN" == 1 ]]; then
-  echo "  [dry-run] hooks.json merge"
-elif ! wl_merge_hooks_json "$CURSOR_DIR/hooks.json" "$CURSOR_EXAMPLES/hooks.json"; then
-  INSTALL_FAIL=1
+run_step "skills/wolfeat" install_file 644 \
+  "$CURSOR_EXAMPLES/skills/wolfeat/SKILL.md" "$CURSOR_DIR/skills/wolfeat/SKILL.md"
+run_step "wolfeat.sh" install_file 755 \
+  "$CURSOR_EXAMPLES/skills/wolfeat/scripts/wolfeat.sh" "$CURSOR_DIR/skills/wolfeat/scripts/wolfeat.sh"
+
+# Automatic recall and checkpoint hooks are part of the standard client setup.
+# Set WOLF_LEADER_HOOKS=0 only when the owner explicitly opts out.
+if [[ "${WOLF_LEADER_HOOKS:-1}" != 0 ]]; then
+  if [[ "$DRY_RUN" == 1 ]]; then
+    echo "  [dry-run] hooks.json merge"
+  elif ! wl_merge_hooks_json "$CURSOR_DIR/hooks.json" "$CURSOR_EXAMPLES/hooks.json"; then
+    INSTALL_FAIL=1
+  fi
+  run_step "recall hook" install_file 755 \
+    "$CURSOR_EXAMPLES/hooks/wolf-leader-recall.sh" "$CURSOR_DIR/hooks/wolf-leader-recall.sh"
+  run_step "save hook" install_file 755 \
+    "$CURSOR_EXAMPLES/hooks/wolf-leader-save.sh" "$CURSOR_DIR/hooks/wolf-leader-save.sh"
+  run_step "autosave worker" install_file 755 \
+    "$CURSOR_EXAMPLES/hooks/wolf-leader-autosave.py" "$CURSOR_DIR/hooks/wolf-leader-autosave.py"
+else
+  wl_step_skip "hooks (disabled by owner with WOLF_LEADER_HOOKS=0)"
 fi
-run_step "recall hook" install_file 755 \
-  "$CURSOR_EXAMPLES/hooks/wolf-leader-recall.sh" "$CURSOR_DIR/hooks/wolf-leader-recall.sh"
-run_step "save hook" install_file 755 \
-  "$CURSOR_EXAMPLES/hooks/wolf-leader-save.sh" "$CURSOR_DIR/hooks/wolf-leader-save.sh"
-run_step "autosave hook" install_file 755 \
-  "$CURSOR_EXAMPLES/hooks/wolf-leader-autosave.py" "$CURSOR_DIR/hooks/wolf-leader-autosave.py"
 
 run_step "wolf-leader-hub rule" install_file 644 \
   "$CURSOR_EXAMPLES/rules/wolf-leader-hub.mdc" "$CURSOR_DIR/rules/wolf-leader-hub.mdc"

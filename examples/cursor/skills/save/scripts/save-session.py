@@ -136,14 +136,17 @@ def find_transcript(
                 roots.append(candidate)
 
     seen: set[Path] = set()
+    # Pass 1: an explicit session id wins wherever it lives — never fall back to
+    # "newest in the first folder" while a later folder holds the real transcript.
+    if sid:
+        for root in roots:
+            path = root / sid / f"{sid}.jsonl"
+            if path.is_file():
+                return sid, path
     for root in roots:
         if root in seen or not root.is_dir():
             continue
         seen.add(root)
-        if sid:
-            path = root / sid / f"{sid}.jsonl"
-            if path.is_file():
-                return sid, path
         candidates: list[tuple[float, str, Path]] = []
         for child in root.iterdir():
             if not child.is_dir() or child.name == "subagents":

@@ -1,0 +1,25 @@
+@import url("https://fonts.googleapis.com/css2?family=Nunito:ital,wght@0,400;0,600;0,700;0,800;0,900&family=DM+Mono:wght@400;500&display=swap");
+@import 'tailwindcss';
+@import './halo.css';
+@import 'fumadocs-ui/css/preset.css';
+
+html {
+  scrollbar-gutter: stable;
+}
+
+html > body[data-scroll-locked] {
+  margin-right: 0px !important;
+  --removed-body-scroll-bar-size: 0px !important;
+}
+
+/* Halo: generous radii on cards + code, soft shadow on the docs page card */
+.prose pre,
+.prose :where(figure) {
+  border-radius: var(--radius-md);
+}
+
+.wl-hero {
+  background:
+    radial-gradient(1200px 400px at 10% -10%, rgba(71, 153, 122, 0.18), transparent 60%),
+    radial-gradient(800px 300px at 90% 0%, rgba(108, 127, 209, 0.16), transparent 60%);
+}

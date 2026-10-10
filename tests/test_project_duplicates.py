@@ -81,7 +81,10 @@ def test_merge_reassigns_linked_data_and_preserves_metadata():
         conn.commit()
 
     report = merge_projects(keep, [duplicate])
-    assert report["moved"] == {"chats": 1, "memories": 1, "snippets": 1}
+    assert report["moved"] == {
+        "chats": 1, "memories": 1, "snippets": 1, "howls": 0, "jobs": 0,
+        "catalog": 0, "file_chunks": 0, "knowledge_revisions": 0, "paths": 0,
+    }
 
     with db_conn() as conn:
         cur = conn.cursor()

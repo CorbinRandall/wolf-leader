@@ -12,7 +12,6 @@ elif [[ -f "${HOME}/.cursor/lib/wolf-leader-client.sh" ]]; then
 fi
 
 CURSOR_DIR="${CURSOR_DIR:-$HOME/.cursor}"
-AGENT_SKILLS_DIR="${AGENT_SKILLS_DIR:-$HOME/.agents/skills}"
 FAIL=0
 WARN=0
 
@@ -32,18 +31,20 @@ echo ""
 
 check "wolf-leader.env" "$CURSOR_DIR/wolf-leader.env"
 check "mcp.json" "$CURSOR_DIR/mcp.json"
-check "hooks.json" "$CURSOR_DIR/hooks.json"
 check "save skill" "$CURSOR_DIR/skills/save/SKILL.md"
 check "save script" "$CURSOR_DIR/skills/save/scripts/save-session.sh"
 check "save curl fallback" "$CURSOR_DIR/skills/save/scripts/save-session-curl.sh"
 check "new skill" "$CURSOR_DIR/skills/new/SKILL.md"
 check "new project script" "$CURSOR_DIR/skills/new/scripts/new-project-session.sh"
 check "new curl fallback" "$CURSOR_DIR/skills/new/scripts/new-project-session-curl.sh"
-check "portable save skill" "$AGENT_SKILLS_DIR/save/SKILL.md"
-check "portable save runner" "$AGENT_SKILLS_DIR/save/scripts/save-session.sh"
-check "portable new skill" "$AGENT_SKILLS_DIR/new/SKILL.md"
-check "recall hook" "$CURSOR_DIR/hooks/wolf-leader-recall.sh"
-check "save hook" "$CURSOR_DIR/hooks/wolf-leader-save.sh"
+check "wolfhowl skill" "$CURSOR_DIR/skills/wolfhowl/SKILL.md"
+check "wolfhowl script" "$CURSOR_DIR/skills/wolfhowl/scripts/wolfhowl.sh"
+check "wolfeat skill" "$CURSOR_DIR/skills/wolfeat/SKILL.md"
+check "wolfeat script" "$CURSOR_DIR/skills/wolfeat/scripts/wolfeat.sh"
+if [[ "${WOLF_LEADER_HOOKS:-0}" == 1 ]]; then
+  check "recall hook" "$CURSOR_DIR/hooks/wolf-leader-recall.sh"
+  check "save hook" "$CURSOR_DIR/hooks/wolf-leader-save.sh"
+fi
 check "hub rule" "$CURSOR_DIR/rules/wolf-leader-hub.mdc"
 check "client lib" "$CURSOR_DIR/lib/wolf-leader-client.sh"
 

@@ -1,0 +1,95 @@
+/* Fumadocs UI theme — Halo
+   Drop-in replacement for `fumadocs-ui/css/<theme>.css`:
+     @import 'tailwindcss';
+     @import './halo.css';
+     @import 'fumadocs-ui/css/preset.css';
+   Fonts: Nunito (UI) + DM Mono (code). */
+
+/* Google Fonts import lives in global.css so it precedes every other rule. */
+@import 'fumadocs-ui/css/lib/default-colors.css';
+
+@theme {
+  --font-sans: "Nunito", "Avenir Next", system-ui, sans-serif;
+  --font-mono: "DM Mono", ui-monospace, monospace;
+
+  /* paper + ink */
+  --color-fd-background: #EAE3DA;          /* cream-300 */
+  --color-fd-foreground: #1D1916;          /* ink-900 */
+  --color-fd-card: #F5F1E9;                /* cream-100 */
+  --color-fd-card-foreground: #1D1916;
+  --color-fd-popover: #FBF8F3;             /* cream-50 */
+  --color-fd-popover-foreground: #1D1916;
+  --color-fd-muted: #F0EBE2;               /* cream-200 */
+  --color-fd-muted-foreground: #6E675E;    /* ink-500 */
+  --color-fd-secondary: #DDD5CB;           /* cream-400 */
+  --color-fd-secondary-foreground: #1D1916;
+  --color-fd-accent: rgba(29,25,22,0.06);  /* hairline */
+  --color-fd-accent-foreground: #1D1916;
+  --color-fd-border: rgba(29,25,22,0.06);
+  --color-fd-primary: #2C6B54;             /* mint-900 — legible on paper */
+  --color-fd-primary-foreground: #FBF8F3;
+  --color-fd-ring: rgba(108,127,209,0.45); /* periwinkle focus ring */
+  --color-fd-overlay: rgba(29,25,22,0.32);
+
+  /* callouts take the four Halo channels */
+  --color-fd-info: #6C7FD1;     /* lilac-700 */
+  --color-fd-warning: #C79A2E;  /* butter-700 */
+  --color-fd-error: #D9647F;    /* blush-700 */
+  --color-fd-success: #47997A;  /* mint-700 */
+  --color-fd-idea: #C79A2E;
+  --color-fd-diff-remove: rgba(217,100,127,0.12);
+  --color-fd-diff-remove-symbol: #D9647F;
+  --color-fd-diff-add: rgba(71,153,122,0.14);
+  --color-fd-diff-add-symbol: #47997A;
+
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --radius-xl: 28px;
+}
+
+.dark {
+  --color-fd-background: #1D1916;          /* ink-900 */
+  --color-fd-foreground: #F5F1E9;          /* cream-100 */
+  --color-fd-card: #241F1B;                /* ink-800 */
+  --color-fd-card-foreground: #F5F1E9;
+  --color-fd-popover: #2B2622;
+  --color-fd-popover-foreground: #F5F1E9;
+  --color-fd-muted: #2B2622;
+  --color-fd-muted-foreground: #ADA298;    /* cream-600 */
+  --color-fd-secondary: #3A342E;           /* ink-700 */
+  --color-fd-secondary-foreground: #F5F1E9;
+  --color-fd-accent: rgba(245,241,233,0.07);
+  --color-fd-accent-foreground: #F5F1E9;
+  --color-fd-border: rgba(245,241,233,0.07);
+  --color-fd-primary: #9FD9BC;             /* mint-500 */
+  --color-fd-primary-foreground: #1D1916;
+  --color-fd-ring: rgba(165,183,232,0.5);
+  --color-fd-overlay: rgba(0,0,0,0.5);
+  --color-fd-info: #A5B7E8;
+  --color-fd-warning: #EFCF87;
+  --color-fd-error: #F5A8BE;
+  --color-fd-success: #9FD9BC;
+  --color-fd-idea: #EFCF87;
+}
+
+/* Halo type: weight carries hierarchy, not size */
+body { font-family: var(--font-sans); }
+.prose { --tw-prose-body: var(--color-fd-foreground); --tw-prose-headings: var(--color-fd-foreground); --tw-prose-links: var(--color-fd-primary); --tw-prose-code: var(--color-fd-primary); }
+.prose :where(h1, h2, h3, h4) { font-weight: 800; letter-spacing: -0.02em; }
+.prose :where(a):not(:where([class~='not-prose'] *)) { text-decoration: none; font-weight: 700; }
+.prose :where(code):not(:where([class~='not-prose'], [class~='not-prose'] *)) { border: none; background-color: color-mix(in oklab, var(--color-fd-primary) 12%, transparent); border-radius: 8px; }
+
+/* borderless paper cards with warm double shadow */
+#nd-sidebar { background-color: var(--color-fd-card); border-color: transparent; }
+#nd-sidebar [data-active='true'] { border-radius: var(--radius-sm); font-weight: 800; }
+
+@layer utilities {
+  figure.shiki, .fd-codeblock, pre { border: none; border-radius: var(--radius-md); background-color: var(--color-fd-card); box-shadow: 0 2px 10px rgba(29,25,22,0.035), 0 12px 28px rgba(29,25,22,0.045); }
+  .dark figure.shiki, .dark pre { box-shadow: 0 2px 10px rgba(0,0,0,0.25), 0 12px 28px rgba(0,0,0,0.3); }
+  button[data-search-full] { background-color: var(--color-fd-background); border: none; border-radius: 999px; box-shadow: inset 0 1px 2px rgba(29,25,22,0.06); }
+  a[data-card], .fd-card { border: none; border-radius: var(--radius-lg); background-color: var(--color-fd-card); box-shadow: 0 2px 10px rgba(29,25,22,0.035), 0 12px 28px rgba(29,25,22,0.045); transition: transform 160ms cubic-bezier(.2,.8,.2,1); }
+  a[data-card]:hover { transform: translateY(-1px); filter: brightness(0.97); background-color: var(--color-fd-card); }
+  a[data-card]:active { transform: scale(0.97); }
+  .fd-callout, [data-callout] { border: none; border-radius: var(--radius-md); background-color: var(--color-fd-card); }
+}

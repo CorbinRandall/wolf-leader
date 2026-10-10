@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ide_storage import localtime as LT
 from ide_storage.db import db_conn
 from ide_storage.embed_index import knn
 from ide_storage.embeddings import embed_one, embeddings_available
@@ -53,7 +54,8 @@ def reciprocal_rank_fusion(
     return merged
 
 
-ALL_KINDS = frozenset({"memory", "project", "chat", "message"})
+ALL_KINDS = frozenset({"memory", "project", "chat", "message", "howl", "catalog", "chunk"})
+VECTOR_KINDS = ("memory", "project", "chat", "howl", "catalog", "chunk")
 
 
 def _parse_kinds(kinds_param: str | None) -> frozenset[str] | None:
@@ -158,6 +160,59 @@ def keyword_search(
                 item["source"] = "keyword"
                 results.append(item)
 
+        if "howl" in want:
+            cur.execute(
+                """
+                SELECT h.id, h.project_id, substr(h.summary, 1, 200) AS content,
+                       h.created_at, h.git_commit, p.slug AS slug,
+                       'howl' AS kind
+                FROM howls h LEFT JOIN projects p ON p.id = h.project_id
+                WHERE h.summary LIKE ? OR COALESCE(h.actions, '') LIKE ?
+                ORDER BY h.created_at DESC LIMIT ?
+                """,
+                (pattern, pattern, limit),
+            )
+            for row in cur.fetchall():
+                item = dict(row)
+                item["title"] = f"Howl {LT.fmt(item.get('created_at'))} · {item.get('slug') or ''}".strip(" ·")
+                item["stamp"] = LT.stamp(item.get("created_at"))
+                item["source"] = "keyword"
+                results.append(item)
+
+        if "catalog" in want:
+            cur.execute(
+                """
+                SELECT f.id, f.project_id, f.rel_path AS title, f.blurb AS content,
+                       f.root_path, f.mtime, 'catalog' AS kind
+                FROM fs_catalog f
+                WHERE f.is_dir = FALSE AND (f.rel_path LIKE ? OR COALESCE(f.blurb, '') LIKE ?)
+                ORDER BY f.mtime DESC NULLS LAST LIMIT ?
+                """,
+                (pattern, pattern, limit),
+            )
+            for row in cur.fetchall():
+                item = dict(row)
+                item["path"] = f"{item['root_path'].rstrip('/')}/{item['title']}"
+                item["source"] = "keyword"
+                results.append(item)
+
+        if "chunk" in want and not hub_mode:
+            cur.execute(
+                """
+                SELECT id, project_id, path, chunk_index, substr(content, 1, 300) AS content,
+                       'chunk' AS kind
+                FROM file_chunks
+                WHERE content LIKE ?
+                ORDER BY id DESC LIMIT ?
+                """,
+                (pattern, limit),
+            )
+            for row in cur.fetchall():
+                item = dict(row)
+                item["title"] = f"{item['path']} #{item['chunk_index']}"
+                item["source"] = "keyword"
+                results.append(item)
+
     return results
 
 
@@ -173,7 +228,7 @@ def vector_search(
     query_vec = embed_one(query)
     if not query_vec:
         return []
-    knn_kinds = tuple(kinds & {"memory", "project", "chat"}) if kinds else ("memory", "project", "chat")
+    knn_kinds = tuple(k for k in VECTOR_KINDS if k in kinds) if kinds else VECTOR_KINDS
     if not knn_kinds:
         return []
     return knn(query_vec, kinds=knn_kinds, limit=limit, include_archived=include_archived)

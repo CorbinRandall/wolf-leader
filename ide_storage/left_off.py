@@ -32,7 +32,7 @@ _SIGNAL_RE = re.compile(
 )
 _AGENT_DENSE_RE = re.compile(
     r"(?i)\b(handoff_tier|pickup_override|agent-brief|SPEC\.yaml|do not redeploy|"
-    r"LXC\s*\d+|bin/deploy|primary_hub)\b"
+    r"LXC\s*\d+|bin/deploy|primary_hub|\w+-sshd)\b"
 )
 _PATH_HEAVY_RE = re.compile(r"(/[^\s]{8,})|(\d{1,3}(?:\.\d{1,3}){3})")
 # Mid-conversation agent voice — not a useful “where we left off” for humans.
@@ -98,8 +98,6 @@ def ensure_brief_url(text: str, brief_url: str) -> str:
     t = (text or "").strip()
     if not t or not brief_url:
         return t
-    # Pickup notes survive hardware moves. Replace only Wolf Leader's generated
-    # agent-brief endpoint; preserve every other historical URL verbatim.
     endpoint = re.compile(
         r"https?://[^\s<>'\"]+/api/projects/[^\s<>'\"]+/agent-brief/?",
         re.IGNORECASE,

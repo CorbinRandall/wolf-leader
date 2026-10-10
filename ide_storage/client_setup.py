@@ -19,6 +19,7 @@ VERIFY_SCRIPT = REPO_ROOT / "scripts" / "verify-cursor-client.sh"
 CODEX_VERIFY_SCRIPT = REPO_ROOT / "scripts" / "verify-codex-client.sh"
 PREFLIGHT_SCRIPT = REPO_ROOT / "scripts" / "preflight-cursor-client.sh"
 CLIENT_LIB = REPO_ROOT / "scripts" / "lib" / "wolf-leader-client.sh"
+BACKFILL_SCRIPT = REPO_ROOT / "scripts" / "wolf-backfill.py"
 AGENTS_MD = REPO_ROOT / "examples" / "AGENTS.md"
 
 BUNDLE_SCRIPTS = (
@@ -29,6 +30,7 @@ BUNDLE_SCRIPTS = (
     CODEX_VERIFY_SCRIPT,
     PREFLIGHT_SCRIPT,
     CLIENT_LIB,
+    BACKFILL_SCRIPT,
     AGENTS_MD,
 )
 

@@ -50,10 +50,9 @@ Edit `.env`:
 
 ```bash
 # Use the address other machines will use to reach this host
-IDE_STORAGE_PUBLIC_HOST=100.x.y.z # Tailscale preferred; LAN/hostname also works
-IDE_STORAGE_PUBLIC_URL=http://100.x.y.z:6971
-IDE_STORAGE_MCP_URL=http://100.x.y.z:6972/mcp
-IDE_STORAGE_DEVICE_NAME=my-server # appears in agent pickup prompts
+IDE_STORAGE_PUBLIC_URL=http://<hub-ip>:6971
+IDE_STORAGE_MCP_URL=http://<hub-ip>:6972/mcp
+IDE_STORAGE_HOST_LABEL=homelab   # optional — appears in agent pickup prompts
 ```
 
 Run setup:
@@ -107,7 +106,7 @@ Then: `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`
 
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 2. Clone repo to e.g. `C:\Users\you\wolf-leader`
-3. Run `./scripts/configure-runtime.sh`; it prefers Tailscale, then LAN, and writes `.env`
+3. Copy `.env.example` → `.env`; set `IDE_STORAGE_PUBLIC_URL=http://localhost:6971` for local-only, or your LAN IP for other devices
 4. In PowerShell: `docker compose up -d --build`
 5. Cursor MCP on Windows: `http://localhost:6972/mcp` or LAN IP
 
@@ -151,15 +150,13 @@ Create `docker-compose.local.yml` for personal overrides without editing committ
 **One-command install (recommended):**
 
 ```bash
-git clone https://github.com/YOUR_GITHUB_USER/wolf-leader.git
+git clone git@github.com:YOU/wolf-leader.git
 cd wolf-leader
 WOLF_LEADER_API=http://YOUR_HOST:6971 \
 WOLF_LEADER_MCP=http://YOUR_HOST:6972/mcp \
-WOLF_LEADER_CLIENT=cursor \
-  bash -c "$(curl -fsSL http://YOUR_HOST:6971/api/client-setup/install.sh)"
+./scripts/install-cursor-client.sh
+./scripts/verify-cursor-client.sh
 ```
-
-Use `WOLF_LEADER_CLIENT=codex` for Codex. The hub bundle contains separate installers and verifiers because Codex and Cursor use different skill locations and hook schemas.
 
 This installs into `~/.cursor/`:
 
@@ -167,13 +164,11 @@ This installs into `~/.cursor/`:
 |-------|------|
 | `/save` skill | `skills/save/SKILL.md` |
 | MCP | `mcp.json` (`wolf-leader` + legacy `ide-storage` key) |
-| Hooks | `hooks.json`, `hooks/wolf-leader-*.sh`, background transcript autosave |
+| Hooks (opt-in, `WOLF_LEADER_HOOKS=1`) | `hooks.json`, `hooks/wolf-leader-*.sh` |
 | Rule | `rules/wolf-leader-hub.mdc` |
 | Hub URLs | `wolf-leader.env` |
 
-Reload the Cursor window so `/save` and `/new` appear in the `/` menu. The session-start hook recalls project context; the stop hook checkpoints meaningful transcript updates after responses and on stop. Automatic saves are best-effort; check `~/.cursor/wolf-leader-last-save.json` for the latest result and `~/.cursor/wolf-leader-autosave-error.log` for failures. Use `/save` for a deliberate final checkpoint. During onboarding, choose an economy, balanced, or maximum-quality model policy and record it in the workspace `AGENTS.md`.
-
-For Codex, reload the app, open **Settings → Hooks**, and trust the installed `SessionStart`, `UserPromptSubmit`, and `Stop` hooks. Codex skips untrusted hooks. Rerun `scripts/verify-codex-client.sh`, then complete one test save and confirm it appears in the hub. Setup is incomplete until those checks pass.
+Reload the Cursor window so `/save` appears in the `/` menu.
 
 **Manual / partial setup:**
 

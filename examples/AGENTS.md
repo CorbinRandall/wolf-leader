@@ -4,8 +4,6 @@
 
 Replace `YOUR_HOST` with your server IP, hostname, or Tailscale name.
 
-Prefer the Setup tab's **Copy setup prompt** button. It inserts the running hub's configured API and MCP URLs automatically.
-
 | Resource | URL / path |
 |----------|------------|
 | **Full onboarding (web)** | http://YOUR_HOST:6971/?tab=setup |
@@ -30,25 +28,25 @@ Raw transcripts stay on each device. `/save` checkpoints knowledge into the proj
 ```
 Connect this workspace to Wolf Leader and finish setup.
 
-1. Fetch and read http://YOUR_HOST:6971/api/onboarding and http://YOUR_HOST:6971/api/client-setup
-2. Identify OS, IDE, config-owning machine, and absolute workspace path
-3. Add MCP server `wolf-leader` → `http://YOUR_HOST:6972/mcp`, preserving existing client configuration
-4. Place AGENTS.md in workspace root (copy from hub data/AGENTS.md)
-5. Install the matching Cursor or Codex client integration; reload and verify `/save`, `/new`, recall, and automatic-save hooks. In Codex, trust the hooks in Settings → Hooks
+1. Fetch and read: http://YOUR_HOST:6971/api/onboarding
+2. Add MCP server `wolf-leader` → `http://YOUR_HOST:6972/mcp`
+3. Place AGENTS.md in workspace root (copy from hub data/AGENTS.md)
+4. Import existing transcripts not yet in the hub (skip by session_id)
+5. Install `/save` skill on each Cursor workspace (see Phase 2)
 6. Call resolve_project + recall before project work
-7. Use `/save` after meaningful work; Cursor hooks also save meaningful transcript updates after responses and on stop
+7. Type `/save` after meaningful work; stop hook catches session close
 ```
 
 ## Every session (mandatory)
 
-During setup, ask the owner to choose an **economy**, **balanced**, or **maximum-quality** model policy. Automatic background saves are installed by default and may only be skipped when the owner explicitly asks. Record choices in the workspace `AGENTS.md`; do not put personal values into tracked examples. Check the client directory's `wolf-leader-last-save.json` for the latest result and `wolf-leader-autosave-error.log` for failures. Use `/save` for a deliberate final checkpoint.
-
 | When | Action |
 |------|--------|
-| **Start** | `resolve_project({ path: "<workspace>" })` → `recall()` or `get_brief()` |
-| **During** | `remember({ type: "decision", content: "..." })` for durable facts |
-| **Checkpoint** | Type **`/save`** — extract memories → refresh brief → archive session |
-| **End** | Stop hook attempts another save; use `/save` for an intentional final checkpoint |
+| **Start** | `resolve_project({ path: "<workspace>" })` → `recall()`. Not matched → ask the user, then `create_project({ path })` |
+| **During** | `remember({ type, content })` for durable facts; `save_session({ title, content, session_id, project_id, workspace_path })` after each meaningful step and at least every ~8 turns (same `session_id` updates; pass `project_id` so it stays filed) |
+| **End** | Final `save_session` with an honest summary; one line to the user |
+| **Tell the user** | One short line per save; ask before creating/renaming/merging projects; surface any error |
+
+The user never types a command for this. `/save`, `/wolfhowl`, `/wolfeat` exist for deliberate use only.
 
 ## Handoff tiers
 
@@ -60,7 +58,7 @@ During setup, ask the owner to choose an **economy**, **balanced**, or **maximum
 
 ## MCP tools
 
-`set_project` · `resolve_project` · `recall` · `remember` · `get_brief` · `list_projects` · `search` · `get_session` · `save_session`
+`set_project` · `resolve_project` · `create_project` · `recall` · `remember` · `get_brief` · `list_projects` · `search` · `get_session` · `save_session` · `wolfhowl` · `wolfeat`
 
 ## Without MCP
 
@@ -91,16 +89,15 @@ File: `~/.cursor/mcp.json` (or project `.cursor/mcp.json`)
 claude mcp add wolf-leader --url http://YOUR_HOST:6972/mcp
 ```
 
-## Phase 2 — Cursor or Codex client (required)
+## Phase 2 — Cursor client (recommended)
 
 ```bash
 WOLF_LEADER_API=http://YOUR_HOST:6971 \
 WOLF_LEADER_MCP=http://YOUR_HOST:6972/mcp \
-WOLF_LEADER_CLIENT=cursor \
-  bash -c "$(curl -fsSL http://YOUR_HOST:6971/api/client-setup/install.sh)"
+./scripts/install-cursor-client.sh
 ```
 
-Use `WOLF_LEADER_CLIENT=codex` for Codex. The installer adds `/save` and `/new`, MCP, session recall, and automatic-save hooks. Codex users must reload, trust all Wolf Leader hooks in **Settings → Hooks**, rerun the verifier, and confirm a test save appears in Wolf Leader.
+Installs `/save` at `~/.cursor/skills/save/`, MCP, and rules (hooks only with `WOLF_LEADER_HOOKS=1`). Reload Cursor after install.
 
 ## Phase 3 — Project work
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -16,10 +15,14 @@ from ide_storage.spec_validation import validate_spec
 from ide_storage.project_archetypes import get_continue_mode, get_deploy_state, pickup_prompt
 from ide_storage.memory_ops import archive_chat, extract_memories_for_project
 from ide_storage.markdown_sync import read_agent_brief, regenerate_index
-from ide_storage.db import db_file, get_db_path
+from ide_storage.db import connect, db_file, get_db_path  # noqa: F401
 from ide_storage.relink_chats import relink_for_session
 
-TRANSCRIPTS_ROOT = Path("/root/.cursor/projects/root/agent-transcripts")
+TRANSCRIPTS_ROOT = Path(
+    os.environ.get("WOLF_TRANSCRIPTS_ROOT")
+    or os.environ.get("CURSOR_TRANSCRIPTS_ROOT")
+    or "/root/.cursor/projects/root/agent-transcripts"
+)
 
 
 def _public_base() -> str:
@@ -33,8 +36,7 @@ def _agent_prompt(name: str, slug: str, compose_path: str = "") -> str:
 
 
 def _get_chat(session_id: str | None = None, chat_id: int | None = None) -> dict | None:
-    conn = sqlite3.connect(db_file())
-    conn.row_factory = sqlite3.Row
+    conn = connect()
     cur = conn.cursor()
     if chat_id:
         cur.execute("SELECT * FROM chats WHERE id = ?", (chat_id,))
@@ -49,8 +51,7 @@ def _get_chat(session_id: str | None = None, chat_id: int | None = None) -> dict
 
 
 def _get_project(project_id: int) -> dict | None:
-    conn = sqlite3.connect(db_file())
-    conn.row_factory = sqlite3.Row
+    conn = connect()
     cur = conn.cursor()
     cur.execute("SELECT * FROM projects WHERE id = ?", (project_id,))
     row = cur.fetchone()
@@ -141,7 +142,7 @@ def post_save_pipeline(
         explicit=(chat.get("occurred_at") or None),
     )
     if occurred and occurred != (chat.get("occurred_at") or ""):
-        conn = sqlite3.connect(db_file())
+        conn = connect()
         cur = conn.cursor()
         cur.execute(
             "UPDATE chats SET occurred_at = ? WHERE id = ?",
@@ -167,7 +168,7 @@ def post_save_pipeline(
         return report
 
     slug = project.get("slug") or f"project-{project_id}"
-    extract = extract_memories_for_project(project_id, chat_id=chat["id"], max_new=5)
+    extract = extract_memories_for_project(project_id, chat_id=chat["id"], max_new=10)
     report["steps"].append({"extract_memories": extract})
     # A4: soft, non-breaking observability — bubble up when memories were saved
     # without an agent-provided descriptor and embeddings are on (descriptors
@@ -263,6 +264,11 @@ def post_save_pipeline(
         project_id=project_id,
         chat_ids=[chat["id"]],
     )
+
+    # Human-readable mirrors (Obsidian vault on the share + Fumadocs wiki).
+    from ide_storage.mirrors import refresh_mirrors
+
+    report["mirrors"] = refresh_mirrors(project_id)
     return report
 
 
@@ -285,7 +291,7 @@ def _checkpoint_summary(spec_result: dict, validation: dict) -> str:
 
 
 def _message_count(chat_id: int) -> int:
-    conn = sqlite3.connect(db_file())
+    conn = connect()
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM messages WHERE chat_id = ?", (chat_id,))
     n = cur.fetchone()[0]
@@ -294,8 +300,7 @@ def _message_count(chat_id: int) -> int:
 
 
 def _chat_messages(chat_id: int) -> list[dict]:
-    conn = sqlite3.connect(db_file())
-    conn.row_factory = sqlite3.Row
+    conn = connect()
     cur = conn.cursor()
     cur.execute(
         "SELECT role, content FROM messages WHERE chat_id = ? ORDER BY id",

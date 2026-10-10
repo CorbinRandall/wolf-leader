@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import sqlite3
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
-from ide_storage.db import db_file
+from ide_storage.db import connect, db_file
 from ide_storage.import_all_transcripts import (
     CATCH_ALL_PROJECT_ID,
     TRANSCRIPTS_ROOT,
@@ -22,7 +22,7 @@ MANUAL_LINKS: dict[int, int] = {}
 # Topic chats: resolved via slug in MANUAL_SLUG_LINKS (topic_projects.py)
 
 
-def chat_text(cur: sqlite3.Cursor, chat_id: int, title: str, content: str | None) -> str:
+def chat_text(cur: Any, chat_id: int, title: str, content: str | None) -> str:
     parts = [title or "", content or ""]
     cur.execute(
         "SELECT content FROM messages WHERE chat_id = ? AND role = 'user' ORDER BY id LIMIT 3",
@@ -34,10 +34,10 @@ def chat_text(cur: sqlite3.Cursor, chat_id: int, title: str, content: str | None
 
 
 def relink_chat(
-    cur: sqlite3.Cursor,
+    cur: Any,
     chat_id: int,
     *,
-    db_path: Path,
+    db_path: Any = None,
     force: bool = False,
     now: str | None = None,
 ) -> dict | None:
@@ -73,14 +73,13 @@ def relink_chat(
 
 def relink_for_session(
     session_id: str,
-    db_path: Path | None = None,
+    db_path: Any = None,
     *,
     force: bool = False,
     root: Path = TRANSCRIPTS_ROOT,
 ) -> dict | None:
     """Relink a single chat by Cursor session_id (full transcript when available)."""
-    conn = sqlite3.connect(db_path or db_file())
-    conn.row_factory = sqlite3.Row
+    conn = connect()
     cur = conn.cursor()
     cur.execute("SELECT id, project_id, title FROM chats WHERE session_id = ?", (session_id,))
     row = cur.fetchone()
@@ -152,7 +151,7 @@ def relink_for_session(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Link chats to projects by topic")
-    parser.add_argument("--db", type=Path, default=None)
+    parser.add_argument("--db", default=None, help="ignored; set DATABASE_URL instead")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true", help="Re-guess even if project_id is set")
     parser.add_argument(
@@ -164,8 +163,7 @@ def main() -> None:
     db_path = args.db or db_file()
 
     now = datetime.utcnow().isoformat()
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
+    conn = connect()
     cur = conn.cursor()
     cur.execute("SELECT id, title, content, project_id FROM chats ORDER BY id")
 

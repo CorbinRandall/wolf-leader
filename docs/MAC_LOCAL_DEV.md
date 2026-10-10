@@ -1,49 +1,77 @@
-# Wolf Leader — macOS local development
+# Wolf Leader — Mac local dev setup
 
-Use this guide to run a private development hub on a Mac. Your production hub, if any, stays separate.
+Paste this entire document into a **new Cursor chat** on your Mac with folder **`~/dev/wolf-leader`** open (local, not Remote-SSH).
+
+---
+
+## Goal
+
+Run Wolf Leader on your Mac (Docker), develop and test fast, push to GitHub, deploy to your production hub only when ready.
+
+Production hub stays at **`http://wolf.local:6971`** (or `http://<hub-ip>:6971`). Mac dev uses **`http://127.0.0.1:6971`**.
+
+---
 
 ## Prerequisites
 
-- Docker Desktop
-- Git
-- An MCP-capable IDE or agent
+- Docker Desktop installed and running
+- Git + SSH access to your fork, e.g. `github.com:<owner>/wolf-leader`
+- Cursor on Mac (this chat)
 
-## Clone and configure
+---
+
+## Step 1 — Clone repo
 
 ```bash
-mkdir -p "$HOME/dev"
-git clone https://github.com/YOUR_GITHUB_USER/wolf-leader.git "$HOME/dev/wolf-leader"
-cd "$HOME/dev/wolf-leader"
+mkdir -p ~/dev
+git clone git@github.com:<owner>/wolf-leader.git ~/dev/wolf-leader
+cd ~/dev/wolf-leader
+```
+
+Open **`~/dev/wolf-leader`** in Cursor (File → Open Folder).
+
+---
+
+## Step 2 — Local hub (.env + Docker)
+
+```bash
+cd ~/dev/wolf-leader
 cp .env.example .env
 ```
 
-For a Mac-only development hub, keep the loopback defaults in `.env`:
+Edit `.env`:
 
-```dotenv
-IDE_STORAGE_PUBLIC_HOST=127.0.0.1
+```bash
 IDE_STORAGE_PUBLIC_URL=http://127.0.0.1:6971
 IDE_STORAGE_MCP_URL=http://127.0.0.1:6972/mcp
-IDE_STORAGE_DEVICE_NAME=mac-dev
 IDE_STORAGE_HOST_LABEL=mac-dev
 ```
 
-If other devices must reach the Mac, run `./scripts/configure-runtime.sh --force`. It detects a Tailscale or LAN address and writes the URLs into the private `.env` file.
-
-## Start and verify
+Start hub:
 
 ```bash
+chmod +x scripts/*.sh scripts/lib/*.sh 2>/dev/null || true
 ./scripts/setup.sh
-curl -fsS http://127.0.0.1:6971/health
+```
+
+Verify:
+
+```bash
+curl -s http://127.0.0.1:6971/health
 open http://127.0.0.1:6971/?tab=setup
 ```
 
-Rebuild after code changes with `docker compose up -d --build`.
+Rebuild after code changes:
 
-## Connect the local IDE
+```bash
+docker compose up -d --build
+```
 
-Open the Setup tab and click **Copy setup prompt**. The copied prompt contains this hub's configured API and MCP URLs. Paste it into the IDE agent and let it identify the current workspace.
+---
 
-For Cursor, the equivalent command is:
+## Step 3 — Cursor client → local hub
+
+Run on Mac (not SSH):
 
 ```bash
 WOLF_LEADER_API=http://127.0.0.1:6971 \
@@ -52,13 +80,29 @@ WORKSPACE="$HOME/dev/wolf-leader" \
   bash -c "$(curl -fsSL http://127.0.0.1:6971/api/client-setup/install.sh)"
 ```
 
-Reload Cursor after installation. Confirm `/save` and `/new` appear. The installed hooks recall project context and save meaningful transcript updates in the background. Use `/save` for a deliberate final checkpoint.
+Or from repo checkout:
 
-During onboarding, choose a friendly device name, a model policy (economy, balanced, or maximum quality), and whether background saves should remain enabled. Store those choices in the workspace `AGENTS.md`, not in tracked public examples.
+```bash
+cd ~/dev/wolf-leader
+WOLF_LEADER_API=http://127.0.0.1:6971 \
+WOLF_LEADER_MCP=http://127.0.0.1:6972/mcp \
+WORKSPACE="$HOME/dev/wolf-leader" \
+  ./scripts/install-cursor-client.sh
+```
 
-## Optional transcript import
+Verify:
 
-Create a gitignored `docker-compose.local.yml` and replace the host path with the transcript directory on this Mac:
+```bash
+./scripts/verify-cursor-client.sh
+```
+
+**Reload Cursor window** — `/save` and `/new` should appear.
+
+---
+
+## Step 4 — Optional: import Mac transcripts into local hub
+
+Create `docker-compose.local.yml` (gitignored overrides are fine):
 
 ```yaml
 services:
@@ -66,15 +110,72 @@ services:
     environment:
       CURSOR_TRANSCRIPTS_ROOT: /transcripts
     volumes:
-      - /absolute/path/to/agent-transcripts:/transcripts:ro
+      - ${HOME}/.cursor/projects/Users-YOURUSER-dev-wolf-leader/agent-transcripts:/transcripts:ro
 ```
 
-Then run:
+Find your actual path:
+
+```bash
+ls ~/.cursor/projects/
+```
+
+Then:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
 ```
 
-## Deployment
+---
 
-Wolf Leader does not assume a production host. Configure deployment for your environment separately. The public GitHub workflow is manual and opt-in so forks do not wait for someone else's private runner.
+## Step 5 — Daily dev loop
+
+1. Edit code in `~/dev/wolf-leader`
+2. `docker compose up -d --build`
+3. Test at http://127.0.0.1:6971
+4. Commit and push:
+
+```bash
+git add -A && git commit -m "your message" && git push origin main
+```
+
+---
+
+## Step 6 — Deploy to production when ready
+
+After `git push`, from this repo on your Mac:
+
+```bash
+WOLF_LEADER_PROXMOX_HOST=root@<proxmox-host> WOLF_LEADER_VMID=<ctid> ./scripts/deploy-prod.sh
+```
+
+That SSHs to your Proxmox host, pulls from GitHub on the host, then **git pull inside the hub LXC** and rebuilds the container. No manual file copy.
+
+Or on the Proxmox host directly:
+
+```bash
+cd /opt/wolf-leader && git pull --ff-only && WOLF_LEADER_VMID=<ctid> ./scripts/deploy-wolf-leader-lxc.sh
+```
+
+Production URL: http://wolf.local:6971/health
+
+First deploy bootstraps git inside the LXC (preserves `data/` and `.env`). Later deploys are just pull + rebuild.
+
+### Automatic deploy (optional, recommended)
+
+After a one-time [self-hosted runner setup](GITHUB_ACTIONS.md) on Proxmox, **pushes to `main`** run tests and deploy automatically. Until then, use `./scripts/deploy-prod.sh` manually.
+
+Other clients keep using the production hub URL — no change unless you intentionally point them at your Mac.
+
+---
+
+## Agent instructions (for this chat)
+
+You are setting up Wolf Leader local dev on macOS.
+
+1. Run Step 1–3 commands; fix any errors.
+2. Confirm `curl http://127.0.0.1:6971/health` and Setup tab loads.
+3. Confirm `verify-cursor-client.sh` passes.
+4. Use MCP `wolf-leader` at `http://127.0.0.1:6972/mcp` for project work in this repo.
+5. Do **not** deploy to production unless I ask.
+
+Report: Docker status, health URL, verify output, and whether `/save` `/new` appear after reload.

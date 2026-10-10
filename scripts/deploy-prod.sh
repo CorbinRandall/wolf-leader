@@ -1,34 +1,26 @@
 #!/usr/bin/env bash
-# Deploy Wolf Leader to a user-configured remote host (after git push).
+# Deploy Wolf Leader production from your workstation (after git push).
 #
 # Usage:
-#   WOLF_LEADER_DEPLOY_HOST=user@server WOLF_LEADER_REMOTE_DIR=/opt/wolf-leader ./scripts/deploy-prod.sh
-#   ./scripts/deploy-prod.sh main      # deploy a specific branch
+#   WOLF_LEADER_PROXMOX_HOST=root@<proxmox-host> WOLF_LEADER_VMID=<ctid> ./scripts/deploy-prod.sh
+#   ... ./scripts/deploy-prod.sh main      # deploy a specific branch
 #
 set -euo pipefail
 
-DEPLOY_HOST="${WOLF_LEADER_DEPLOY_HOST:-}"
-REMOTE_DIR="${WOLF_LEADER_REMOTE_DIR:-/opt/wolf-leader}"
+PROXMOX="${WOLF_LEADER_PROXMOX_HOST:-}"
+VMID="${WOLF_LEADER_VMID:-}"
 BRANCH="${1:-}"
 
-if [[ -z "$DEPLOY_HOST" ]]; then
-  echo "ERROR: set WOLF_LEADER_DEPLOY_HOST to the SSH destination (for example user@server)" >&2
-  exit 1
-fi
-if [[ -n "$BRANCH" && ! "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-  echo "ERROR: invalid branch name" >&2
-  exit 1
-fi
-if [[ ! "$REMOTE_DIR" =~ ^/[A-Za-z0-9._/-]+$ ]]; then
-  echo "ERROR: WOLF_LEADER_REMOTE_DIR must be an absolute path using letters, numbers, dots, underscores, dashes, and slashes" >&2
+if [[ -z "$PROXMOX" || -z "$VMID" ]]; then
+  echo "ERROR: set WOLF_LEADER_PROXMOX_HOST (ssh target, e.g. root@<proxmox-host>) and WOLF_LEADER_VMID (<ctid>)" >&2
   exit 1
 fi
 
 if [[ -n "$BRANCH" ]]; then
-  remote_cmd="cd '$REMOTE_DIR' && git fetch origin && git checkout '$BRANCH' && git pull --ff-only origin '$BRANCH' && WOLF_LEADER_BRANCH='$BRANCH' bash scripts/deploy-wolf-leader-lxc.sh"
+  remote_cmd="cd /opt/wolf-leader && git fetch origin && git checkout $BRANCH && git pull --ff-only origin $BRANCH && WOLF_LEADER_VMID=$VMID WOLF_LEADER_BRANCH=$BRANCH bash scripts/deploy-wolf-leader-lxc.sh"
 else
-  remote_cmd="cd '$REMOTE_DIR' && git pull --ff-only && bash scripts/deploy-wolf-leader-lxc.sh"
+  remote_cmd="cd /opt/wolf-leader && git pull --ff-only && WOLF_LEADER_VMID=$VMID bash scripts/deploy-wolf-leader-lxc.sh"
 fi
 
-echo "Deploying via $DEPLOY_HOST ..."
-ssh "$DEPLOY_HOST" "$remote_cmd"
+echo "Deploying via $PROXMOX ..."
+ssh "$PROXMOX" "$remote_cmd"

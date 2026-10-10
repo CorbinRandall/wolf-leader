@@ -1,24 +1,26 @@
-"""Embedding index: build text, sync vectors, KNN lookup."""
+"""Embedding index: build text, sync vectors, KNN lookup (pgvector)."""
 from __future__ import annotations
 
 import hashlib
 import json
-import sqlite3
 from datetime import datetime
 from typing import Any
 
-from ide_storage.db import db_conn, load_vec_extension
+from ide_storage import localtime as LT
+from ide_storage.db import db_conn
 from ide_storage.embeddings import (
     embed_dim,
     embed_model_name,
     embed_one,
     embed_texts,
     embeddings_available,
-    serialize_vector,
 )
 from ide_storage.markdown_sync import read_project_md
 
-EMBED_KINDS = ("memory", "project", "chat")
+# Row kinds that carry a vector. "howl", "catalog" and "chunk" are the
+# broadcast note, the filesystem catalog blurb and an ingested file slice.
+EMBED_KINDS = ("memory", "project", "chat", "howl", "catalog", "chunk")
+CORE_KINDS = ("memory", "project", "chat")
 
 # Sub-batch size for embedding so a large project doesn't spike RAM/CPU by
 # embedding everything in one call. Mirrors backfill_embeddings.DEFAULT_BATCH.
@@ -88,19 +90,23 @@ def delete_embeddings(pairs: list[tuple[str, int]]) -> int:
 
 
 def delete_project_embeddings(project_id: int) -> int:
-    """Delete embeddings for a project and all of its memories and chats."""
+    """Delete embeddings for a project and all rows that hang off it."""
+    tables = {
+        "memory": "memories",
+        "chat": "chats",
+        "howl": "howls",
+        "catalog": "fs_catalog",
+        "chunk": "file_chunks",
+    }
+    pairs: list[tuple[str, int]] = [("project", int(project_id))]
     try:
         with db_conn() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT id FROM memories WHERE project_id = ?", (project_id,))
-            mem_ids = [int(r[0]) for r in cur.fetchall()]
-            cur.execute("SELECT id FROM chats WHERE project_id = ?", (project_id,))
-            chat_ids = [int(r[0]) for r in cur.fetchall()]
+            for kind, table in tables.items():
+                cur.execute(f"SELECT id FROM {table} WHERE project_id = ?", (project_id,))
+                pairs += [(kind, int(r[0])) for r in cur.fetchall()]
     except Exception:
         return 0
-    pairs: list[tuple[str, int]] = [("project", int(project_id))]
-    pairs += [("memory", m) for m in mem_ids]
-    pairs += [("chat", c) for c in chat_ids]
     return delete_embeddings(pairs)
 
 
@@ -117,7 +123,39 @@ def _project_semantic_descriptor(metadata: Any) -> str:
     return ""
 
 
-def memory_embed_text(row: sqlite3.Row | dict[str, Any]) -> str:
+def howl_embed_text(row: Any) -> str:
+    data = dict(row)
+    parts: list[str] = []
+    project_name = (data.get("project_name") or data.get("project_slug") or "").strip()
+    if project_name:
+        parts.append(f"Project: {project_name}")
+    summary = (data.get("summary") or "").strip()
+    if summary:
+        parts.append(summary[:3000])
+    return "\n".join(parts).strip()
+
+
+def catalog_embed_text(row: Any) -> str:
+    data = dict(row)
+    parts: list[str] = []
+    project_name = (data.get("project_name") or data.get("project_slug") or "").strip()
+    if project_name:
+        parts.append(f"Project: {project_name}")
+    parts.append(f"File: {data.get('rel_path') or data.get('name') or ''}")
+    blurb = (data.get("blurb") or "").strip()
+    if blurb:
+        parts.append(blurb[:600])
+    return "\n".join(parts).strip()
+
+
+def chunk_embed_text(row: Any) -> str:
+    data = dict(row)
+    path = (data.get("path") or "").strip()
+    content = (data.get("content") or "").strip()
+    return f"{path}\n{content[:3000]}".strip()
+
+
+def memory_embed_text(row: Any) -> str:
     data = dict(row)
     parts: list[str] = []
     # Project context anchors the vector so memories from different projects
@@ -137,7 +175,7 @@ def memory_embed_text(row: sqlite3.Row | dict[str, Any]) -> str:
     return "\n".join(parts).strip()
 
 
-def project_embed_text(row: sqlite3.Row | dict[str, Any]) -> str:
+def project_embed_text(row: Any) -> str:
     data = dict(row)
     parts: list[str] = []
     name = (data.get("name") or "").strip()
@@ -159,7 +197,7 @@ def project_embed_text(row: sqlite3.Row | dict[str, Any]) -> str:
     return "\n".join(parts).strip()
 
 
-def chat_embed_text(row: sqlite3.Row | dict[str, Any]) -> str:
+def chat_embed_text(row: Any) -> str:
     data = dict(row)
     title = (data.get("title") or "").strip()
     content = (data.get("content") or "").strip()
@@ -167,8 +205,13 @@ def chat_embed_text(row: sqlite3.Row | dict[str, Any]) -> str:
     return "\n".join(parts).strip()
 
 
+def vector_literal(vector: list[float]) -> str:
+    """pgvector text form: '[0.1,0.2,...]'."""
+    return "[" + ",".join(f"{float(v):.8g}" for v in vector) + "]"
+
+
 def _upsert_embedding(
-    cur: sqlite3.Cursor,
+    cur,
     *,
     kind: str,
     ref_id: int,
@@ -179,11 +222,10 @@ def _upsert_embedding(
     model = embed_model_name()
     dim = embed_dim()
     th = text_hash(embed_text)
-    blob = serialize_vector(vector)
     cur.execute(
         """
         INSERT INTO embeddings (kind, ref_id, model, dim, text_hash, embed_text, vector, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?::vector, ?)
         ON CONFLICT(kind, ref_id, model) DO UPDATE SET
             dim = excluded.dim,
             text_hash = excluded.text_hash,
@@ -191,11 +233,11 @@ def _upsert_embedding(
             vector = excluded.vector,
             updated_at = excluded.updated_at
         """,
-        (kind, ref_id, model, dim, th, embed_text, blob, now),
+        (kind, ref_id, model, dim, th, embed_text, vector_literal(vector), now),
     )
 
 
-def _existing_hashes(cur: sqlite3.Cursor, kind: str) -> dict[int, str]:
+def _existing_hashes(cur, kind: str) -> dict[int, str]:
     model = embed_model_name()
     cur.execute(
         "SELECT ref_id, text_hash FROM embeddings WHERE kind = ? AND model = ?",
@@ -204,13 +246,32 @@ def _existing_hashes(cur: sqlite3.Cursor, kind: str) -> dict[int, str]:
     return {int(r[0]): r[1] for r in cur.fetchall()}
 
 
+def _collect(pending, report, rows, kind, hashes, text_fn) -> None:
+    for row in rows:
+        text = text_fn(row)
+        if not text:
+            continue
+        th = text_hash(text)
+        if hashes.get(int(row["id"])) == th:
+            report["skipped_unchanged"] += 1
+            continue
+        pending.append((kind, int(row["id"]), text))
+
+
 def sync_dirty(
     *,
     project_id: int | None = None,
     memory_ids: list[int] | None = None,
     chat_ids: list[int] | None = None,
+    howl_ids: list[int] | None = None,
+    catalog_ids: list[int] | None = None,
+    chunk_ids: list[int] | None = None,
 ) -> dict[str, Any]:
-    """Re-embed rows whose source text changed or are missing from the index."""
+    """Re-embed rows whose source text changed or are missing from the index.
+
+    This is the embed-on-write path: every save/howl/catalog refresh calls it for
+    the rows it just touched.
+    """
     if not embeddings_available():
         return {"ok": True, "skipped": True, "reason": "embeddings unavailable"}
 
@@ -223,8 +284,6 @@ def sync_dirty(
     pending: list[tuple[str, int, str]] = []
     with db_conn() as conn:
         cur = conn.cursor()
-        if not load_vec_extension(conn):
-            return {"ok": False, "error": "sqlite-vec extension unavailable"}
 
         # Memories — JOIN projects so embed text includes project name for better clustering
         mem_query = """
@@ -275,10 +334,10 @@ def sync_dirty(
 
         # Chats (optional, for semantic session search)
         if chat_ids or project_id is not None:
-            chat_query = """
-                SELECT id, title, content FROM chats
-                WHERE COALESCE(status, 'active') = 'active'
-            """
+            # Every saved chat gets a vector, archived included: the save pipeline
+            # archives before it embeds, and _hydrate_knn_rows applies the
+            # active/archived visibility rule at query time.
+            chat_query = "SELECT id, title, content FROM chats WHERE 1=1"
             chat_params: list[Any] = []
             if project_id is not None:
                 chat_query += " AND project_id = ?"
@@ -298,6 +357,52 @@ def sync_dirty(
                     report["skipped_unchanged"] += 1
                     continue
                 pending.append(("chat", int(row["id"]), text))
+
+        # Howls
+        if howl_ids or project_id is not None:
+            q = """
+                SELECT h.id, h.summary, p.name AS project_name, p.slug AS project_slug
+                FROM howls h LEFT JOIN projects p ON p.id = h.project_id WHERE 1=1
+            """
+            params: list[Any] = []
+            if project_id is not None:
+                q += " AND h.project_id = ?"
+                params.append(project_id)
+            if howl_ids:
+                q += f" AND h.id IN ({','.join('?' * len(howl_ids))})"
+                params.extend(howl_ids)
+            cur.execute(q, params)
+            _collect(pending, report, cur.fetchall(), "howl", _existing_hashes(cur, "howl"), howl_embed_text)
+
+        # Filesystem catalog (only explicit ids or a project refresh)
+        if catalog_ids or project_id is not None:
+            q = """
+                SELECT f.id, f.rel_path, f.name, f.blurb, p.name AS project_name, p.slug AS project_slug
+                FROM fs_catalog f LEFT JOIN projects p ON p.id = f.project_id
+                WHERE f.is_dir = FALSE
+            """
+            params = []
+            if project_id is not None:
+                q += " AND f.project_id = ?"
+                params.append(project_id)
+            if catalog_ids:
+                q += f" AND f.id IN ({','.join('?' * len(catalog_ids))})"
+                params.extend(catalog_ids)
+            cur.execute(q, params)
+            _collect(pending, report, cur.fetchall(), "catalog", _existing_hashes(cur, "catalog"), catalog_embed_text)
+
+        # File chunks
+        if chunk_ids or project_id is not None:
+            q = "SELECT id, path, content FROM file_chunks WHERE 1=1"
+            params = []
+            if project_id is not None:
+                q += " AND project_id = ?"
+                params.append(project_id)
+            if chunk_ids:
+                q += f" AND id IN ({','.join('?' * len(chunk_ids))})"
+                params.extend(chunk_ids)
+            cur.execute(q, params)
+            _collect(pending, report, cur.fetchall(), "chunk", _existing_hashes(cur, "chunk"), chunk_embed_text)
 
     if not pending:
         report["ok"] = True
@@ -349,46 +454,78 @@ def knn(
     min_similarity: float = MIN_SIMILARITY,
     include_archived: bool = False,
 ) -> list[dict[str, Any]]:
-    """Cosine-distance KNN over the embeddings table."""
+    """Cosine-distance KNN over the embeddings table (pgvector ``<=>``)."""
     if not embeddings_available():
         return []
 
-    blob = serialize_vector(query_vector)
+    qvec = vector_literal(query_vector)
     model = embed_model_name()
     placeholders = ",".join("?" * len(kinds))
 
     with db_conn() as conn:
         cur = conn.cursor()
-        if not load_vec_extension(conn):
-            return []
-
         sql = f"""
             SELECT e.kind, e.ref_id, e.embed_text,
-                   vec_distance_cosine(e.vector, ?) AS distance
+                   (e.vector <=> ?::vector) AS distance
             FROM embeddings e
             WHERE e.model = ? AND e.kind IN ({placeholders})
         """
-        params: list[Any] = [blob, model, *kinds]
+        params: list[Any] = [qvec, model, *kinds]
 
-        if project_id is not None and "memory" in kinds:
+        if project_id is not None:
             sql += """
                 AND (
-                    e.kind != 'memory'
-                    OR e.ref_id IN (
-                        SELECT id FROM memories WHERE project_id = ? AND COALESCE(status, 'active') = 'active'
-                    )
+                    (e.kind = 'memory' AND e.ref_id IN (
+                        SELECT id FROM memories WHERE project_id = ? AND COALESCE(status, 'active') = 'active'))
+                 OR (e.kind = 'chat' AND e.ref_id IN (SELECT id FROM chats WHERE project_id = ?))
+                 OR (e.kind = 'howl' AND e.ref_id IN (SELECT id FROM howls WHERE project_id = ?))
+                 OR (e.kind = 'catalog' AND e.ref_id IN (SELECT id FROM fs_catalog WHERE project_id = ?))
+                 OR (e.kind = 'chunk' AND e.ref_id IN (SELECT id FROM file_chunks WHERE project_id = ?))
+                 OR (e.kind = 'project' AND e.ref_id = ?)
                 )
             """
-            params.append(project_id)
+            params.extend([project_id] * 6)
 
         max_distance = 1.0 - min_similarity
-        sql += " AND vec_distance_cosine(e.vector, ?) <= ? ORDER BY distance ASC LIMIT ?"
-        params.extend([blob, max_distance, limit])
+        sql += " AND (e.vector <=> ?::vector) <= ? ORDER BY distance ASC LIMIT ?"
+        params.extend([qvec, max_distance, limit])
 
         cur.execute(sql, params)
         rows = [dict(r) for r in cur.fetchall()]
 
     return _hydrate_knn_rows(rows, include_archived=include_archived)
+
+
+def neighbors_for(
+    kind: str,
+    ref_id: int,
+    *,
+    kinds: tuple[str, ...] = ("project", "memory", "howl", "chat"),
+    limit: int = 8,
+    min_similarity: float = 0.35,
+) -> list[dict[str, Any]]:
+    """Nearest rows to an already-embedded row (used for vault "Related" links)."""
+    if not embeddings_available():
+        return []
+    model = embed_model_name()
+    placeholders = ",".join("?" * len(kinds))
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"""
+            SELECT e.kind, e.ref_id, e.embed_text,
+                   (e.vector <=> src.vector) AS distance
+            FROM embeddings e,
+                 (SELECT vector FROM embeddings WHERE kind = ? AND ref_id = ? AND model = ?) src
+            WHERE e.model = ? AND e.kind IN ({placeholders})
+              AND NOT (e.kind = ? AND e.ref_id = ?)
+              AND (e.vector <=> src.vector) <= ?
+            ORDER BY distance ASC LIMIT ?
+            """,
+            [kind, ref_id, model, model, *kinds, kind, ref_id, 1.0 - min_similarity, limit],
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+    return _hydrate_knn_rows(rows, include_archived=True)
 
 
 def _hydrate_knn_rows(
@@ -476,6 +613,66 @@ def _hydrate_knn_rows(
                         "title": chat.get("title"),
                         "content": chat.get("content"),
                         "updated_at": chat.get("updated_at"),
+                    }
+                )
+            elif kind == "howl":
+                cur.execute(
+                    """
+                    SELECT h.id, h.project_id, h.summary, h.created_at, h.git_commit,
+                           p.slug AS project_slug
+                    FROM howls h LEFT JOIN projects p ON p.id = h.project_id
+                    WHERE h.id = ?
+                    """,
+                    (ref_id,),
+                )
+                howl = cur.fetchone()
+                if not howl:
+                    continue
+                howl = dict(howl)
+                item.update(
+                    {
+                        "title": f"Howl {LT.fmt(howl['created_at'])} · {howl.get('project_slug') or ''}".strip(" ·"),
+                        "content": (howl.get("summary") or "")[:300],
+                        "project_id": howl.get("project_id"),
+                        "slug": howl.get("project_slug"),
+                        "created_at": howl.get("created_at"),
+                        "stamp": LT.stamp(howl.get("created_at")),
+                    }
+                )
+            elif kind == "catalog":
+                cur.execute(
+                    "SELECT id, project_id, root_path, rel_path, name, blurb, mtime FROM fs_catalog WHERE id = ?",
+                    (ref_id,),
+                )
+                cat = cur.fetchone()
+                if not cat:
+                    continue
+                cat = dict(cat)
+                item.update(
+                    {
+                        "title": cat["rel_path"],
+                        "content": cat.get("blurb"),
+                        "project_id": cat.get("project_id"),
+                        "path": f"{cat['root_path'].rstrip('/')}/{cat['rel_path']}",
+                        "mtime": cat.get("mtime"),
+                    }
+                )
+            elif kind == "chunk":
+                cur.execute(
+                    "SELECT id, project_id, path, chunk_index, content FROM file_chunks WHERE id = ?",
+                    (ref_id,),
+                )
+                ch = cur.fetchone()
+                if not ch:
+                    continue
+                ch = dict(ch)
+                item.update(
+                    {
+                        "title": f"{ch['path']} #{ch['chunk_index']}",
+                        "content": (ch.get("content") or "")[:400],
+                        "project_id": ch.get("project_id"),
+                        "path": ch["path"],
+                        "chunk_index": ch["chunk_index"],
                     }
                 )
             else:

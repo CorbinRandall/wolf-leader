@@ -1,0 +1,84 @@
+# Wolf Leader hub (e.g. in a Proxmox LXC, see docs/lxc-hub.md) — Postgres + pgvector.
+#
+#   cp .env.example .env            # set IDE_STORAGE_PUBLIC_URL etc.
+#   docker compose -f docker-compose.postgres.yml up -d --build
+#
+# Two local disks on the hub machine (see scripts/wolf-lxc-storage.sh):
+#   WOLF_PGDATA      (default /var/lib/wolf-postgres) Postgres only, never shared
+#   WOLF_SHARE_ROOT  (default /srv/wolf) the drive every client maps (W:\ / \\wolf.local\wolf):
+#     /srv/wolf/<project repos>        git, as always
+#     /srv/wolf/wolf-leader/vault      Obsidian vault the hub writes
+#     /srv/wolf/wolf-leader/hub        pg_dump on every howl + nightly (the DB backup)
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: wolf-leader-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-wolf}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wolf}
+      POSTGRES_DB: ${POSTGRES_DB:-wolf_leader}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - ${WOLF_PGDATA:-/var/lib/wolf-postgres}:/var/lib/postgresql/data
+    command: >
+      postgres -c shared_buffers=512MB -c work_mem=16MB -c maintenance_work_mem=128MB
+               -c max_connections=60 -c wal_compression=on
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wolf} -d ${POSTGRES_DB:-wolf_leader}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  wolf-leader:
+    container_name: wolf-leader
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        INCLUDE_EMBEDDINGS: "1"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wolf}:${POSTGRES_PASSWORD:-wolf}@postgres:5432/${POSTGRES_DB:-wolf_leader}
+      IDE_STORAGE_EMBEDDINGS_ENABLED: "1"
+      IDE_STORAGE_PROJECTS_DIR: /data/projects
+      # In-container paths are fixed; only the host side (WOLF_SHARE_ROOT) moves.
+      IDE_STORAGE_VAULT_DIR: /srv/wolf/wolf-leader/vault
+      IDE_STORAGE_SHARE_ROOT: /srv/wolf
+      WOLF_SHARE_ROOT: /srv/wolf
+      WOLF_WIKI_DIR: /app/wiki
+      # Times are stored UTC; notes/wiki/summaries display in this zone as HH:MM MM/DD/YYYY.
+      WOLF_TZ: ${WOLF_TZ:-America/Chicago}
+      TZ: ${WOLF_TZ:-America/Chicago}
+      HOST: 0.0.0.0
+      MCP_HOST: 0.0.0.0
+    ports:
+      - "${PORT:-6971}:6971"
+      - "${MCP_PORT:-6972}:6972"
+    volumes:
+      - ./data:/data
+      - ${WOLF_SHARE_ROOT:-/srv/wolf}:/srv/wolf
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Nightly pg_dump into the share so a plain file backup exists next to pgdata.
+  backup:
+    image: pgvector/pgvector:pg16
+    container_name: wolf-leader-backup
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-wolf}
+    volumes:
+      - ${WOLF_SHARE_ROOT:-/srv/wolf}/wolf-leader/hub:/backup
+    # One dump per day, keep the newest 14 (only ever deletes our own *.dump files in hub/).
+    entrypoint:
+      - sh
+      - -c
+      - while true; do pg_dump -h postgres -U ${POSTGRES_USER:-wolf} -d ${POSTGRES_DB:-wolf_leader} -Fc -f /backup/wolf-leader-$$(date +%F).dump && ls -t /backup/wolf-leader-*.dump | tail -n +15 | xargs -r rm -f; sleep 86400; done
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped

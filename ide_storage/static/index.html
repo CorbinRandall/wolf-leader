@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/styles.css?v=human-summaries-2" />
+  <link rel="stylesheet" href="/static/styles.css?v=workspace-tabs-5" />
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
@@ -23,11 +23,14 @@
         </div>
         <nav class="tabs" id="nav-tabs">
           <button type="button" class="tab" data-tab="projects">Projects</button>
+          <button type="button" class="tab" data-tab="kanban">Kanban</button>
+          <button type="button" class="tab" data-tab="skills">Skills</button>
           <button type="button" class="tab" data-tab="home">Home</button>
           <button type="button" class="tab" data-tab="setup">Setup</button>
           <button type="button" class="tab" data-tab="archive">Library</button>
         </nav>
         <input type="search" id="search" placeholder="Search…" autocomplete="off" />
+        <button type="button" id="duplicate-projects-btn" class="btn btn-secondary sidebar-tool hidden">Fix duplicate projects</button>
       </header>
       <div id="sidebar-list" class="chat-list"></div>
       <footer class="sidebar-footer">
@@ -63,6 +66,48 @@
         <div id="setup-content" class="md-content"></div>
       </div>
 
+      <div id="kanban-view" class="view kanban-view hidden">
+        <header class="view-header kanban-header">
+          <div>
+            <h2>Project board</h2>
+            <p class="setup-lead">Drag projects between columns. Drag a column by its handle, or double-click its title to rename it.</p>
+          </div>
+          <button type="button" id="add-kanban-column-btn" class="btn btn-secondary" aria-expanded="false" aria-controls="add-kanban-column-form">Add column</button>
+        </header>
+        <form id="add-kanban-column-form" class="kanban-add-form hidden"><input id="kanban-column-name" placeholder="Column name" required /><input id="kanban-column-description" placeholder="Short description (optional)" /><button class="btn btn-primary">Add</button></form>
+        <div id="kanban-board" class="kanban-board" aria-label="Project status board"></div>
+      </div>
+
+      <div id="projects-view" class="view projects-view hidden">
+        <header class="view-header"><div><h2>Projects</h2><p class="setup-lead">A quick, readable index of every project.</p></div></header>
+        <div id="projects-list" class="projects-list"></div>
+      </div>
+
+      <div id="skills-view" class="view skills-view hidden">
+        <header class="view-header skills-header">
+          <div>
+            <h2>Skills library</h2>
+            <p class="setup-lead">Browse and share portable personal workflows with any IDE or agent. Plugin and system skills remain with their provider.</p>
+          </div>
+          <div class="chat-actions">
+            <button type="button" id="copy-skills-install-btn" class="btn btn-primary">Copy install prompt</button>
+            <button type="button" id="copy-skills-publish-btn" class="btn btn-secondary">Copy publish prompt</button>
+            <a id="download-skills-btn" class="btn btn-secondary" href="/api/skills/export.zip">Download all</a>
+          </div>
+        </header>
+        <div id="skills-grid" class="skills-grid"></div>
+        <section id="skill-detail" class="panel skill-detail hidden">
+          <header class="skill-detail-header">
+            <div>
+              <h3 id="skill-detail-title">—</h3>
+              <p id="skill-detail-meta" class="muted"></p>
+            </div>
+            <a id="download-skill-btn" class="btn btn-secondary" href="#">Download skill</a>
+          </header>
+          <div id="skill-detail-content" class="md-content"></div>
+        </section>
+      </div>
+
       <div id="project-view" class="view hidden">
         <header class="chat-header">
           <div class="chat-header-text">
@@ -91,11 +136,11 @@
         </section>
         <p id="brief-meta" class="setup-lead muted"></p>
         <section class="panel">
-          <h3>Agent brief (distilled)</h3>
+          <h3>Project knowledge</h3>
           <div id="agent-brief-preview" class="md-content"></div>
         </section>
         <section class="panel">
-          <h3>Memories <button type="button" id="add-memory-btn" class="btn btn-small btn-secondary">+ Add</button></h3>
+          <h3>Categorized memories <button type="button" id="add-memory-btn" class="btn btn-small btn-secondary">+ Add</button></h3>
           <div id="memories-list"></div>
         </section>
         <section class="split-pane">
@@ -155,6 +200,6 @@
   </dialog>
 
   <div id="toast" class="toast hidden"></div>
-  <script src="/static/app.js?v=human-summaries-2"></script>
+  <script src="/static/app.js?v=workspace-tabs-5"></script>
 </body>
 </html>

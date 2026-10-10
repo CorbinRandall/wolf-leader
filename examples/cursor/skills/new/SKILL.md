@@ -18,7 +18,7 @@ For checkpointing an **existing** project, use `/save` instead.
 ## Hub URL (both paths)
 
 ```bash
-source ~/.cursor/wolf-leader.env 2>/dev/null || true
+source ~/.codex/wolf-leader.env 2>/dev/null || source ~/.cursor/wolf-leader.env 2>/dev/null || true
 API="${WOLF_LEADER_API_LOCAL:-${WOLF_LEADER_API:-http://127.0.0.1:6971}}"
 ```
 
@@ -116,19 +116,19 @@ Wolf Leader embeds these so search works by description, not just keywords.
 **Bundled script** (creates project if needed, uploads transcript, distills):
 
 ```bash
-~/.cursor/skills/new/scripts/new-project-session.sh
+${WOLF_LEADER_NEW_RUNNER:-$HOME/.agents/skills/new/scripts/new-project-session.sh}
 ```
 
 With explicit slug:
 
 ```bash
-~/.cursor/skills/new/scripts/new-project-session.sh my-project-slug "My Project Name"
+${WOLF_LEADER_NEW_RUNNER:-$HOME/.agents/skills/new/scripts/new-project-session.sh} my-project-slug "My Project Name"
 ```
 
 **No python3 on this host?** The same script uses a **curl fallback** — you must pass slug + name:
 
 ```bash
-~/.cursor/skills/new/scripts/new-project-session-curl.sh my-project-slug "My Project Name"
+${WOLF_LEADER_NEW_CURL_RUNNER:-$HOME/.agents/skills/new/scripts/new-project-session-curl.sh} my-project-slug "My Project Name"
 ```
 
 Creates the project, links workspace path, runs save + distill. Does not upload local `.jsonl` transcript — use MCP `save_session` or install python3 for that.

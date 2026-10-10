@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a new Wolf Leader project and save the current Cursor session to it."""
+"""Create a new Wolf Leader project and save the current local agent session."""
 from __future__ import annotations
 
 import importlib.util

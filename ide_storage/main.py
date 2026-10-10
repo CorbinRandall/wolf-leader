@@ -3,6 +3,8 @@ Wolf Leader REST API — AI project storage (chats, projects, memories, briefs).
 """
 import logging
 import os
+import json
+import re
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 
@@ -159,6 +161,78 @@ class ProjectUpdate(BaseModel):
     status: Optional[str] = None
     compose_path: Optional[str] = None
     path: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+class ProjectMerge(BaseModel):
+    target_id: int
+    source_ids: List[int]
+
+
+class KanbanColumnCreate(BaseModel):
+    label: str
+    description: Optional[str] = ""
+
+
+class KanbanColumnUpdate(BaseModel):
+    label: Optional[str] = None
+    description: Optional[str] = None
+
+
+class KanbanColumnOrder(BaseModel):
+    statuses: List[str]
+
+
+DEFAULT_KANBAN_COLUMNS = [
+    {"status": "backlog", "label": "Backlog", "description": "Ideas and work waiting to start"},
+    {"status": "in_progress", "label": "In progress", "description": "Projects currently being worked on"},
+    {"status": "done", "label": "Done for now", "description": "Completed or paused indefinitely"},
+]
+
+
+def _kanban_columns() -> list[dict]:
+    with db_conn() as conn:
+        row = conn.execute("SELECT value FROM app_settings WHERE key = 'kanban_columns'").fetchone()
+    if not row:
+        return [dict(column) for column in DEFAULT_KANBAN_COLUMNS]
+    try:
+        columns = json.loads(row["value"])
+        if isinstance(columns, list) and columns and all(isinstance(item, dict) and item.get("status") and item.get("label") for item in columns):
+            return columns
+    except (TypeError, json.JSONDecodeError):
+        pass
+    return [dict(column) for column in DEFAULT_KANBAN_COLUMNS]
+
+
+def _save_kanban_columns(columns: list[dict]) -> None:
+    now = datetime.utcnow().isoformat()
+    with db_conn() as conn:
+        conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES ('kanban_columns', ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            (json.dumps(columns), now),
+        )
+        conn.commit()
+
+
+class SkillImport(BaseModel):
+    name: str
+    archive_base64: str
+    overwrite: bool = False
+
+
+class SnippetCreate(BaseModel):
+    title: Optional[str] = None
+    language: Optional[str] = None
+    content: str
+    project_id: Optional[int] = None
+    tags: Optional[List[str]] = None
+
+
+class SnippetUpdate(BaseModel):
+    title: Optional[str] = None
+    language: Optional[str] = None
+    content: Optional[str] = None
     tags: Optional[List[str]] = None
 
 
@@ -855,6 +929,74 @@ async def query_chat(
 
 
 # Project endpoints
+@app.get("/api/kanban/columns")
+async def get_kanban_columns():
+    return {"columns": _kanban_columns()}
+
+
+@app.post("/api/kanban/columns")
+async def add_kanban_column(body: KanbanColumnCreate):
+    label = body.label.strip()
+    if not label:
+        raise HTTPException(status_code=400, detail="A column needs a name")
+    base = re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_")[:40] or "column"
+    columns = _kanban_columns()
+    used = {column["status"] for column in columns}
+    status, suffix = base, 2
+    while status in used:
+        status = f"{base}_{suffix}"
+        suffix += 1
+    column = {"status": status, "label": label, "description": (body.description or "").strip()}
+    columns.append(column)
+    _save_kanban_columns(columns)
+    return {"column": column, "columns": columns}
+
+
+@app.put("/api/kanban/columns/{status}")
+async def update_kanban_column(status: str, body: KanbanColumnUpdate):
+    columns = _kanban_columns()
+    column = next((item for item in columns if item["status"] == status), None)
+    if not column:
+        raise HTTPException(status_code=404, detail="Column not found")
+    if body.label is not None:
+        if not body.label.strip():
+            raise HTTPException(status_code=400, detail="A column needs a name")
+        column["label"] = body.label.strip()
+    if body.description is not None:
+        column["description"] = body.description.strip()
+    _save_kanban_columns(columns)
+    return {"column": column, "columns": columns}
+
+
+@app.put("/api/kanban/columns-order")
+async def reorder_kanban_columns(body: KanbanColumnOrder):
+    columns = _kanban_columns()
+    by_status = {column["status"]: column for column in columns}
+    if len(body.statuses) != len(columns) or set(body.statuses) != set(by_status):
+        raise HTTPException(status_code=400, detail="Column order must include every column exactly once")
+    ordered = [by_status[status] for status in body.statuses]
+    _save_kanban_columns(ordered)
+    return {"columns": ordered}
+
+
+@app.delete("/api/kanban/columns/{status}")
+async def delete_kanban_column(status: str, move_to: str):
+    columns = _kanban_columns()
+    if len(columns) <= 1:
+        raise HTTPException(status_code=400, detail="Keep at least one board column")
+    if status == move_to or move_to not in {item["status"] for item in columns}:
+        raise HTTPException(status_code=400, detail="Choose another column for existing projects")
+    if status not in {item["status"] for item in columns}:
+        raise HTTPException(status_code=404, detail="Column not found")
+    now = datetime.utcnow().isoformat()
+    with db_conn() as conn:
+        conn.execute("UPDATE projects SET status = ?, updated_at = ? WHERE status = ?", (move_to, now, status))
+        conn.commit()
+    columns = [item for item in columns if item["status"] != status]
+    _save_kanban_columns(columns)
+    return {"columns": columns}
+
+
 @app.post("/api/projects")
 async def create_project(project: ProjectCreate):
     """Create a new project."""
@@ -920,6 +1062,42 @@ async def list_projects(
         rows = cur.fetchall()
         projects = [dict(row) for row in rows]
         return {"projects": projects, "count": len(projects)}
+
+
+@app.get("/api/projects/duplicates")
+async def project_duplicates():
+    """Find conservative exact-normalized duplicate project groups."""
+    from ide_storage.project_duplicates import list_duplicate_projects
+
+    groups = list_duplicate_projects()
+    return {"groups": groups, "count": len(groups)}
+
+
+@app.post("/api/projects/merge")
+async def merge_duplicate_projects(body: ProjectMerge):
+    """Merge duplicate records after the user chooses the canonical project."""
+    from ide_storage.embed_index import delete_project_embeddings, sync_dirty
+    from ide_storage.project_duplicates import merge_projects
+
+    try:
+        report = merge_projects(body.target_id, body.source_ids)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    for project_id in body.source_ids:
+        delete_project_embeddings(project_id)
+
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM projects WHERE id = ?", (body.target_id,))
+        target = dict(cur.fetchone())
+    ensure_project_md_from_db(target)
+    regenerate_index()
+    report["embeddings"] = sync_dirty(project_id=body.target_id)
+    report["message"] = f"Merged {report['removed_count']} duplicate project(s) into {report['target_name']}"
+    return report
 
 
 @app.get("/api/projects/{project_id}")
@@ -1044,6 +1222,76 @@ async def delete_project(project_id: int):
 
     regenerate_index()
     return {"message": "Project deleted successfully"}
+
+
+# Portable skill library endpoints
+@app.get("/api/skills")
+async def api_list_skills():
+    from ide_storage.runtime_config import runtime_config
+    from ide_storage.skill_registry import install_prompt, list_skills, publish_prompt
+
+    public = runtime_config().public_url
+    skills = list_skills()
+    return {
+        "skills": skills,
+        "count": len(skills),
+        "bundle_url": f"{public}/api/skills/export.zip",
+        "install_prompt": install_prompt(public),
+        "publish_prompt": publish_prompt(public),
+    }
+
+
+@app.get("/api/skills/export.zip")
+async def api_export_skills():
+    from ide_storage.skill_registry import bundle_archive
+
+    return Response(
+        content=bundle_archive(),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="wolf-leader-skills.zip"'},
+    )
+
+
+@app.post("/api/skills/import")
+async def api_import_skill(body: SkillImport):
+    from ide_storage.skill_registry import import_skill
+
+    try:
+        skill = import_skill(body.name, body.archive_base64, body.overwrite)
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=f"Skill already exists: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"skill": skill, "message": f"Imported {skill['name']}"}
+
+
+@app.get("/api/skills/{skill_name}/download")
+async def api_download_skill(skill_name: str):
+    from ide_storage.skill_registry import skill_archive
+
+    try:
+        content = skill_archive(skill_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Skill not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(
+        content=content,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{skill_name}.zip"'},
+    )
+
+
+@app.get("/api/skills/{skill_name}")
+async def api_get_skill(skill_name: str):
+    from ide_storage.skill_registry import get_skill
+
+    try:
+        return get_skill(skill_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Skill not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/projects/{project_id}/chats")
@@ -1407,9 +1655,9 @@ async def get_onboarding():
         )
         + "/data/ONBOARDING.md",
         "agent_prompt": (
-            f"Connect this device to {PRODUCT_NAME}. "
-            f"Open {public}/?tab=setup and copy the client setup prompt, "
-            f"or fetch: {public}/api/client-setup"
+            f"Connect this device to {PRODUCT_NAME} and complete setup. "
+            f"Open {public}/?tab=setup and click Copy setup prompt, "
+            f"or fetch and follow: {public}/api/client-setup"
         ),
         "client_setup_url": f"{public}/api/client-setup",
     }
@@ -1554,6 +1802,99 @@ async def delete_memory(memory_id: int):
     return {"message": "Memory deleted", "project_id": project_id}
 
 
+# Snippet endpoints
+@app.post("/api/snippets")
+async def create_snippet(snippet: SnippetCreate):
+    now = datetime.utcnow().isoformat()
+    tags_json = json.dumps(snippet.tags) if snippet.tags else None
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO snippets (title, language, content, project_id, created_at, updated_at, tags)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
+            """,
+            (snippet.title, snippet.language, snippet.content, snippet.project_id, now, now, tags_json),
+        )
+        snippet_id = cur.fetchone()["id"]
+        conn.commit()
+    return {"id": snippet_id, "message": "Snippet created successfully"}
+
+
+@app.get("/api/snippets")
+async def list_snippets(
+    project_id: Optional[int] = None,
+    language: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+):
+    with db_conn() as conn:
+        cur = conn.cursor()
+        query = "SELECT * FROM snippets WHERE 1=1"
+        params: list[Any] = []
+        if project_id is not None:
+            query += " AND project_id = ?"
+            params.append(project_id)
+        if language:
+            query += " AND language = ?"
+            params.append(language)
+        query += " ORDER BY updated_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        cur.execute(query, params)
+        rows = [dict(row) for row in cur.fetchall()]
+    return {"snippets": rows, "count": len(rows)}
+
+
+@app.get("/api/snippets/{snippet_id}")
+async def get_snippet(snippet_id: int):
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM snippets WHERE id = ?", (snippet_id,))
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Snippet not found")
+    return dict(row)
+
+
+@app.put("/api/snippets/{snippet_id}")
+async def update_snippet(snippet_id: int, snippet: SnippetUpdate):
+    updates: list[str] = []
+    params: list[Any] = []
+    for field in ("title", "language", "content"):
+        value = getattr(snippet, field)
+        if value is not None:
+            updates.append(f"{field} = ?")
+            params.append(value)
+    if snippet.tags is not None:
+        updates.append("tags = ?")
+        params.append(json.dumps(snippet.tags))
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    updates.append("updated_at = ?")
+    params.extend([datetime.utcnow().isoformat(), snippet_id])
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(f"UPDATE snippets SET {', '.join(updates)} WHERE id = ?", params)
+        conn.commit()
+        changed = cur.rowcount
+    if changed == 0:
+        raise HTTPException(status_code=404, detail="Snippet not found")
+    return {"message": "Snippet updated successfully"}
+
+
+@app.delete("/api/snippets/{snippet_id}")
+async def delete_snippet(snippet_id: int):
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM snippets WHERE id = ?", (snippet_id,))
+        conn.commit()
+        changed = cur.rowcount
+    if changed == 0:
+        raise HTTPException(status_code=404, detail="Snippet not found")
+    return {"message": "Snippet deleted successfully"}
+
+
 # Health check
 @app.get("/health")
 async def health():
@@ -1576,6 +1917,21 @@ async def health():
         "database": {"ok": db_ok, "pgvector": vector_available() if db_ok else False, "error": db_error},
         "embeddings": embeddings_status(),
     }
+
+
+@app.get("/{project_slug}")
+async def project_web_ui(project_slug: str):
+    """Serve the web UI at a project's human-readable slug URL."""
+    project = hub.resolve_project_key(project_slug)
+    if not project or project.get("slug") != project_slug:
+        raise HTTPException(status_code=404, detail="Project not found")
+    index = STATIC_DIR / "index.html"
+    if index.is_file():
+        return FileResponse(
+            index,
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
+    raise HTTPException(status_code=404, detail="Web UI not found")
 
 
 if __name__ == "__main__":

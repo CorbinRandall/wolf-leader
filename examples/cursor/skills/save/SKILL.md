@@ -1,6 +1,6 @@
 ---
 name: save
-description: Save the current Cursor session to Wolf Leader (existing project).
+description: Save the current agent session to Wolf Leader (existing project).
 disable-model-invocation: true
 ---
 
@@ -17,7 +17,7 @@ User says: "save this", "save to Wolf Leader", "checkpoint this chat", or `/save
 1. Resolve the hub URL:
 
 ```bash
-source ~/.cursor/wolf-leader.env 2>/dev/null || true
+source ~/.codex/wolf-leader.env 2>/dev/null || source ~/.cursor/wolf-leader.env 2>/dev/null || true
 API="${WOLF_LEADER_API_LOCAL:-${WOLF_LEADER_API:-http://127.0.0.1:6971}}"
 ```
 
@@ -33,10 +33,16 @@ Canonical starter prompt:
 Save this conversation to Wolf Leader. Fetch and follow every step: ${API}/api/save-project-guide
 ```
 
-3. Prefer the bundled runner after you know the slug:
+3. Prefer the bundled runner after you know the slug. Use the first installed path:
 
 ```bash
-~/.cursor/skills/save/scripts/save-session.sh CHOSEN-SLUG
+if [[ -x ~/.agents/skills/save/scripts/save-session.sh ]]; then
+  ~/.agents/skills/save/scripts/save-session.sh CHOSEN-SLUG
+else
+  ~/.cursor/skills/save/scripts/save-session.sh CHOSEN-SLUG
+fi
 ```
+
+If the runner reports that no local transcript is available, save the current in-context messages with MCP `save_session` or follow the live REST guide. Do not report success until the hub confirms the checkpoint.
 
 Do **not** invent save steps here. The guide on the hub defines them and can change without updating this skill.

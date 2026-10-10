@@ -72,14 +72,17 @@
             <h2>Project board</h2>
             <p class="setup-lead">Drag projects between columns. Drag a column by its handle, or double-click its title to rename it.</p>
           </div>
-          <button type="button" id="add-kanban-column-btn" class="btn btn-secondary" aria-expanded="false" aria-controls="add-kanban-column-form">Add column</button>
+          <div class="chat-actions">
+            <label class="owner-filter hidden">Owner <select data-owner-filter aria-label="Show projects owned by"></select></label>
+            <button type="button" id="add-kanban-column-btn" class="btn btn-secondary" aria-expanded="false" aria-controls="add-kanban-column-form">Add column</button>
+          </div>
         </header>
         <form id="add-kanban-column-form" class="kanban-add-form hidden"><input id="kanban-column-name" placeholder="Column name" required /><input id="kanban-column-description" placeholder="Short description (optional)" /><button class="btn btn-primary">Add</button></form>
         <div id="kanban-board" class="kanban-board" aria-label="Project status board"></div>
       </div>
 
       <div id="projects-view" class="view projects-view hidden">
-        <header class="view-header"><div><h2>Projects</h2><p class="setup-lead">A quick, readable index of every project.</p></div></header>
+        <header class="view-header"><div><h2>Projects</h2><p class="setup-lead">A quick, readable index of every project.</p></div><label class="owner-filter hidden">Owner <select data-owner-filter aria-label="Show projects owned by"></select></label></header>
         <div id="projects-list" class="projects-list"></div>
       </div>
 

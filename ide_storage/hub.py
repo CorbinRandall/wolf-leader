@@ -453,7 +453,10 @@ def list_projects_hub(limit: int = 100) -> List[Dict[str, Any]]:
             """,
             (limit,),
         )
-        return [dict(r) for r in cur.fetchall()]
+        rows = [dict(r) for r in cur.fetchall()]
+    from .owners import attach_owners
+
+    return attach_owners(rows)
 
 
 def save_session(

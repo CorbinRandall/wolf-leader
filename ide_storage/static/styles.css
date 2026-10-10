@@ -770,6 +770,12 @@ body {
 .project-row strong, .project-row small { display: block; }
 .project-row small { margin-top: 0.3rem; color: var(--text-muted); line-height: 1.45; }
 .project-row em { flex: 0 0 auto; color: var(--accent); font-size: 0.78rem; font-style: normal; }
+.project-row-side { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 0.4rem; }
+
+.owner-badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; border: 1px solid hsl(var(--owner-hue, 215) 60% 60% / 0.5); background: hsl(var(--owner-hue, 215) 60% 60% / 0.14); color: hsl(var(--owner-hue, 215) 80% 78%); font-size: 0.7rem; font-weight: 500; white-space: nowrap; }
+.owner-badge.owner-none { border-color: var(--border); background: transparent; color: var(--text-muted); }
+.owner-filter { display: flex; align-items: center; gap: 0.5rem; color: var(--text-muted); font-size: 0.8rem; }
+.owner-filter select { padding: 0.35rem 0.5rem; color: var(--text); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 6px; font: inherit; }
 
 @media (max-width: 700px) {
   .sidebar-header { gap: 0.4rem; padding: 0.35rem 0.6rem; }

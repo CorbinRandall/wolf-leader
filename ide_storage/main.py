@@ -151,6 +151,7 @@ class ProjectCreate(BaseModel):
     status: Optional[str] = "active"
     compose_path: Optional[str] = None
     tags: Optional[List[str]] = None
+    owner: Optional[str] = None
 
 
 class ProjectUpdate(BaseModel):
@@ -162,6 +163,13 @@ class ProjectUpdate(BaseModel):
     compose_path: Optional[str] = None
     path: Optional[str] = None
     tags: Optional[List[str]] = None
+    owner: Optional[str] = None  # "" clears a hand-set owner
+
+
+class OwnerAssign(BaseModel):
+    owner: str
+    project_ids: Optional[List[int]] = None
+    only_unassigned: bool = False
 
 
 class ProjectMerge(BaseModel):
@@ -1002,7 +1010,10 @@ async def create_project(project: ProjectCreate):
     """Create a new project."""
     now = datetime.utcnow().isoformat()
     import json
-    metadata_json = json.dumps(project.metadata) if project.metadata else None
+    metadata = dict(project.metadata or {})
+    if project.owner and project.owner.strip():
+        metadata["owner"] = _known_owner(project.owner)
+    metadata_json = json.dumps(metadata) if metadata else None
     tags_json = json.dumps(project.tags) if project.tags else None
     slug = project.slug or project.name.lower().replace(" ", "-")[:64]
     
@@ -1061,7 +1072,42 @@ async def list_projects(
         cur.execute(query, params)
         rows = cur.fetchall()
         projects = [dict(row) for row in rows]
-        return {"projects": projects, "count": len(projects)}
+    from ide_storage.owners import attach_owners
+
+    attach_owners(projects)
+    return {"projects": projects, "count": len(projects)}
+
+
+def _known_owner(name: str) -> str:
+    from ide_storage.owners import canonical_owner, configured_owners
+
+    owner = canonical_owner(name)
+    if owner is None:
+        raise HTTPException(status_code=400, detail=f"Unknown owner. Choose one of: {', '.join(configured_owners())}")
+    return owner
+
+
+@app.get("/api/owners")
+async def list_owners():
+    """Owners on this hub and how many projects each has ("" = unassigned)."""
+    from ide_storage.owners import owner_summary
+
+    return owner_summary()
+
+
+@app.post("/api/owners/assign")
+async def assign_owner(body: OwnerAssign):
+    """Label several projects at once; ``only_unassigned`` labels every project without an owner."""
+    from ide_storage.owners import set_owner, unassigned_project_ids
+
+    owner = _known_owner(body.owner)
+    ids = list(body.project_ids or [])
+    if body.only_unassigned:
+        unassigned = unassigned_project_ids()
+        ids = [i for i in ids if i in set(unassigned)] if ids else unassigned
+    if not ids:
+        return {"owner": owner, "changed": 0}
+    return {"owner": owner, "changed": set_owner(ids, owner)}
 
 
 @app.get("/api/projects/duplicates")
@@ -1110,8 +1156,10 @@ async def get_project(project_id: int):
         
         if not row:
             raise HTTPException(status_code=404, detail="Project not found")
-        
-        return dict(row)
+
+    from ide_storage.owners import attach_owners
+
+    return attach_owners([dict(row)])[0]
 
 
 @app.put("/api/projects/{project_id}")
@@ -1123,7 +1171,7 @@ async def update_project(project_id: int, project: ProjectUpdate):
     # wipes — otherwise PUTs that omit metadata.semantic_descriptor would silently
     # destroy the project's vector descriptor (real data loss).
     existing_metadata: dict = {}
-    if project.metadata is not None:
+    if project.metadata is not None or project.owner is not None:
         with db_conn() as conn:
             cur = conn.cursor()
             cur.execute("SELECT metadata FROM projects WHERE id = ?", (project_id,))
@@ -1150,8 +1198,13 @@ async def update_project(project_id: int, project: ProjectUpdate):
         updates.append("description = ?")
         params.append(project.description)
     
-    if project.metadata is not None:
-        merged = {**existing_metadata, **project.metadata}
+    if project.metadata is not None or project.owner is not None:
+        merged = {**existing_metadata, **(project.metadata or {})}
+        if project.owner is not None:
+            if project.owner.strip():
+                merged["owner"] = _known_owner(project.owner)
+            else:
+                merged.pop("owner", None)
         updates.append("metadata = ?")
         params.append(json.dumps(merged))
 

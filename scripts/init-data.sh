@@ -19,8 +19,12 @@ copy_if_missing() {
 
 echo "Initializing data directory…"
 
-copy_if_missing examples/AGENTS.md data/AGENTS.md
-copy_if_missing examples/ONBOARDING.md data/ONBOARDING.md
+# These are product-managed copies served by the setup API. Refresh them on
+# every install/update so existing hubs do not keep stale onboarding prompts.
+install -m 644 examples/AGENTS.md data/AGENTS.md
+install -m 644 examples/ONBOARDING.md data/ONBOARDING.md
+echo "  ~ AGENTS.md"
+echo "  ~ ONBOARDING.md"
 
 if [[ ! -f data/INDEX.md ]]; then
   cat > data/INDEX.md <<'EOF'

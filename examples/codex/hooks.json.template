@@ -1,0 +1,35 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__CODEX_DIR__/hooks/wolf-leader-recall.sh"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__CODEX_DIR__/hooks/wolf-leader-recall.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "__CODEX_DIR__/hooks/wolf-leader-save.sh",
+            "timeout": 180
+          }
+        ]
+      }
+    ]
+  }
+}

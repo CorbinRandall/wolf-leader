@@ -6,8 +6,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 if [[ ! -f .env ]]; then
-  cp .env.example .env
-  echo "Created .env from .env.example — edit IDE_STORAGE_PUBLIC_URL before sharing MCP URLs."
+  bash scripts/configure-runtime.sh
 fi
 
 bash scripts/init-data.sh
@@ -36,6 +35,6 @@ echo "  Web UI:  ${PUBLIC}/"
 echo "  Setup:   ${PUBLIC}/?tab=setup"
 echo "  MCP:     $(grep -E '^IDE_STORAGE_MCP_URL=' .env | cut -d= -f2- | tr -d '"' || echo 'http://127.0.0.1:6972/mcp')"
 echo ""
-echo "Next: on each Cursor device run:"
-echo "  WOLF_LEADER_API=${PUBLIC} WOLF_LEADER_MCP=\$(grep -E '^IDE_STORAGE_MCP_URL=' .env | cut -d= -f2- | tr -d '\"' || echo 'http://127.0.0.1:6972/mcp') ./scripts/install-cursor-client.sh"
+echo "Next: open ${PUBLIC}/?tab=setup and copy the setup prompt on each device."
+echo "Set WOLF_LEADER_CLIENT=cursor or codex when running the hub installer."
 echo "See INSTALL.md for client setup."

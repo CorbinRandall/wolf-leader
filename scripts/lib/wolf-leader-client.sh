@@ -319,6 +319,68 @@ wl_merge_hooks_json() {
   wl_step_ok "hooks.json"
 }
 
+wl_merge_codex_hooks_json() {
+  local dest="$1" src="$2"
+  local tmp="${dest}.wl-hooks.$$"
+
+  if [[ ! -f "$dest" ]]; then
+    install -m 600 "$src" "$dest"
+    wl_step_ok "Codex hooks.json"
+    return 0
+  fi
+
+  if wl_has_cmd jq && jq empty "$dest" >/dev/null 2>&1; then
+    jq --slurpfile add "$src" '
+      reduce ["SessionStart", "UserPromptSubmit", "Stop"][] as $event (.;
+        .hooks = (.hooks // {}) |
+        .hooks[$event] = (
+          ((.hooks[$event] // []) + ($add[0].hooks[$event] // [])) |
+          unique_by(.hooks[0].command // "")
+        )
+      )
+    ' "$dest" >"$tmp" && mv "$tmp" "$dest" && {
+      chmod 600 "$dest"
+      wl_step_ok "Codex hooks.json (merged Wolf Leader hooks)"
+      return 0
+    }
+  fi
+
+  if wl_has_cmd python3; then
+    python3 - "$dest" "$src" "$tmp" <<'PY'
+import json, sys
+dest, src, out = sys.argv[1:]
+with open(dest, encoding="utf-8") as f:
+    data = json.load(f)
+with open(src, encoding="utf-8") as f:
+    additions = json.load(f)
+hooks = data.setdefault("hooks", {})
+for event in ("SessionStart", "UserPromptSubmit", "Stop"):
+    rows = hooks.setdefault(event, [])
+    known = {
+        ((row.get("hooks") or [{}])[0].get("command") or "")
+        for row in rows if isinstance(row, dict)
+    }
+    for row in additions.get("hooks", {}).get(event, []):
+        command = ((row.get("hooks") or [{}])[0].get("command") or "")
+        if command not in known:
+            rows.append(row)
+with open(out, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+PY
+    if [[ "$?" -eq 0 ]]; then
+      mv "$tmp" "$dest"
+      chmod 600 "$dest"
+      wl_step_ok "Codex hooks.json (merged Wolf Leader hooks)"
+      return 0
+    fi
+  fi
+
+  rm -f "$tmp" 2>/dev/null || true
+  wl_step_fail "Codex hooks.json merge requires valid JSON plus jq or python3"
+  return 1
+}
+
 wl_link_workspace_project() {
   local api="$1" workspace="$2" slug="$3" name="$4"
   [[ -n "$slug" && -n "$api" ]] || return 0

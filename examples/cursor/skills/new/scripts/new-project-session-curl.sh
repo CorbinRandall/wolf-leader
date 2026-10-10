@@ -3,10 +3,12 @@
 # Usage: new-project-session-curl.sh SLUG "Project Name" [description]
 set -euo pipefail
 
-LIB="${HOME}/.cursor/lib/wolf-leader-client.sh"
+LIB="${HOME}/.codex/lib/wolf-leader-client.sh"
+[[ -f "$LIB" ]] || LIB="${HOME}/.cursor/lib/wolf-leader-client.sh"
 [[ -f "$LIB" ]] && source "$LIB"
 
-ENV_FILE="${HOME}/.cursor/wolf-leader.env"
+ENV_FILE="${HOME}/.codex/wolf-leader.env"
+[[ -f "$ENV_FILE" ]] || ENV_FILE="${HOME}/.cursor/wolf-leader.env"
 if [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   source "$ENV_FILE"

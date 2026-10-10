@@ -62,7 +62,9 @@ private struct SkipValue: Decodable {
 struct HubList<T: Decodable>: Decodable {
     var items: [T]
 
-    static var wrapperKeys: [String] { ["projects", "chats", "memories", "results", "items", "active", "data"] }
+    static var wrapperKeys: [String] {
+        ["projects", "chats", "memories", "results", "items", "active", "data", "columns", "skills", "snippets"]
+    }
 
     init(from decoder: Decoder) throws {
         if var arr = try? decoder.unkeyedContainer() {
@@ -150,8 +152,11 @@ struct HubProject: Decodable, Identifiable, Hashable {
     var slug: String?
     var name: String
     var description: String?
+    var path: String?
+    var status: String
     var chatCount: Int
     var memoryCount: Int
+    var snippetCount: Int
     var updatedAt: String?
 
     var updated: Date? { HubDate.parse(updatedAt) }
@@ -164,9 +169,93 @@ struct HubProject: Decodable, Identifiable, Hashable {
         slug = c.str("slug")
         name = c.str("name", "title", "slug") ?? "Untitled project"
         description = c.str("description")
+        path = c.str("path", "compose_path")
+        status = c.str("status") ?? "backlog"
         chatCount = c.int("chat_count", "chats") ?? 0
         memoryCount = c.int("memory_count", "memories") ?? 0
+        snippetCount = c.int("snippet_count", "snippets") ?? 0
         updatedAt = c.str("updated_at", "last_activity", "created_at")
+    }
+}
+
+struct HubKanbanColumn: Decodable, Identifiable, Hashable {
+    var status: String
+    var label: String
+    var description: String?
+    var id: String { status }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        status = c.str("status") ?? "backlog"
+        label = c.str("label") ?? status.replacingOccurrences(of: "_", with: " ").capitalized
+        description = c.str("description")
+    }
+}
+
+struct HubSkill: Decodable, Identifiable, Hashable {
+    var id: String
+    var name: String
+    var description: String?
+    var fileCount: Int
+    var sizeBytes: Int
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        id = c.str("id", "name") ?? "skill"
+        name = c.str("name", "id") ?? id
+        description = c.str("description")
+        fileCount = c.int("file_count") ?? 0
+        sizeBytes = c.int("size_bytes") ?? 0
+    }
+}
+
+struct HubSkillsResponse: Decodable {
+    var skills: [HubSkill]
+    var installPrompt: String
+    var publishPrompt: String
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        skills = (try? c.decode([HubSkill].self, forKey: HubJSONKey("skills"))) ?? []
+        installPrompt = c.str("install_prompt") ?? ""
+        publishPrompt = c.str("publish_prompt") ?? ""
+    }
+}
+
+struct HubDuplicateGroup: Decodable, Identifiable {
+    var key: String
+    var projects: [HubProject]
+    var id: String { key }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        key = c.str("key") ?? UUID().uuidString
+        projects = (try? c.decode([HubProject].self, forKey: HubJSONKey("projects"))) ?? []
+    }
+}
+
+struct HubDuplicateResponse: Decodable {
+    var groups: [HubDuplicateGroup]
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        groups = (try? c.decode([HubDuplicateGroup].self, forKey: HubJSONKey("groups"))) ?? []
+    }
+}
+
+struct HubSnippet: Decodable, Identifiable, Hashable {
+    var id: Int
+    var title: String
+    var language: String?
+    var content: String
+    var projectID: Int?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        id = c.int("id") ?? 0
+        title = c.str("title") ?? "Untitled snippet"
+        language = c.str("language")
+        content = c.str("content") ?? ""
+        projectID = c.int("project_id")
     }
 }
 
@@ -339,5 +428,53 @@ extension HubClient {
     /// GET /api/search?q= (hybrid keyword + vector search).
     func search(_ q: String, limit: Int = 40) async throws -> [HubSearchHit] {
         try await get("/api/search", query: ["q": q, "limit": String(limit)], as: HubList<HubSearchHit>.self).items
+    }
+
+    func kanbanColumns() async throws -> [HubKanbanColumn] {
+        try await get("/api/kanban/columns", as: HubList<HubKanbanColumn>.self).items
+    }
+
+    func updateProjectStatus(id: Int, status: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["status": status])
+        _ = try await data("/api/projects/\(id)", method: "PUT", body: body)
+    }
+
+    func skills() async throws -> HubSkillsResponse {
+        try await get("/api/skills", as: HubSkillsResponse.self)
+    }
+
+    func importSkill(name: String, archive: Data, overwrite: Bool = true) async throws {
+        let body = try JSONSerialization.data(withJSONObject: [
+            "name": name,
+            "archive_base64": archive.base64EncodedString(),
+            "overwrite": overwrite,
+        ])
+        _ = try await data("/api/skills/import", method: "POST", body: body, timeout: 30)
+    }
+
+    func duplicateGroups() async throws -> [HubDuplicateGroup] {
+        try await get("/api/projects/duplicates", as: HubDuplicateResponse.self).groups
+    }
+
+    func mergeProjects(targetID: Int, sourceIDs: [Int]) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["target_id": targetID, "source_ids": sourceIDs])
+        _ = try await data("/api/projects/merge", method: "POST", body: body, timeout: 30)
+    }
+
+    func snippets(projectID: Int? = nil) async throws -> [HubSnippet] {
+        var query: [String: String] = ["limit": "500"]
+        if let projectID { query["project_id"] = String(projectID) }
+        return try await get("/api/snippets", query: query, as: HubList<HubSnippet>.self).items
+    }
+
+    func createSnippet(title: String, language: String, content: String, projectID: Int?) async throws {
+        var payload: [String: Any] = ["title": title, "language": language, "content": content]
+        if let projectID { payload["project_id"] = projectID }
+        let body = try JSONSerialization.data(withJSONObject: payload)
+        _ = try await data("/api/snippets", method: "POST", body: body)
+    }
+
+    func deleteSnippet(id: Int) async throws {
+        _ = try await data("/api/snippets/\(id)", method: "DELETE")
     }
 }

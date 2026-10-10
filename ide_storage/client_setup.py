@@ -2,18 +2,21 @@
 from __future__ import annotations
 
 import io
-import os
 import tarfile
 from pathlib import Path
 from typing import Any
 
 from ide_storage.branding import PRODUCT_NAME
+from ide_storage.runtime_config import runtime_config
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CURSOR_EXAMPLES = REPO_ROOT / "examples" / "cursor"
+CODEX_EXAMPLES = REPO_ROOT / "examples" / "codex"
 INSTALL_SCRIPT = REPO_ROOT / "scripts" / "install-cursor-client.sh"
+CODEX_INSTALL_SCRIPT = REPO_ROOT / "scripts" / "install-codex-client.sh"
 INSTALL_FROM_HUB = REPO_ROOT / "scripts" / "install-client-from-hub.sh"
 VERIFY_SCRIPT = REPO_ROOT / "scripts" / "verify-cursor-client.sh"
+CODEX_VERIFY_SCRIPT = REPO_ROOT / "scripts" / "verify-codex-client.sh"
 PREFLIGHT_SCRIPT = REPO_ROOT / "scripts" / "preflight-cursor-client.sh"
 CLIENT_LIB = REPO_ROOT / "scripts" / "lib" / "wolf-leader-client.sh"
 BACKFILL_SCRIPT = REPO_ROOT / "scripts" / "wolf-backfill.py"
@@ -21,8 +24,10 @@ AGENTS_MD = REPO_ROOT / "examples" / "AGENTS.md"
 
 BUNDLE_SCRIPTS = (
     INSTALL_SCRIPT,
+    CODEX_INSTALL_SCRIPT,
     INSTALL_FROM_HUB,
     VERIFY_SCRIPT,
+    CODEX_VERIFY_SCRIPT,
     PREFLIGHT_SCRIPT,
     CLIENT_LIB,
     BACKFILL_SCRIPT,
@@ -33,7 +38,6 @@ BUNDLE_SCRIPTS = (
 LEGACY_PROFILE_IDS = frozenset(
     {
         "cursor-unraid",
-        "cursor-corbox",
         "cursor-generic",
         "claude-code",
     }
@@ -41,9 +45,10 @@ LEGACY_PROFILE_IDS = frozenset(
 
 
 def hub_urls() -> dict[str, str]:
-    public = os.environ.get("IDE_STORAGE_PUBLIC_URL", "http://127.0.0.1:6971").rstrip("/")
-    local = os.environ.get("IDE_STORAGE_LOCAL_URL", public).rstrip("/")
-    mcp = os.environ.get("IDE_STORAGE_MCP_URL", f"{public.rsplit(':', 1)[0]}:6972/mcp")
+    cfg = runtime_config()
+    public = cfg.public_url
+    local = cfg.local_url
+    mcp = cfg.mcp_url
     return {"api": public, "api_local": local, "mcp": mcp, "setup_web": f"{public}/?tab=setup"}
 
 
@@ -53,21 +58,28 @@ def build_agent_prompt(*, urls: dict[str, str] | None = None) -> str:
     api = urls["api"]
     mcp = urls["mcp"]
 
-    return f"""Connect this device to {PRODUCT_NAME}.
+    return f"""Connect this device to {PRODUCT_NAME} and complete the setup.
 
 Hub API: {api}
 MCP: {mcp}
 
 Works on macOS, Windows, and Linux — local machine or remote host (SSH). Works with any MCP-capable agent (Cursor, Claude Code, Claude Desktop, Gemini CLI, etc.).
 
-## Step 1 — Fetch setup spec (mandatory)
-curl -s "{api}/api/client-setup"
-curl -s "{api}/api/onboarding"
+## Step 1 — Read the current setup instructions
+Fetch and read both endpoints before changing client configuration:
+curl -fsS "{api}/api/client-setup"
+curl -fsS "{api}/api/onboarding"
 
-## Step 2 — Set workspace path
-WORKSPACE = absolute path to the project folder opened in the IDE (use pwd, ask the user, or infer from the workspace root).
+## Step 2 — Identify this client and workspace
+Use the current OS and IDE. Set WORKSPACE to the absolute path of the project folder open in the IDE. For Cursor Remote-SSH, install on the remote machine that owns ~/.cursor and use the remote workspace path. Do not guess a different host or overwrite unrelated client settings.
 
-## Step 3 — Connect MCP (all agents)
+Ask the owner for any setup preference that is not already stated:
+- model policy: economy, balanced, or maximum quality
+- a friendly device name
+
+Automatic background saves are part of standard setup. Only disable them if the owner explicitly asks. Record these choices in the workspace AGENTS.md after installation. Do not put private addresses, credentials, user names, or machine-specific paths into tracked example files.
+
+## Step 3 — Connect MCP
 Add MCP server `wolf-leader` → {mcp}
 
 Examples:
@@ -77,33 +89,36 @@ Examples:
 
 If the hub runs on another machine, use the LAN/Tailscale URL above — not localhost — unless the hub is on this same machine.
 
-## Step 4 — Cursor client (only if using Cursor)
-Run on the machine that owns ~/.cursor (local laptop or Remote-SSH target):
+## Step 4 — Install the client integration (mandatory for Cursor and Codex)
+Set WOLF_LEADER_CLIENT to `cursor` or `codex`. Run on the machine that owns the IDE configuration (local laptop or Remote-SSH target):
 
 WOLF_LEADER_API={api} \\
 WOLF_LEADER_MCP={mcp} \\
+WOLF_LEADER_CLIENT=<cursor-or-codex> \\
 WORKSPACE=<WORKSPACE> \\
   bash -c "$(curl -fsSL {api}/api/client-setup/install.sh)"
 
 If curl pipe fails:
   curl -fsSL {api}/api/client-bundle.tar.gz -o /tmp/wl-client.tar.gz
   mkdir -p /tmp/wl-client && tar xzf /tmp/wl-client.tar.gz -C /tmp/wl-client
-  WOLF_LEADER_API={api} WOLF_LEADER_MCP={mcp} WORKSPACE=<WORKSPACE> /tmp/wl-client/scripts/install-cursor-client.sh
+  WOLF_LEADER_API={api} WOLF_LEADER_MCP={mcp} WOLF_LEADER_CLIENT=<cursor-or-codex> WORKSPACE=<WORKSPACE> /tmp/wl-client/scripts/install-client-from-hub.sh
 
-Reload the Cursor window. /save, /new, /wolfhowl and /wolfeat should appear in the slash menu.
+This installs /save and /new skills, hub URLs, recall hooks, and the automatic save hook. Cursor also receives its MCP entry and rule. Keep existing MCP servers and unrelated hooks.
 
-## Step 5 — Verify
+Reload the client. For Codex, open Settings → Hooks and trust all three Wolf Leader hooks; Codex skips untrusted hooks. Confirm /save and /new appear. Setup is incomplete until the installed verifier passes and one test checkpoint reaches the hub.
+
+## Step 5 — Verify setup
 curl -s "{api}/health"
 MCP: resolve_project + recall — or curl "{api}/api/bootstrap?path=<WORKSPACE>"
 Place AGENTS.md in the workspace root (included in the hub client bundle).
 
 ## Step 6 — Every session
-Start: /wolfeat (Cursor) or MCP wolfeat — pulls brief, memories, latest howls (with git SHA), open jobs
-During: remember() for durable decisions
-End: /save for a light checkpoint, /wolfhowl (or MCP wolfhowl) to broadcast: save + git state + embed + catalog + Obsidian notes
-Guides: {api}/api/howl-guide and {api}/api/eat-guide. Wiki: {api}/wiki/
+Start: let the session-start hook inject Wolf Leader context; confirm the matching project with resolve_project({{ path: "<WORKSPACE>" }}) and recall() or get_brief() before project work.
+During: remember() for durable decisions.
+In the background: the automatic save hook checkpoints meaningful transcript updates when a turn stops. It is best-effort; check the last-save status if needed.
+End: use /save or MCP save_session for a deliberate final checkpoint. Automatic saving supplements this explicit checkpoint.
 
-Report: OS, agent/IDE, WORKSPACE used, MCP connected, hub health OK, and whether /save, /wolfhowl, /wolfeat are available.
+Report: OS, agent/IDE, friendly device name, WORKSPACE used, selected model policy, MCP connected, exact API and MCP URLs, hub health, save/new skill paths, hook paths, Codex hook trust when applicable, and the successful test checkpoint. Fix setup errors before finishing; never report setup complete with a missing skill or inactive save hook.
 """
 
 
@@ -113,16 +128,18 @@ def client_setup_payload(*, legacy_profile: str | None = None) -> dict[str, Any]
         "id": "universal",
         "label": "Any device · any agent",
         "description": (
-            "One setup flow for macOS, Windows, Linux, local or remote. "
-            "Cursor, Claude Code, Claude Desktop, Gemini CLI, or any MCP client."
+            "Complete setup flow for macOS, Windows, Linux, local or remote. "
+            "Includes verified save skills and automatic checkpoint hooks for Cursor and Codex, plus MCP guidance for other clients."
         ),
         "workspace": "<your project root>",
+        "server": runtime_config().as_dict(),
         "hub_api": urls["api"],
         "hub_mcp": urls["mcp"],
         "setup_web_url": urls["setup_web"],
         "agent_prompt": build_agent_prompt(urls=urls),
         "install_command": (
             f'WOLF_LEADER_API={urls["api"]} WOLF_LEADER_MCP={urls["mcp"]} '
+            f'WOLF_LEADER_CLIENT="<cursor-or-codex>" '
             f'WORKSPACE="<your project root>" '
             f'bash -c "$(curl -fsSL {urls["api"]}/api/client-setup/install.sh)"'
         ),
@@ -138,13 +155,19 @@ def client_setup_payload(*, legacy_profile: str | None = None) -> dict[str, Any]
 
 
 def build_client_bundle() -> bytes:
-    """Tar.gz of examples/cursor + install script + AGENTS.md for hub install."""
+    """Tar.gz of Cursor/Codex client assets and installers served by the hub."""
     buf = io.BytesIO()
     paths: list[tuple[Path, str]] = []
 
     if CURSOR_EXAMPLES.is_dir():
         for path in CURSOR_EXAMPLES.rglob("*"):
-            if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
+            if path.is_file():
+                rel = path.relative_to(REPO_ROOT)
+                paths.append((path, str(rel)))
+
+    if CODEX_EXAMPLES.is_dir():
+        for path in CODEX_EXAMPLES.rglob("*"):
+            if path.is_file():
                 rel = path.relative_to(REPO_ROOT)
                 paths.append((path, str(rel)))
 

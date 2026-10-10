@@ -5,14 +5,13 @@ from typing import Any, Dict, Optional
 
 from ide_storage.branding import MCP_SERVER_KEY, PRODUCT_NAME
 from ide_storage.project_archetypes import host_label_suffix
+from ide_storage.runtime_config import runtime_config
 
 
 def get_service_config() -> Dict[str, str]:
-    port = os.environ.get("PORT", "6971")
-    public_base = os.environ.get(
-        "IDE_STORAGE_PUBLIC_URL",
-        f"http://127.0.0.1:{port}",
-    ).rstrip("/")
+    runtime = runtime_config()
+    port = runtime.port
+    public_base = runtime.public_url
     compose_path = os.environ.get("IDE_STORAGE_COMPOSE_PATH", "/app")
     return {
         "container_name": os.environ.get(
@@ -31,12 +30,8 @@ def get_service_config() -> Dict[str, str]:
             "/root/.cursor/projects/root/agent-transcripts",
         ),
         "public_base_url": public_base,
-        "local_base_url": os.environ.get(
-            "IDE_STORAGE_LOCAL_URL", "http://127.0.0.1:6971"
-        ).rstrip("/"),
-        "mcp_url": os.environ.get(
-            "IDE_STORAGE_MCP_URL", "http://127.0.0.1:6972/mcp"
-        ),
+        "local_base_url": runtime.local_url,
+        "mcp_url": runtime.mcp_url,
         "onboarding_url": f"{public_base}/api/onboarding",
         "onboarding_web_url": f"{public_base}/?tab=setup",
         "onboarding_host_path": os.environ.get(

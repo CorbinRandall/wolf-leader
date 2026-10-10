@@ -27,6 +27,14 @@ def sample_rows():
             "compose_path": None,
             "path": "/root",
         },
+        {
+            "id": 3,
+            "slug": "ide-storage",
+            "name": "Wolf Leader",
+            "description": "Wolf Leader AI project memory hub with autosave and recall.",
+            "compose_path": None,
+            "path": "/opt/wolf-leader",
+        },
     ]
 
 
@@ -52,3 +60,11 @@ def test_ambiguous_close_scores_returns_no_best(monkeypatch, sample_rows):
     assert len(ranked) >= 2
     best = pm.best_project_match(text, db_path=Path("/dev/null"), min_lead=12)
     assert best is None
+
+
+def test_wolf_leader_phrase_has_a_canonical_match(monkeypatch, sample_rows):
+    monkeypatch.setattr(pm, "_slug_rows", lambda _db: sample_rows)
+    text = "The Wolf Leader autosave hook should recall memory before answering."
+    best = pm.best_project_match(text, db_path=Path("/dev/null"))
+    assert best is not None
+    assert best["slug"] == "ide-storage"

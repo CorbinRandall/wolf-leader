@@ -128,9 +128,9 @@ run_step "skills/wolfeat" install_file 644 \
 run_step "wolfeat.sh" install_file 755 \
   "$CURSOR_EXAMPLES/skills/wolfeat/scripts/wolfeat.sh" "$CURSOR_DIR/skills/wolfeat/scripts/wolfeat.sh"
 
-# Hooks are opt-in (WOLF_LEADER_HOOKS=1). The rule + MCP do the recall/save work; shell hooks
-# on Windows open .sh files in the editor and the stop hook cannot see a remote hub's transcript.
-if [[ "${WOLF_LEADER_HOOKS:-0}" == 1 ]]; then
+# Automatic recall and checkpoint hooks are part of the standard client setup.
+# Set WOLF_LEADER_HOOKS=0 only when the owner explicitly opts out.
+if [[ "${WOLF_LEADER_HOOKS:-1}" != 0 ]]; then
   if [[ "$DRY_RUN" == 1 ]]; then
     echo "  [dry-run] hooks.json merge"
   elif ! wl_merge_hooks_json "$CURSOR_DIR/hooks.json" "$CURSOR_EXAMPLES/hooks.json"; then
@@ -140,8 +140,10 @@ if [[ "${WOLF_LEADER_HOOKS:-0}" == 1 ]]; then
     "$CURSOR_EXAMPLES/hooks/wolf-leader-recall.sh" "$CURSOR_DIR/hooks/wolf-leader-recall.sh"
   run_step "save hook" install_file 755 \
     "$CURSOR_EXAMPLES/hooks/wolf-leader-save.sh" "$CURSOR_DIR/hooks/wolf-leader-save.sh"
+  run_step "autosave worker" install_file 755 \
+    "$CURSOR_EXAMPLES/hooks/wolf-leader-autosave.py" "$CURSOR_DIR/hooks/wolf-leader-autosave.py"
 else
-  wl_step_skip "hooks (off by default; set WOLF_LEADER_HOOKS=1 to install)"
+  wl_step_skip "hooks (disabled by owner with WOLF_LEADER_HOOKS=0)"
 fi
 
 run_step "wolf-leader-hub rule" install_file 644 \

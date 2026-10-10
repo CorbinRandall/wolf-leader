@@ -94,7 +94,7 @@ private struct ProjectBoardView: View {
                 }
             }
         }
-        EmptyView().task(id: store.config.hubURL) { await load() }
+        Color.clear.frame(height: 0).task(id: store.config.hubURL) { await load() }
     }
 
     private func load() async {
@@ -160,7 +160,7 @@ private struct SkillsLibraryView: View {
                 Button("Copy install prompt") { copy(response.installPrompt) }.buttonStyle(SecondaryButtonStyle())
             }
         }
-        EmptyView().task(id: store.config.hubURL) { await load() }
+        Color.clear.frame(height: 0).task(id: store.config.hubURL) { await load() }
     }
 
     private var root: String { store.config.hubURL.trimmingCharacters(in: CharacterSet(charactersIn: "/ ")) }
@@ -227,7 +227,7 @@ private struct DuplicateCleanupView: View {
                 }
             }
         }
-        EmptyView().task(id: store.config.hubURL) { await load() }
+        Color.clear.frame(height: 0).task(id: store.config.hubURL) { await load() }
     }
 
     private func selection(_ group: HubDuplicateGroup) -> Binding<Int> {
@@ -296,7 +296,7 @@ private struct SnippetsLibraryView: View {
                 }
             }
         }
-        EmptyView().task(id: store.config.hubURL) { await load() }
+        Color.clear.frame(height: 0).task(id: store.config.hubURL) { await load() }
     }
 
     private func load() async {

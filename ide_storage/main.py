@@ -1813,10 +1813,11 @@ async def create_snippet(snippet: SnippetCreate):
             """
             INSERT INTO snippets (title, language, content, project_id, created_at, updated_at, tags)
             VALUES (?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
             """,
             (snippet.title, snippet.language, snippet.content, snippet.project_id, now, now, tags_json),
         )
-        snippet_id = cur.lastrowid
+        snippet_id = cur.fetchone()["id"]
         conn.commit()
     return {"id": snippet_id, "message": "Snippet created successfully"}
 

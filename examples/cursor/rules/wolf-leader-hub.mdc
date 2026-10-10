@@ -1,0 +1,70 @@
+---
+description: Wolf Leader project memory — runs in the background through MCP; the user never types commands for it
+alwaysApply: true
+---
+
+# Wolf Leader
+
+Wolf Leader is the user's memory across chats, projects and machines. It works in the background.
+The user does not type `/save`, `/wolfhowl` or anything else to make it work. You do it, through the
+**`wolf-leader`** MCP server, and you keep the user informed in one short line each time.
+
+Never run a `.sh` script or open a file for any of this. MCP tools only. (`ide-storage` is a legacy
+alias of the same server — ignore it.)
+
+## Start of every chat
+
+1. `resolve_project({ path: "<workspace folder>" })`.
+2. **Matched** → `recall()` (or `get_brief()`). Use it. Say one line: `Wolf Leader: picked up <name> (<n> memories).`
+3. **Not matched** → tell the user and ask before creating, e.g.
+   `No Wolf Leader project for this folder. Create "<Folder Name>"?`
+   On yes → `create_project({ path })`, then continue. On no → carry on without saving and say so once.
+4. No workspace folder (bare chat) → ask once whether to file it under an existing project or skip.
+
+## While working
+
+- `remember({ type, content })` the moment something durable happens: a decision, a constraint, a fix
+  that landed, a problem found, a goal set. Types: `decision | constraint | active_work | problem | goal | note | caveat`.
+- `save_session({ title, content, session_id, project_id, workspace_path })` after each meaningful step
+  (thing shipped, bug fixed, plan agreed) and **at least every ~8 turns**. Always pass the real chat
+  `session_id` so re-saves update the same record, and the `project_id` you got from
+  `resolve_project`/`create_project` so the chat stays in that project. Do not paste the transcript;
+  `messages_json` is for the backfill tool, not for you.
+- Write `content` as **one typed line per fact**, because the hub mines it line by line:
+
+  ```
+  decision: hooks are off; saving goes through MCP only
+  constraint: never push project repos to GitHub; git stays on the share
+  problem: full Docker rebuild takes ~8 min because the Dockerfile copies the repo before the wiki stage
+  active_work: Mac setup block written in docs/lxc-hub.md, not yet run on the Mac
+  note: W: reconnect fixed by saving the Samba credential with cmdkey
+  ```
+
+  Types: `decision | constraint | goal | problem | caveat | active_work | note`. 3–10 lines, concrete,
+  no prose paragraphs.
+- Each save runs the whole pipeline on the hub: memories, embeddings, brief, Obsidian note, wiki.
+  You do not need to call anything else.
+
+## Keep the user in the loop, briefly
+
+- After a save: one line, e.g. `Saved to Wolf Leader (<project>, 2 new memories).`
+- Before anything that changes the hub beyond a routine save (new project, renaming, moving a chat,
+  merging projects): say what you are about to do and ask.
+- On any error, timeout, or ambiguity (two projects could match, hub unreachable): say so in one
+  line and ask for direction. Do not silently retry forever and do not silently skip.
+- Do not narrate every `remember`. Fold it into your normal reply.
+
+## End of chat
+
+Final `save_session` with an honest `content` summary of what was done and what is left.
+One line to the user confirming it saved.
+
+## Manual skills still exist
+
+`/save`, `/wolfhowl`, `/wolfeat` remain for when the user wants them on purpose. Do not suggest them
+as a substitute for doing the above yourself.
+
+## Handoff
+
+Do not redeploy stacks when `handoff_tier` is `continue`. Read `on_disk` in SPEC when tier is
+`orient` or `rebuild`.

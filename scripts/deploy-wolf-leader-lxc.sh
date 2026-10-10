@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# Deploy Wolf Leader production (LXC) from GitHub — standard git pull + docker rebuild.
+#
+# Run on your Proxmox host after pushing to GitHub:
+#   cd /opt/wolf-leader && git pull --ff-only && WOLF_LEADER_VMID=<ctid> ./scripts/deploy-wolf-leader-lxc.sh
+#
+# Or from your workstation:
+#   WOLF_LEADER_PROXMOX_HOST=root@<proxmox-host> WOLF_LEADER_VMID=<ctid> ./scripts/deploy-prod.sh
+#
+set -euo pipefail
+
+VMID="${WOLF_LEADER_VMID:-}"
+DEST="${WOLF_LEADER_DEST:-/opt/wolf-leader}"
+SRC="${WOLF_LEADER_SRC:-/opt/wolf-leader}"
+REPO="${WOLF_LEADER_REPO:-}"
+HEALTH_URL="${WOLF_LEADER_HEALTH_URL:-http://127.0.0.1:6971/health}"
+
+if [[ -z "$VMID" ]]; then
+  echo "ERROR: set WOLF_LEADER_VMID to the hub container id" >&2
+  exit 1
+fi
+if [[ -z "$REPO" && -d "$SRC/.git" ]]; then
+  REPO="$(git -C "$SRC" remote get-url origin 2>/dev/null || true)"
+fi
+if [[ -z "${WOLF_LEADER_BRANCH:-}" && -d "$SRC/.git" ]]; then
+  WOLF_LEADER_BRANCH="$(git -C "$SRC" rev-parse --abbrev-ref HEAD)"
+fi
+BRANCH="${WOLF_LEADER_BRANCH:-main}"
+
+if ! pct status "$VMID" 2>/dev/null | grep -q running; then
+  echo "ERROR: LXC $VMID is not running" >&2
+  exit 1
+fi
+
+echo "Deploy Wolf Leader → LXC $VMID ($DEST)"
+echo "  branch: $BRANCH"
+echo "  repo:   $REPO"
+echo ""
+
+pct exec "$VMID" -- bash -s -- "$DEST" "$BRANCH" "$REPO" <<'EOF'
+set -euo pipefail
+DEST="$1"
+BRANCH="$2"
+REPO="$3"
+
+compose_cmd() {
+  if docker compose version >/dev/null 2>&1; then
+    docker compose "$@"
+  else
+    docker-compose "$@"
+  fi
+}
+
+bootstrap_git() {
+  if [[ -z "$REPO" ]]; then
+    echo "ERROR: no git checkout in $DEST; set WOLF_LEADER_REPO to clone one" >&2
+    exit 1
+  fi
+  echo "Bootstrapping git in LXC (preserving data/ and .env)..."
+  local staging
+  staging="$(mktemp -d)"
+  git clone --branch "$BRANCH" "$REPO" "$staging/repo"
+
+  mkdir -p "$DEST"
+  for keep in data .env; do
+    if [[ -e "$DEST/$keep" ]]; then
+      rm -rf "$staging/repo/$keep"
+      cp -a "$DEST/$keep" "$staging/repo/$keep"
+    fi
+  done
+
+  find "$DEST" -mindepth 1 -maxdepth 1 ! -name data ! -name .env -exec rm -rf {} +
+  shopt -s dotglob nullglob
+  cp -a "$staging/repo/"* "$DEST/"
+  rm -rf "$staging"
+  echo "Git bootstrap complete."
+}
+
+if [[ ! -d "$DEST/.git" ]]; then
+  bootstrap_git
+else
+  echo "Pulling latest from origin/$BRANCH ..."
+  cd "$DEST"
+  git fetch origin
+  git checkout "$BRANCH"
+  git pull --ff-only origin "$BRANCH"
+fi
+
+cd "$DEST"
+echo "Building and restarting container..."
+compose_cmd up -d --build
+docker image prune -f
+EOF
+
+echo ""
+echo "Checking health: $HEALTH_URL"
+for _ in 1 2 3 4 5 6; do
+  if pct exec "$VMID" -- curl -sf "$HEALTH_URL" >/dev/null 2>&1; then
+    pct exec "$VMID" -- curl -s "$HEALTH_URL"
+    echo ""
+    echo "Deploy complete."
+    exit 0
+  fi
+  sleep 2
+done
+echo "WARNING: health check failed — inspect logs:" >&2
+echo "  pct exec $VMID -- docker logs wolf-leader --tail 50" >&2
+exit 1

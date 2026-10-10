@@ -1,0 +1,20 @@
+# Semantic-search overlay — opt into the heavier embeddings build + runtime.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.embeddings.yml up -d --build
+#
+# Combine with the Unraid overlay if needed:
+#   docker compose -f docker-compose.yml -f docker-compose.unraid.yml \
+#     -f docker-compose.embeddings.yml up -d --build
+#
+# After first deploy with embeddings on, backfill existing data once:
+#   docker compose ... exec wolf-leader python -m ide_storage.backfill_embeddings
+
+services:
+  wolf-leader:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        INCLUDE_EMBEDDINGS: "1"
+    environment:
+      IDE_STORAGE_EMBEDDINGS_ENABLED: "1"

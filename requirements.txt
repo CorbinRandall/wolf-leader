@@ -1,0 +1,7 @@
+# Full dev stack: core + optional embeddings. `pip install -r requirements.txt`
+# installs everything (keyword + semantic search) for local development.
+#
+# The Docker image is lean by default and installs requirements-core.txt only;
+# build with --build-arg INCLUDE_EMBEDDINGS=1 to also install the embeddings deps.
+-r requirements-core.txt
+-r requirements-embeddings.txt

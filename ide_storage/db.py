@@ -323,6 +323,26 @@ SCHEMA_STATEMENTS = [
     "CREATE UNIQUE INDEX IF NOT EXISTS ux_projects_slug ON projects(slug)",
     "CREATE INDEX IF NOT EXISTS idx_projects_path ON projects(path)",
     """
+    CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS snippets (
+        id BIGSERIAL PRIMARY KEY,
+        title TEXT,
+        language TEXT,
+        content TEXT NOT NULL,
+        project_id BIGINT REFERENCES projects(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        tags TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_snippets_project ON snippets(project_id)",
+    """
     CREATE TABLE IF NOT EXISTS project_paths (
         id BIGSERIAL PRIMARY KEY,
         project_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,

@@ -45,7 +45,7 @@ services:
       IDE_STORAGE_EMBEDDINGS_ENABLED: "1"
       IDE_STORAGE_PROJECTS_DIR: /data/projects
       # In-container paths are fixed; only the host side (WOLF_SHARE_ROOT) moves.
-      IDE_STORAGE_VAULT_DIR: /srv/wolf/Corbin/wolfleader/vault
+      IDE_STORAGE_VAULT_DIR: /srv/wolf/wolf-leader/vault
       IDE_STORAGE_SHARE_ROOT: /srv/wolf
       WOLF_SHARE_ROOT: /srv/wolf
       WOLF_WIKI_DIR: /app/wiki
@@ -55,10 +55,10 @@ services:
       HOST: 0.0.0.0
       MCP_HOST: 0.0.0.0
     ports:
-      - "127.0.0.1:${PORT:-6971}:6971"
-      - "127.0.0.1:${MCP_PORT:-6972}:6972"
+      - "${PORT:-6971}:6971"
+      - "${MCP_PORT:-6972}:6972"
     volumes:
-      - ../data:/data
+      - ./data:/data
       - ${WOLF_SHARE_ROOT:-/srv/wolf}:/srv/wolf
     depends_on:
       postgres:
@@ -72,7 +72,7 @@ services:
     environment:
       PGPASSWORD: ${POSTGRES_PASSWORD:-wolf}
     volumes:
-      - ${WOLF_SHARE_ROOT:-/srv/wolf}/Corbin/wolfleader/hub:/backup
+      - ${WOLF_SHARE_ROOT:-/srv/wolf}/wolf-leader/hub:/backup
     # One dump per day, keep the newest 14 (only ever deletes our own *.dump files in hub/).
     entrypoint:
       - sh

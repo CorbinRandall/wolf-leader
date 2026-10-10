@@ -1,0 +1,9 @@
+name: "Example Project"
+slug: _example
+continue_mode: compose_maintain
+deploy_state: n/a
+handoff_tier: orient
+overview: "Template project — replace with your stack description."
+compose: "/path/to/your/project"
+pickup: "Work on Example Project. Load: http://YOUR_HOST:6971/api/projects/_example/agent-brief"
+secrets_policy: never_store_values

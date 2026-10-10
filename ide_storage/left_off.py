@@ -98,7 +98,13 @@ def ensure_brief_url(text: str, brief_url: str) -> str:
     t = (text or "").strip()
     if not t or not brief_url:
         return t
-    if "agent-brief" in t or brief_url in t or re.search(r"(?i)\bbrief:\s*http", t):
+    endpoint = re.compile(
+        r"https?://[^\s<>'\"]+/api/projects/[^\s<>'\"]+/agent-brief/?",
+        re.IGNORECASE,
+    )
+    if endpoint.search(t):
+        return endpoint.sub(brief_url, t)
+    if brief_url in t or re.search(r"(?i)\bbrief:\s*http", t):
         return t
     return f"{t.rstrip()}\nBrief: {brief_url}"
 

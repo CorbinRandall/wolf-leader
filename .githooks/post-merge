@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# A successful phone-side git pull must also refresh the native service.
+exec bash scripts/phone-refresh.sh

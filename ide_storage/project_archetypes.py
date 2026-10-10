@@ -86,8 +86,10 @@ def get_deploy_state(project: dict[str, Any]) -> str:
 
 
 def host_label_suffix() -> str:
-    """Optional host name for pickup prompts (set IDE_STORAGE_HOST_LABEL in .env)."""
-    label = os.environ.get("IDE_STORAGE_HOST_LABEL", "").strip()
+    """Canonical device name for pickup prompts."""
+    from ide_storage.runtime_config import runtime_config
+
+    label = runtime_config().device_name
     return f" on {label}" if label else ""
 
 

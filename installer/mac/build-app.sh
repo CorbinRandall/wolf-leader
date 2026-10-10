@@ -92,7 +92,10 @@ fi
 PKG="$ROOT/installer/mac/WolfLeaderApp"
 ASSETS="$ROOT/installer/assets"
 DIST="$ROOT/dist"
-APP="$DIST/Wolf Leader.app"
+APP_NAME="${WL_APP_NAME:-Wolf Leader}"
+BUNDLE_ID="${WL_BUNDLE_ID:-app.wolfleader.mac}"
+CONFIG_DIR="${WL_CONFIG_DIRECTORY:-WolfLeader}"
+APP="$DIST/$APP_NAME.app"
 CONTENTS="$APP/Contents"
 RES="$CONTENTS/Resources"
 PAY="$RES/payload"
@@ -138,11 +141,11 @@ cat >"$CONTENTS/Info.plist" <<PLIST
 	<key>CFBundleExecutable</key>
 	<string>WolfLeader</string>
 	<key>CFBundleIdentifier</key>
-	<string>app.wolfleader.mac</string>
+	<string>$(xml_escape "$BUNDLE_ID")</string>
 	<key>CFBundleName</key>
-	<string>Wolf Leader</string>
+	<string>$(xml_escape "$APP_NAME")</string>
 	<key>CFBundleDisplayName</key>
-	<string>Wolf Leader</string>
+	<string>$(xml_escape "$APP_NAME")</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -169,6 +172,8 @@ cat >"$CONTENTS/Info.plist" <<PLIST
 	<string>$(xml_escape "$GIT_BRANCH")</string>
 	<key>WLRepoURL</key>
 	<string>$(xml_escape "$REPO_URL")</string>
+	<key>WLConfigDirectory</key>
+	<string>$(xml_escape "$CONFIG_DIR")</string>
 </dict>
 </plist>
 PLIST

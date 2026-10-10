@@ -112,7 +112,7 @@ final class ConfigStore: ObservableObject {
 
     static var supportDir: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("WolfLeader", isDirectory: true)
+        return base.appendingPathComponent(BuildInfo.supportDirectoryName, isDirectory: true)
     }
     private static var file: URL { supportDir.appendingPathComponent("config.json") }
 
@@ -149,6 +149,7 @@ enum BuildInfo {
     static var gitSHA: String? { plist("WLGitSHA") }
     static var branch: String { plist("WLGitBranch") ?? defaultBranch }
     static var repoURL: String { plist("WLRepoURL") ?? defaultRepoURL }
+    static var supportDirectoryName: String { plist("WLConfigDirectory") ?? "WolfLeader" }
 }
 
 /// Files bundled with the app: installer/mac/install.sh, ini.sh, examples/, hub sources.

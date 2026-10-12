@@ -223,9 +223,18 @@ def _save_kanban_columns(columns: list[dict]) -> None:
         conn.commit()
 
 
+class SkillFile(BaseModel):
+    path: str
+    content_base64: str
+
+
 class SkillImport(BaseModel):
-    name: str
-    archive_base64: str
+    # Send a ZIP (archive_base64) or loose files (a folder, or just SKILL.md).
+    # name is optional: it falls back to SKILL.md's own name, the folder, then the file name.
+    name: Optional[str] = None
+    archive_base64: Optional[str] = None
+    filename: Optional[str] = None
+    files: Optional[List[SkillFile]] = None
     overwrite: bool = False
 
 
@@ -1307,10 +1316,17 @@ async def api_export_skills():
 
 @app.post("/api/skills/import")
 async def api_import_skill(body: SkillImport):
-    from ide_storage.skill_registry import import_skill
+    from ide_storage.skill_registry import import_skill, import_skill_files
 
     try:
-        skill = import_skill(body.name, body.archive_base64, body.overwrite)
+        if body.files:
+            skill = import_skill_files(
+                body.name, [f.model_dump() for f in body.files], body.overwrite, filename=body.filename
+            )
+        elif body.archive_base64:
+            skill = import_skill(body.name, body.archive_base64, body.overwrite, filename=body.filename)
+        else:
+            raise ValueError("Send a skill ZIP (archive_base64) or its files")
     except FileExistsError as exc:
         raise HTTPException(status_code=409, detail=f"Skill already exists: {exc}") from exc
     except ValueError as exc:

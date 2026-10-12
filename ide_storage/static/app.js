@@ -458,7 +458,7 @@ function renderSkills() {
           <span class="skill-card-meta">${skill.file_count} files · ${formatBytes(skill.size_bytes)}</span>
         </button>
       </article>`).join("")
-    : `<div class="empty-library"><h3>No skills yet</h3><p>Sync user skills from a connected client to fill this library.</p></div>`;
+    : `<div class="empty-library"><h3>No skills yet</h3><p>Drop a skill folder, ZIP, or SKILL.md above, or sync user skills from a connected client.</p></div>`;
   grid.querySelectorAll("[data-skill]").forEach((button) =>
     button.addEventListener("click", () => selectSkill(button.dataset.skill))
   );
@@ -487,6 +487,145 @@ async function selectSkill(skillId) {
   $("#skill-detail-content").innerHTML = md(skillInstructions(detail.content));
   $("#download-skill-btn").href = `/api/skills/${encodeURIComponent(skillId)}/download`;
   $("#skill-detail").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// Add a skill: upload button, click-to-choose, or drag a folder / ZIP / SKILL.md onto the page.
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",", 2)[1] || "");
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function readDroppedEntry(entry, prefix = "") {
+  return new Promise((resolve, reject) => {
+    if (entry.isFile) {
+      entry.file((file) => resolve([{ path: prefix + entry.name, file }]), reject);
+      return;
+    }
+    const reader = entry.createReader();
+    const found = [];
+    const next = () => reader.readEntries(async (batch) => {
+      if (!batch.length) return resolve(found);
+      try {
+        for (const child of batch) found.push(...await readDroppedEntry(child, `${prefix}${entry.name}/`));
+        next();
+      } catch (err) { reject(err); }
+    }, reject);
+    next();
+  });
+}
+
+async function postSkill(payload, label) {
+  const send = (overwrite) => fetch(`${API}/api/skills/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...payload, overwrite }),
+  });
+  let res = await send(false);
+  if (res.status === 409) {
+    if (!confirm(`A skill from "${label}" is already in the library. Replace it?`)) return null;
+    res = await send(true);
+  }
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.detail || res.statusText);
+  return body.skill;
+}
+
+// items: [{ path, file }]. ZIPs are one skill each; everything else is one skill's loose files.
+async function addSkills(items) {
+  const zips = items.filter((item) => /\.zip$/i.test(item.file.name) && !item.path.includes("/"));
+  const loose = items.filter((item) => !zips.includes(item) && !/(^|\/)(\.DS_Store|\.git|__pycache__)(\/|$)/.test(item.path));
+  if (!zips.length && !loose.length) return;
+  const zone = $("#skills-dropzone");
+  zone.classList.add("busy");
+  const added = [];
+  try {
+    for (const { file } of zips) {
+      const skill = await postSkill({ archive_base64: await fileToBase64(file), filename: file.name }, file.name);
+      if (skill) added.push(skill);
+    }
+    if (loose.length) {
+      const hasManifest = loose.some((item) => /(^|\/)SKILL\.md$/.test(item.path));
+      // A lone markdown file dropped on its own is the skill's SKILL.md.
+      const single = loose.length === 1 && /\.md$/i.test(loose[0].path) && !loose[0].path.includes("/");
+      if (!hasManifest && !single) throw new Error("That is not a skill yet: it needs a SKILL.md file.");
+      const files = [];
+      for (const item of loose) {
+        files.push({ path: single ? "SKILL.md" : item.path, content_base64: await fileToBase64(item.file) });
+      }
+      // The skill's own name wins; a lone file's name is only the fallback.
+      const filename = single && !/^skill\.md$/i.test(loose[0].file.name) ? loose[0].file.name : undefined;
+      const label = loose[0].path.split("/")[0];
+      const skill = await postSkill(filename ? { files, filename } : { files }, label);
+      if (skill) added.push(skill);
+    }
+  } catch (err) {
+    showToast(`Could not add skill: ${err.message}`);
+  } finally {
+    zone.classList.remove("busy");
+  }
+  if (!added.length) return;
+  state.skillsLibrary = await api("/api/skills");
+  state.skills = state.skillsLibrary.skills || [];
+  renderSidebar();
+  renderSkills();
+  showToast(added.length === 1 ? `Added ${added[0].name}` : `Added ${added.length} skills`);
+  await selectSkill(added[added.length - 1].id);
+}
+
+$("#upload-skill-btn").addEventListener("click", () => $("#upload-skill-input").click());
+$("#skills-dropzone").addEventListener("click", () => $("#upload-skill-input").click());
+$("#skills-dropzone").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === " ") { event.preventDefault(); $("#upload-skill-input").click(); }
+});
+$("#upload-skill-input").addEventListener("change", async (event) => {
+  const items = [...event.target.files].map((file) => ({ path: file.name, file }));
+  event.target.value = "";
+  // Several files chosen together are separate skills, not one skill's files.
+  for (const item of items) await addSkills([item]);
+});
+
+{
+  const view = $("#skills-view");
+  let depth = 0;
+  const hasFiles = (event) => [...(event.dataTransfer?.types || [])].includes("Files");
+  view.addEventListener("dragenter", (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    depth += 1;
+    view.classList.add("dragging");
+  });
+  view.addEventListener("dragover", (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  });
+  view.addEventListener("dragleave", () => {
+    depth = Math.max(0, depth - 1);
+    if (!depth) view.classList.remove("dragging");
+  });
+  view.addEventListener("drop", async (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    depth = 0;
+    view.classList.remove("dragging");
+    // Grab entries synchronously: the DataTransfer is emptied once the handler yields.
+    const entries = [...event.dataTransfer.items]
+      .map((item) => item.webkitGetAsEntry?.() || null);
+    const plain = [...event.dataTransfer.files];
+    for (let i = 0; i < entries.length; i += 1) {
+      const entry = entries[i];
+      try {
+        // Each dropped top-level item is its own skill.
+        await addSkills(entry ? await readDroppedEntry(entry) : [{ path: plain[i].name, file: plain[i] }]);
+      } catch (err) {
+        showToast(`Could not read that drop: ${err.message}`);
+      }
+    }
+  });
 }
 
 $("#copy-skills-install-btn").addEventListener("click", async () => {

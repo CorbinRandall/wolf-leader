@@ -92,11 +92,17 @@
             <p class="setup-lead">Browse and share portable personal workflows with any IDE or agent. Plugin and system skills remain with their provider.</p>
           </div>
           <div class="chat-actions">
-            <button type="button" id="copy-skills-install-btn" class="btn btn-primary">Copy install prompt</button>
+            <button type="button" id="upload-skill-btn" class="btn btn-primary">Add skill</button>
+            <input type="file" id="upload-skill-input" class="hidden" accept=".zip,.md,application/zip,text/markdown" multiple>
+            <button type="button" id="copy-skills-install-btn" class="btn btn-secondary">Copy install prompt</button>
             <button type="button" id="copy-skills-publish-btn" class="btn btn-secondary">Copy publish prompt</button>
             <a id="download-skills-btn" class="btn btn-secondary" href="/api/skills/export.zip">Download all</a>
           </div>
         </header>
+        <div id="skills-dropzone" class="skills-dropzone" role="button" tabindex="0" aria-label="Add a skill">
+          <strong>Drop a skill here</strong>
+          <span>A skill folder, a ZIP, or a single SKILL.md. Or click to choose a file.</span>
+        </div>
         <div id="skills-grid" class="skills-grid"></div>
         <section id="skill-detail" class="panel skill-detail hidden">
           <header class="skill-detail-header">

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 private enum LibraryTab: String, Hashable {
     case board, skills, cleanup, snippets
@@ -281,15 +282,20 @@ private struct SkillsLibraryView: View {
     @State private var loading = true
     @State private var error: String?
     @State private var notice: String?
+    @State private var addError: String?
+    @State private var dropTargeted = false
+    @State private var adding = false
 
     var body: some View {
         WLPageHeader(title: "Skills library", subtitle: "Portable skills shared by every connected client.") {
             HStack(spacing: 8) {
-                Button("Import ZIP") { chooseArchive() }.buttonStyle(SecondaryButtonStyle())
+                Button("Add skill") { chooseSkills() }.buttonStyle(SecondaryButtonStyle())
                 Button("Export all") { MainLinks.open(exportURL) }.buttonStyle(OutlineButtonStyle())
             }
         }
         if let notice { WLStatusPill(text: notice, kind: .good) }
+        if let addError { WLStatusPill(text: addError, kind: .bad) }
+        dropZone
         if loading && response == nil {
             ProgressView("Loading skills…")
         } else if let error {
@@ -330,21 +336,140 @@ private struct SkillsLibraryView: View {
         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(value, forType: .string)
         notice = "Copied to the clipboard."
     }
-    private func chooseArchive() {
+    private var dropZone: some View {
+        VStack(spacing: 4) {
+            if adding {
+                ProgressView().controlSize(.small)
+            } else {
+                Image(systemName: "square.and.arrow.down").font(.system(size: 18)).foregroundStyle(dropTargeted ? p.accent : p.textMuted)
+            }
+            Text("Drop a skill here").font(DS.Font.bodySmall.weight(.semibold))
+            Text("A skill folder, a ZIP, or a single SKILL.md. Or click to choose.")
+                .font(DS.Font.micro).foregroundStyle(p.textMuted)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 18)
+        .background(dropTargeted ? p.accent.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(dropTargeted ? p.accent : p.border, style: StrokeStyle(lineWidth: 1.2, dash: [6, 4]))
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { chooseSkills() }
+        .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
+            let group = DispatchGroup()
+            var urls: [URL] = []
+            for provider in providers {
+                group.enter()
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    DispatchQueue.main.async {
+                        if let url { urls.append(url) }
+                        group.leave()
+                    }
+                }
+            }
+            group.notify(queue: .main) { Task { await add(urls) } }
+            return true
+        }
+        .accessibilityLabel("Add a skill")
+    }
+
+    private func chooseSkills() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.zip]
-        panel.allowsMultipleSelection = false
-        guard panel.runModal() == .OK, let url = panel.url, let data = try? Data(contentsOf: url) else { return }
-        let raw = url.deletingPathExtension().lastPathComponent.lowercased()
-        let name = raw.replacingOccurrences(of: "[^a-z0-9_-]", with: "-", options: .regularExpression)
-        Task {
+        panel.message = "Choose a skill folder, a ZIP, or a SKILL.md file."
+        panel.prompt = "Add"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.zip, .folder, UTType(filenameExtension: "md") ?? .plainText]
+        guard panel.runModal() == .OK else { return }
+        let urls = panel.urls
+        Task { await add(urls) }
+    }
+
+    /// Each dropped or chosen item is one skill.
+    private func add(_ urls: [URL]) async {
+        guard !urls.isEmpty else { return }
+        adding = true; addError = nil; notice = nil
+        defer { adding = false }
+        var added: [String] = []
+        for url in urls {
             do {
-                try await store.hub.importSkill(name: name, archive: data)
-                notice = "Imported \(name)."
-                await load()
-            } catch { self.error = error.localizedDescription }
+                if let name = try await addOne(url, overwrite: false) { added.append(name) }
+            } catch HubClient.HubError.http(409) {
+                guard confirmReplace(url.lastPathComponent) else { continue }
+                do {
+                    if let name = try await addOne(url, overwrite: true) { added.append(name) }
+                } catch { addError = describe(error, url) }
+            } catch { addError = describe(error, url) }
+        }
+        if !added.isEmpty {
+            notice = added.count == 1 ? "Added \(added[0])." : "Added \(added.count) skills."
+            await load()
         }
     }
+
+    private func addOne(_ url: URL, overwrite: Bool) async throws -> String? {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else { return nil }
+        if isDirectory.boolValue {
+            let files = try Self.files(in: url)
+            guard files.contains(where: { $0.path.hasSuffix("SKILL.md") }) else { throw SkillAddError.noManifest }
+            return try await store.hub.addSkill(files: files, filename: nil, overwrite: overwrite)
+        }
+        let data = try Data(contentsOf: url)
+        switch url.pathExtension.lowercased() {
+        case "zip":
+            return try await store.hub.addSkill(archive: data, filename: url.lastPathComponent, overwrite: overwrite)
+        case "md":
+            // A lone markdown file is the skill's SKILL.md. Its own name wins; the file name is the fallback.
+            let isManifest = url.deletingPathExtension().lastPathComponent.lowercased() == "skill"
+            return try await store.hub.addSkill(
+                files: [(path: "SKILL.md", data: data)], filename: isManifest ? nil : url.lastPathComponent, overwrite: overwrite)
+        default:
+            throw SkillAddError.unsupported
+        }
+    }
+
+    private enum SkillAddError: Error { case noManifest, unsupported }
+
+    private static let skipped: Set<String> = [".DS_Store", ".git", "__pycache__"]
+
+    /// Every file under a skill folder, with paths relative to the folder's parent.
+    private static func files(in folder: URL) throws -> [(path: String, data: Data)] {
+        let base = folder.standardizedFileURL.path
+        var found: [(path: String, data: Data)] = []
+        let walker = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey])
+        while let item = walker?.nextObject() as? URL {
+            if skipped.contains(item.lastPathComponent) { walker?.skipDescendants(); continue }
+            guard (try? item.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
+            let relative = String(item.standardizedFileURL.path.dropFirst(base.count + 1))
+            found.append((path: folder.lastPathComponent + "/" + relative, data: try Data(contentsOf: item)))
+        }
+        return found
+    }
+
+    private func confirmReplace(_ label: String) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Replace the existing skill?"
+        alert.informativeText = "A skill from “\(label)” is already in the library."
+        alert.addButton(withTitle: "Replace")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    private func describe(_ error: Error, _ url: URL) -> String {
+        let label = url.lastPathComponent
+        switch error {
+        case SkillAddError.noManifest, HubClient.HubError.http(400):
+            return "“\(label)” is not a skill yet: it needs a SKILL.md file at its top level."
+        case SkillAddError.unsupported:
+            return "“\(label)” can't be added. Use a skill folder, a ZIP, or a SKILL.md file."
+        default:
+            return "Couldn't add “\(label)”: \(error.localizedDescription)"
+        }
+    }
+
     private func load() async {
         loading = true; defer { loading = false }
         do { response = try await store.hub.skills(); error = nil } catch { self.error = error.localizedDescription }

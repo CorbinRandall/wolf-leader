@@ -14,6 +14,7 @@ from typing import Any
 
 SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 MAX_ARCHIVE_BYTES = 25 * 1024 * 1024
+MAX_SKILL_FILES = 500
 IGNORED_PARTS = {"__pycache__", ".DS_Store", ".git"}
 BUILTIN_SKILLS_DIR = Path(__file__).resolve().parent.parent / "examples" / "shared" / "skills"
 
@@ -141,62 +142,132 @@ def _validate_archive_member(info: zipfile.ZipInfo) -> PurePosixPath:
     return path
 
 
-def import_skill(name: str, archive_base64: str, overwrite: bool = False) -> dict[str, Any]:
-    if not SKILL_NAME_RE.fullmatch(name):
-        raise ValueError("Skill name must use lowercase letters, numbers, hyphens, or underscores")
+def _slugify_skill_name(raw: str) -> str:
+    slug = re.sub(r"[^a-z0-9_-]+", "-", raw.strip().lower()).strip("-_")[:64]
+    return slug
+
+
+def _decode(value: str, what: str) -> bytes:
     try:
-        archive_bytes = base64.b64decode(archive_base64, validate=True)
+        return base64.b64decode(value, validate=True)
     except (ValueError, TypeError) as exc:
-        raise ValueError("archive_base64 is not valid base64") from exc
+        raise ValueError(f"{what} is not valid base64") from exc
+
+
+def _skill_root(staged: Path) -> Path:
+    """The folder holding SKILL.md: the staging root, or its single top-level folder."""
+    if (staged / "SKILL.md").is_file():
+        return staged
+    children = [child for child in staged.iterdir() if child.name not in IGNORED_PARTS]
+    if len(children) == 1 and children[0].is_dir() and (children[0] / "SKILL.md").is_file():
+        return children[0]
+    raise ValueError("A skill must contain SKILL.md at its top level")
+
+
+def _install_staged_skill(staged: Path, name: str | None, hint: str | None, overwrite: bool) -> dict[str, Any]:
+    source = _skill_root(staged)
+    if not name:
+        # Prefer the name the skill gives itself, then its folder, then the uploaded file name.
+        folder_hint = source.name if source != staged else ""
+        declared, _ = _parse_manifest((source / "SKILL.md").read_text(encoding="utf-8", errors="replace"), "")
+        name = next((slug for slug in map(_slugify_skill_name, (declared, folder_hint, hint or "")) if slug), None)
+    if not name or not SKILL_NAME_RE.fullmatch(name):
+        raise ValueError("Skill name must use lowercase letters, numbers, hyphens, or underscores")
+
+    root = skills_dir()
+    destination = root / name
+    if destination.exists() and not overwrite:
+        raise FileExistsError(name)
+    backup = root / f".{name}.backup"
+    if backup.exists():
+        shutil.rmtree(backup)
+    if destination.exists():
+        destination.replace(backup)
+    try:
+        shutil.copytree(source, destination, ignore=shutil.ignore_patterns(*IGNORED_PARTS))
+    except Exception:
+        if backup.exists() and not destination.exists():
+            backup.replace(destination)
+        raise
+    if backup.exists():
+        shutil.rmtree(backup)
+    return get_skill(name)
+
+
+def import_skill(
+    name: str | None,
+    archive_base64: str,
+    overwrite: bool = False,
+    *,
+    filename: str | None = None,
+) -> dict[str, Any]:
+    """Add a skill from a ZIP. Without a name, it comes from SKILL.md, the folder, or the file name."""
+    if name and not SKILL_NAME_RE.fullmatch(name):
+        raise ValueError("Skill name must use lowercase letters, numbers, hyphens, or underscores")
+    archive_bytes = _decode(archive_base64, "archive_base64")
     if len(archive_bytes) > MAX_ARCHIVE_BYTES:
         raise ValueError("Skill archive is too large")
 
     root = skills_dir()
     root.mkdir(parents=True, exist_ok=True)
-    destination = root / name
-    if destination.exists() and not overwrite:
-        raise FileExistsError(name)
-
     with tempfile.TemporaryDirectory(dir=root, prefix=".skill-import-") as temp_name:
         temp_path = Path(temp_name)
         try:
             with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
-                members = [info for info in archive.infolist() if not info.is_dir()]
+                members = [
+                    info for info in archive.infolist()
+                    if not info.is_dir() and not (set(PurePosixPath(info.filename).parts) & (IGNORED_PARTS | {"__MACOSX"}))
+                ]
                 if not members:
                     raise ValueError("Skill archive is empty")
-                total_size = sum(info.file_size for info in members)
-                if total_size > MAX_ARCHIVE_BYTES:
+                if sum(info.file_size for info in members) > MAX_ARCHIVE_BYTES:
                     raise ValueError("Expanded skill archive is too large")
                 for info in members:
                     relative = _validate_archive_member(info)
-                    parts = relative.parts
-                    if len(parts) > 1 and parts[0] == name:
-                        relative = PurePosixPath(*parts[1:])
                     target = temp_path.joinpath(*relative.parts)
                     target.parent.mkdir(parents=True, exist_ok=True)
                     with archive.open(info) as source, target.open("wb") as output:
                         shutil.copyfileobj(source, output)
         except zipfile.BadZipFile as exc:
             raise ValueError("Skill archive is not a valid ZIP file") from exc
+        hint = Path(filename).stem if filename else None
+        return _install_staged_skill(temp_path, name, hint, overwrite)
 
-        if not (temp_path / "SKILL.md").is_file():
-            raise ValueError("Skill archive must contain SKILL.md")
 
-        backup = root / f".{name}.backup"
-        if backup.exists():
-            shutil.rmtree(backup)
-        if destination.exists():
-            destination.replace(backup)
-        try:
-            shutil.copytree(temp_path, destination)
-        except Exception:
-            if backup.exists() and not destination.exists():
-                backup.replace(destination)
-            raise
-        if backup.exists():
-            shutil.rmtree(backup)
+def import_skill_files(
+    name: str | None,
+    files: list[dict[str, str]],
+    overwrite: bool = False,
+    *,
+    filename: str | None = None,
+) -> dict[str, Any]:
+    """Add a skill from loose files: a dropped folder, or a single SKILL.md."""
+    if name and not SKILL_NAME_RE.fullmatch(name):
+        raise ValueError("Skill name must use lowercase letters, numbers, hyphens, or underscores")
+    if not files:
+        raise ValueError("No files were uploaded")
+    if len(files) > MAX_SKILL_FILES:
+        raise ValueError(f"A skill can hold at most {MAX_SKILL_FILES} files")
 
-    return get_skill(name)
+    root = skills_dir()
+    root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=root, prefix=".skill-import-") as temp_name:
+        temp_path = Path(temp_name)
+        total = 0
+        for item in files:
+            relative = PurePosixPath(str(item.get("path") or "").replace("\\", "/"))
+            if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+                raise ValueError(f"Unsafe file path: {item.get('path')}")
+            if set(relative.parts) & IGNORED_PARTS:
+                continue
+            content = _decode(item.get("content_base64") or "", f"{relative} content")
+            total += len(content)
+            if total > MAX_ARCHIVE_BYTES:
+                raise ValueError("Skill is too large")
+            target = temp_path.joinpath(*relative.parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+        return _install_staged_skill(temp_path, name, Path(filename).stem if filename else None, overwrite)
 
 
 def install_prompt(public_url: str) -> str:

@@ -482,13 +482,26 @@ extension HubClient {
         try await get("/api/skills", as: HubSkillsResponse.self)
     }
 
-    func importSkill(name: String, archive: Data, overwrite: Bool = true) async throws {
-        let body = try JSONSerialization.data(withJSONObject: [
-            "name": name,
-            "archive_base64": archive.base64EncodedString(),
+    /// Add a skill from a ZIP. The hub names it from SKILL.md, its folder, or the file name.
+    func addSkill(archive: Data, filename: String, overwrite: Bool) async throws -> String {
+        try await postSkill(["archive_base64": archive.base64EncodedString(), "filename": filename, "overwrite": overwrite])
+    }
+
+    /// Add a skill from loose files: a folder's contents, or a single SKILL.md.
+    func addSkill(files: [(path: String, data: Data)], filename: String?, overwrite: Bool) async throws -> String {
+        var payload: [String: Any] = [
+            "files": files.map { ["path": $0.path, "content_base64": $0.data.base64EncodedString()] },
             "overwrite": overwrite,
-        ])
-        _ = try await data("/api/skills/import", method: "POST", body: body, timeout: 30)
+        ]
+        if let filename { payload["filename"] = filename }
+        return try await postSkill(payload)
+    }
+
+    private func postSkill(_ payload: [String: Any]) async throws -> String {
+        let body = try JSONSerialization.data(withJSONObject: payload)
+        let reply = try await data("/api/skills/import", method: "POST", body: body, timeout: 60)
+        let skill = (try? JSONSerialization.jsonObject(with: reply) as? [String: Any])?["skill"] as? [String: Any]
+        return (skill?["name"] as? String) ?? "skill"
     }
 
     func duplicateGroups() async throws -> [HubDuplicateGroup] {

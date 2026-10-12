@@ -6,7 +6,7 @@ alwaysApply: true
 # Wolf Leader
 
 Wolf Leader is the user's memory across chats, projects and machines. It works in the background.
-The user does not type `/save`, `/wolfhowl` or anything else to make it work. You do it, through the
+The user does not type `/wolfhowl` or anything else to make it work. You do it, through the
 **`wolf-leader`** MCP server, and you keep the user informed in one short line each time.
 
 Never run a `.sh` script or open a file for any of this. MCP tools only. (`ide-storage` is a legacy
@@ -61,7 +61,7 @@ One line to the user confirming it saved.
 
 ## Manual skills still exist
 
-`/save`, `/wolfhowl`, `/wolfeat` remain for when the user wants them on purpose. Do not suggest them
+`/wolfhowl` (save) and `/wolfeat` (recall) remain for when the user wants them on purpose. Do not suggest them
 as a substitute for doing the above yourself.
 
 ## Handoff

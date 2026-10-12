@@ -46,11 +46,22 @@ def test_agent_prompt_explains_codex_save_setup():
     assert "trust all three Wolf Leader hooks" in prompt
 
 
-def test_client_bundle_contains_codex_save_skill():
+def test_client_bundle_ships_only_wolfhowl_and_wolfeat_skills():
     with tarfile.open(fileobj=io.BytesIO(build_client_bundle()), mode="r:gz") as archive:
-        assert "examples/codex/skills/save/SKILL.md" in archive.getnames()
-        assert "examples/shared/skills/wolfhowl/SKILL.md" in archive.getnames()
-        assert "examples/shared/skills/wolfeat/SKILL.md" in archive.getnames()
+        names = archive.getnames()
+    assert "examples/shared/skills/wolfhowl/SKILL.md" in names
+    assert "examples/shared/skills/wolfhowl/scripts/session.py" in names
+    assert "examples/shared/skills/wolfhowl/scripts/wolfhowl-curl.sh" in names
+    assert "examples/shared/skills/wolfeat/SKILL.md" in names
+    # /save and /new were folded into the two skills above.
+    assert not [n for n in names if "/skills/save/" in n or "/skills/new/" in n]
+
+
+def test_agent_prompt_no_longer_offers_save_or_new():
+    prompt = build_agent_prompt()
+    assert "Confirm /wolfhowl and /wolfeat appear." in prompt
+    assert "use /wolfhowl for a deliberate final checkpoint" in prompt
+    assert "use /save" not in prompt
 
 
 def test_payload_reports_server_identity(monkeypatch):

@@ -275,7 +275,7 @@ def distill_project(project_id: int, db_path: Path | None = None) -> dict[str, A
             "1. Treat this brief as authoritative context for this project.",
             "2. Use the compose path above; do not guess container or file locations.",
             "3. Open linked sessions only when you need verbatim prior work.",
-            "4. Call `remember()` for new decisions; run `/save` or sync at session end.",
+            "4. Call `remember()` for new decisions; run `/wolfhowl` or sync at session end.",
             "",
         ]
     )

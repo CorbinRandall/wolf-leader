@@ -47,6 +47,8 @@ class HowlBody(BaseModel):
     ingest_cited: bool = False
     refresh_catalog: bool = True
     client_os: Optional[str] = None  # windows | mac | linux — picks the remote spelling
+    create_project: bool = False
+    project_name: Optional[str] = None
 
 
 class HowlGitUpdate(BaseModel):
@@ -136,10 +138,15 @@ async def post_howl(body: HowlBody = HowlBody()):
             ingest_cited=body.ingest_cited,
             refresh_catalog=body.refresh_catalog,
             client_os=body.client_os,
+            create_project=body.create_project,
+            project_name=body.project_name,
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("howl failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if report.get("needs_project_choice"):
+        # Not an error: the agent must ask the user (existing project or new) and re-run.
+        return report
     if not report.get("ok"):
         raise HTTPException(status_code=400, detail=report.get("error") or "howl failed")
     return report

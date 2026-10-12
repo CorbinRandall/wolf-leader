@@ -17,11 +17,11 @@ Replace `YOUR_HOST` with your server IP, hostname, or Tailscale name.
 **Wolf Leader** is **AI Project Storage** — a self-hosted hub for agent project memory:
 
 - **Projects** with typed `SPEC.yaml` checkpoints (compose stacks, daemons, client setup, …)
-- Typed **memories** (`decision`, `constraint`, `active_work`, …) — extracted on `/save`
+- Typed **memories** (`decision`, `constraint`, `active_work`, …) — extracted on `/wolfhowl`
 - `PROJECT.md` living briefs per project
 - **Archive** — full past sessions for drill-down
 
-Raw transcripts stay on each device. `/save` checkpoints knowledge into the project, then archives the session.
+Raw transcripts stay on each device. `/wolfhowl` checkpoints knowledge into the project, then archives the session.
 
 ## Zero-context agent prompt
 
@@ -32,9 +32,9 @@ Connect this workspace to Wolf Leader and finish setup.
 2. Add MCP server `wolf-leader` → `http://YOUR_HOST:6972/mcp`
 3. Place AGENTS.md in workspace root (copy from hub data/AGENTS.md)
 4. Import existing transcripts not yet in the hub (skip by session_id)
-5. Install `/save` skill on each Cursor workspace (see Phase 2)
+5. Install the `/wolfhowl` and `/wolfeat` skills on each client (see Phase 2)
 6. Call resolve_project + recall before project work
-7. Type `/save` after meaningful work; stop hook catches session close
+7. Type `/wolfhowl` after meaningful work; `/wolfeat` picks it back up
 ```
 
 ## Every session (mandatory)
@@ -46,7 +46,7 @@ Connect this workspace to Wolf Leader and finish setup.
 | **End** | Final `save_session` with an honest summary; one line to the user |
 | **Tell the user** | One short line per save; ask before creating/renaming/merging projects; surface any error |
 
-The user never types a command for this. `/save`, `/wolfhowl`, `/wolfeat` exist for deliberate use only.
+The user never types a command for this. `/wolfhowl` (save) and `/wolfeat` (recall) exist for deliberate use only.
 
 ## Handoff tiers
 
@@ -97,14 +97,14 @@ WOLF_LEADER_MCP=http://YOUR_HOST:6972/mcp \
 ./scripts/install-cursor-client.sh
 ```
 
-Installs `/save` at `~/.cursor/skills/save/`, MCP, and rules (hooks only with `WOLF_LEADER_HOOKS=1`). Reload Cursor after install.
+Installs `/wolfhowl` and `/wolfeat` under `~/.cursor/skills/`, MCP, and rules (hooks only with `WOLF_LEADER_HOOKS=1`). Reload Cursor after install.
 
 ## Phase 3 — Project work
 
 1. `set_project({ slug: "your-project" })`
 2. `get_brief()` — read SPEC + pickup prompt
 3. Work; `remember()` for decisions
-4. `/save` at end
+4. `/wolfhowl` at end
 
 ---
 

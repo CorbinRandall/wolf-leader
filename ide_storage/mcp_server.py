@@ -290,10 +290,13 @@ def wolfhowl(
     git_json: Optional[str] = None,
     cited_paths_json: Optional[str] = None,
     ingest_cited: bool = False,
+    create_project: bool = False,
+    project_name: Optional[str] = None,
     ctx: Context = None,
 ) -> dict:
     """
-    Broadcast this session: /save + path alias + git state + embed + file catalog + Obsidian notes.
+    Save and broadcast this session: memories + brief + archive, path alias, git state, embed, file catalog, Obsidian notes.
+    If the report has needs_project_choice, ask the user: existing project (pass slug) or new (create_project=True + project_name).
     messages_json: JSON array of {role, content}. git_json: {commit, branch, remote, dirty_files, is_repo}.
     Returns a summary paragraph and offers[] to ask the user about (commit, ingest files, jobs).
     """
@@ -322,6 +325,8 @@ def wolfhowl(
             git=git,
             cited_paths=cited,
             ingest_cited=ingest_cited,
+            create_project=create_project,
+            project_name=project_name,
         )
         if report.get("project_id"):
             active["project_id"] = report["project_id"]

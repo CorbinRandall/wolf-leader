@@ -113,7 +113,7 @@ Times shown to humans are local, `HH:MM MM/DD/YYYY`, using `WOLF_TZ`.
 }
 ```
 
-Then use the dashboard's **Setup** prompt. Cursor and Codex receive all four Wolf Leader skills,
+Then use the dashboard's **Setup** prompt. Cursor and Codex receive the `/wolfhowl` (save) and `/wolfeat` (recall) skills,
 hooks, and client configuration. Other skill-capable agents can install the portable skills from
 the dashboard's **Skills** tab. The desktop installer does this for supported clients.
 

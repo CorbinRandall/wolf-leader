@@ -465,7 +465,7 @@ final class UpdateChecker: ObservableObject {
             "obsidian=\(obsidian ? "yes" : "no")",
             "cursor=\(exists("/Applications/Cursor.app", home + "/Applications/Cursor.app", home + "/.cursor"))",
             "claude_code=\(exists(home + "/.claude"))",
-            "wolf_client=\(exists(home + "/.cursor/rules/wolf-leader-hub.mdc", home + "/.cursor/skills/save"))",
+            "wolf_client=\(exists(home + "/.cursor/rules/wolf-leader-hub.mdc", home + "/.cursor/skills/wolfhowl", home + "/.cursor/skills/save"))",
             "",
             "[backup]",
             "done=no",

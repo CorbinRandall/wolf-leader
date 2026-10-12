@@ -115,7 +115,11 @@ def relink_for_session(
     transcript = root / session_id / f"{session_id}.jsonl"
     project_id = None
     match_reason = None
-    if transcript.is_file():
+    try:
+        has_transcript = transcript.is_file()
+    except OSError:
+        has_transcript = False  # hub cannot read a Cursor home (non-root container, remote hub)
+    if has_transcript:
         text = transcript_text(transcript)
         if text.strip():
             match = best_project_match(text, db_path=db_path)

@@ -400,14 +400,14 @@ def build_agent_brief_response(
             "You are continuing work on this Unraid plugin/daemon project. "
             + _local_brief
             + "Edit files under plugin_root — not Docker Compose. "
-            "At session end, /save or save_session to checkpoint project knowledge."
+            "At session end, /wolfhowl or save_session to checkpoint project knowledge."
         )
     elif mode == "client_setup":
         instructions = (
             "You are setting up a client device for this homelab project. "
             + _local_brief
             + "Focus on SSH keys and client-side configuration; server may already be ready. "
-            "At session end, /save or save_session to checkpoint project knowledge."
+            "At session end, /wolfhowl or save_session to checkpoint project knowledge."
         )
     elif mode == "compose_maintain":
         instructions = (
@@ -415,14 +415,14 @@ def build_agent_brief_response(
             + _local_brief
             + "Fix and tune only — do not redeploy unless explicitly asked. "
             "Use the compose path for file edits. "
-            "At session end, /save or save_session to checkpoint project knowledge."
+            "At session end, /wolfhowl or save_session to checkpoint project knowledge."
         )
     else:
         instructions = (
             "You are continuing work on this homelab project. "
             + _local_brief
             + "Verify on_disk preflight before acting. "
-            "At session end, /save or save_session to checkpoint project knowledge."
+            "At session end, /wolfhowl or save_session to checkpoint project knowledge."
         )
         if mode.startswith("compose") and compose:
             instructions += f" Compose path: {compose}."

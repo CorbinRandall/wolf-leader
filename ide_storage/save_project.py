@@ -29,6 +29,14 @@ def find_transcript(
     root: Path = TRANSCRIPTS_ROOT,
 ) -> tuple[str, Path] | tuple[None, None]:
     """Resolve session id and transcript path (newest session if omitted)."""
+    try:
+        return _find_transcript(session_id, root)
+    except OSError:
+        # The hub may not be able to read a Cursor home at all (non-root container, remote hub).
+        return None, None
+
+
+def _find_transcript(session_id: str | None, root: Path) -> tuple[str, Path] | tuple[None, None]:
     sid = (session_id or os.environ.get("CURSOR_SESSION_ID") or "").strip()
     if not sid and STATE_FILE.is_file():
         sid = STATE_FILE.read_text(encoding="utf-8").splitlines()[0].strip()

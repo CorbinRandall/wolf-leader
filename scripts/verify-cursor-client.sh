@@ -31,14 +31,10 @@ echo ""
 
 check "wolf-leader.env" "$CURSOR_DIR/wolf-leader.env"
 check "mcp.json" "$CURSOR_DIR/mcp.json"
-check "save skill" "$CURSOR_DIR/skills/save/SKILL.md"
-check "save script" "$CURSOR_DIR/skills/save/scripts/save-session.sh"
-check "save curl fallback" "$CURSOR_DIR/skills/save/scripts/save-session-curl.sh"
-check "new skill" "$CURSOR_DIR/skills/new/SKILL.md"
-check "new project script" "$CURSOR_DIR/skills/new/scripts/new-project-session.sh"
-check "new curl fallback" "$CURSOR_DIR/skills/new/scripts/new-project-session-curl.sh"
 check "wolfhowl skill" "$CURSOR_DIR/skills/wolfhowl/SKILL.md"
 check "wolfhowl script" "$CURSOR_DIR/skills/wolfhowl/scripts/wolfhowl.sh"
+check "wolfhowl transcript helper" "$CURSOR_DIR/skills/wolfhowl/scripts/session.py"
+check "wolfhowl curl fallback" "$CURSOR_DIR/skills/wolfhowl/scripts/wolfhowl-curl.sh"
 check "wolfeat skill" "$CURSOR_DIR/skills/wolfeat/SKILL.md"
 check "wolfeat script" "$CURSOR_DIR/skills/wolfeat/scripts/wolfeat.sh"
 if [[ "${WOLF_LEADER_HOOKS:-0}" == 1 ]]; then
@@ -62,9 +58,9 @@ if [[ -f "$CURSOR_DIR/mcp.json" ]]; then
 fi
 
 if command -v python3 >/dev/null 2>&1; then
-  echo "OK    python runtime (/save full path)"
+  echo "OK    python runtime (/wolfhowl full path)"
 else
-  echo "WARN  python3 not found — /save uses curl fallback; /new needs python3 or MCP"
+  echo "WARN  python3 not found — /wolfhowl uses a limited curl fallback"
   WARN=1
 fi
 
@@ -92,7 +88,7 @@ fi
 
 echo ""
 if [[ "$FAIL" -eq 0 ]]; then
-  echo "All required checks passed. Reload Cursor window if /new or /save are missing."
+  echo "All required checks passed. Reload Cursor if /wolfhowl or /wolfeat are missing."
   exit 0
 fi
 echo "Some required checks failed — re-run install or fix items above."

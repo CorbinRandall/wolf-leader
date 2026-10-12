@@ -59,14 +59,21 @@ private struct ProjectBoardView: View {
                             HStack {
                                 Text(column.label).font(DS.Font.body.weight(.semibold))
                                 Spacer()
-                                MainTag(text: String(projects.filter { $0.status == column.status }.count))
+                                MainTag(text: String(projects.filter { $0.kanbanStatus(in: columns) == column.status }.count))
                             }
                             if let description = column.description, !description.isEmpty {
                                 Text(description).font(DS.Font.micro).foregroundStyle(p.textMuted)
                             }
-                            ForEach(projects.filter { $0.status == column.status }) { project in
+                            ForEach(projects.filter { $0.kanbanStatus(in: columns) == column.status }) { project in
                                 VStack(alignment: .leading, spacing: 6) {
-                                    Text(project.name).font(DS.Font.bodySmall.weight(.semibold))
+                                    HStack {
+                                        Text(project.name).font(DS.Font.bodySmall.weight(.semibold))
+                                        Spacer()
+                                        if let owner = project.owner, !owner.isEmpty {
+                                            MainTag(text: owner)
+                                                .help(project.ownerSource == "folder" ? "Assigned from the \(owner) folder" : "Project owner")
+                                        }
+                                    }
                                     if let description = project.description {
                                         Text(description).font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(3)
                                     }
@@ -74,7 +81,7 @@ private struct ProjectBoardView: View {
                                         Text("\(project.memoryCount) memories").font(DS.Font.micro)
                                         Spacer()
                                         Menu("Move") {
-                                            ForEach(columns.filter { $0.status != column.status }) { destination in
+                                            ForEach(columns.filter { $0.status != project.kanbanStatus(in: columns) }) { destination in
                                                 Button(destination.label) { Task { await move(project, to: destination.status) } }
                                             }
                                         }

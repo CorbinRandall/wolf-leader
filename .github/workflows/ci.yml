@@ -9,6 +9,20 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: wolf
+          POSTGRES_PASSWORD: wolf
+          POSTGRES_DB: wolf_leader
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U wolf -d wolf_leader"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v7
 
@@ -28,6 +42,7 @@ jobs:
       - name: Run tests
         env:
           PYTHONPATH: .
+          TEST_DATABASE_URL: postgresql://wolf:wolf@127.0.0.1:5432/wolf_leader
         run: pytest -q
 
       - name: Check public repository hygiene

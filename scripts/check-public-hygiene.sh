@@ -8,8 +8,12 @@ failed=0
 check_pattern() {
   local label="$1"
   local pattern="$2"
+  local allowed_pattern="${3:-}"
   local matches
   matches="$(git grep -nE "$pattern" -- ':!scripts/check-public-hygiene.sh' || true)"
+  if [[ -n "$allowed_pattern" && -n "$matches" ]]; then
+    matches="$(printf '%s\n' "$matches" | grep -Ev "$allowed_pattern" || true)"
+  fi
   if [[ -n "$matches" ]]; then
     echo "ERROR: tracked $label found:" >&2
     echo "$matches" >&2
@@ -17,7 +21,10 @@ check_pattern() {
   fi
 }
 
-check_pattern "macOS home path" '(^|[[:space:]"=])/Users/[[:alnum:]_.-]+'
+check_pattern \
+  "macOS home path" \
+  '(^|[[:space:]"=])/Users/[[:alnum:]_.-]+' \
+  '/Users/(you|alice|someone|example|username|user)/'
 check_pattern "RFC1918 URL" 'https?://(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)'
 
 while IFS= read -r path; do

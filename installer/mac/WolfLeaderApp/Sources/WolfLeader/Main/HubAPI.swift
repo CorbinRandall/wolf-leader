@@ -158,6 +158,8 @@ struct HubProject: Decodable, Identifiable, Hashable {
     var memoryCount: Int
     var snippetCount: Int
     var updatedAt: String?
+    var owner: String?
+    var ownerSource: String?
 
     var updated: Date? { HubDate.parse(updatedAt) }
     /// `slug` when the hub has one, else the numeric id (both work for agent-brief).
@@ -175,6 +177,20 @@ struct HubProject: Decodable, Identifiable, Hashable {
         memoryCount = c.int("memory_count", "memories") ?? 0
         snippetCount = c.int("snippet_count", "snippets") ?? 0
         updatedAt = c.str("updated_at", "last_activity", "created_at")
+        owner = c.str("owner")
+        ownerSource = c.str("owner_source")
+    }
+
+    /// Match the web board's compatibility mapping for statuses created before Kanban existed.
+    func kanbanStatus(in columns: [HubKanbanColumn]) -> String {
+        if columns.contains(where: { $0.status == status }) { return status }
+        if status == "done" || status == "archived" {
+            return columns.first(where: { $0.status == "done" })?.status ?? columns.first?.status ?? status
+        }
+        if status == "backlog" {
+            return columns.first(where: { $0.status == "backlog" })?.status ?? columns.first?.status ?? status
+        }
+        return columns.first(where: { $0.status == "in_progress" })?.status ?? columns.first?.status ?? status
     }
 }
 

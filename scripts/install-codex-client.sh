@@ -43,6 +43,8 @@ echo ""
 mkdir -p \
   "$AGENT_SKILLS_DIR/save/scripts" \
   "$AGENT_SKILLS_DIR/new/scripts" \
+  "$AGENT_SKILLS_DIR/wolfhowl/scripts" \
+  "$AGENT_SKILLS_DIR/wolfeat/scripts" \
   "$CODEX_DIR/hooks" \
   "$CODEX_DIR/lib"
 
@@ -54,6 +56,12 @@ install_one 644 "$SOURCE/skills/new/SKILL.md" "$AGENT_SKILLS_DIR/new/SKILL.md"
 install_one 755 "$SOURCE/skills/new/scripts/new-project-session.sh" "$AGENT_SKILLS_DIR/new/scripts/new-project-session.sh"
 install_one 755 "$SOURCE/skills/new/scripts/new-project-session.py" "$AGENT_SKILLS_DIR/new/scripts/new-project-session.py"
 install_one 755 "$SOURCE/skills/new/scripts/new-project-session-curl.sh" "$AGENT_SKILLS_DIR/new/scripts/new-project-session-curl.sh"
+install_one 644 "$ROOT/examples/shared/skills/wolfhowl/SKILL.md" "$AGENT_SKILLS_DIR/wolfhowl/SKILL.md"
+install_one 755 "$ROOT/examples/shared/skills/wolfhowl/scripts/wolfhowl.sh" "$AGENT_SKILLS_DIR/wolfhowl/scripts/wolfhowl.sh"
+install_one 755 "$ROOT/examples/shared/skills/wolfhowl/scripts/wolfhowl.py" "$AGENT_SKILLS_DIR/wolfhowl/scripts/wolfhowl.py"
+install_one 755 "$ROOT/examples/shared/skills/wolfhowl/scripts/sync_share.py" "$AGENT_SKILLS_DIR/wolfhowl/scripts/sync_share.py"
+install_one 644 "$ROOT/examples/shared/skills/wolfeat/SKILL.md" "$AGENT_SKILLS_DIR/wolfeat/SKILL.md"
+install_one 755 "$ROOT/examples/shared/skills/wolfeat/scripts/wolfeat.sh" "$AGENT_SKILLS_DIR/wolfeat/scripts/wolfeat.sh"
 
 install_one 755 "$SOURCE/hooks/wolf-leader-recall.sh" "$CODEX_DIR/hooks/wolf-leader-recall.sh"
 install_one 755 "$SOURCE/hooks/wolf-leader-save.sh" "$CODEX_DIR/hooks/wolf-leader-save.sh"

@@ -15,6 +15,7 @@ from typing import Any
 SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 MAX_ARCHIVE_BYTES = 25 * 1024 * 1024
 IGNORED_PARTS = {"__pycache__", ".DS_Store", ".git"}
+BUILTIN_SKILLS_DIR = Path(__file__).resolve().parent.parent / "examples" / "shared" / "skills"
 
 
 def skills_dir() -> Path:
@@ -23,6 +24,19 @@ def skills_dir() -> Path:
         return Path(configured)
     projects_dir = Path(os.environ.get("IDE_STORAGE_PROJECTS_DIR", "/data/projects"))
     return projects_dir.parent / "skills"
+
+
+def seed_builtin_skills() -> None:
+    """Install bundled portable skills once without replacing user edits."""
+    if not BUILTIN_SKILLS_DIR.is_dir():
+        return
+    root = skills_dir()
+    root.mkdir(parents=True, exist_ok=True)
+    for source in BUILTIN_SKILLS_DIR.iterdir():
+        if source.is_dir() and (source / "SKILL.md").is_file():
+            destination = root / source.name
+            if not destination.exists():
+                shutil.copytree(source, destination)
 
 
 def _parse_manifest(text: str, fallback_name: str) -> tuple[str, str]:
@@ -70,6 +84,7 @@ def describe_skill(skill_path: Path, include_content: bool = False) -> dict[str,
 
 
 def list_skills() -> list[dict[str, Any]]:
+    seed_builtin_skills()
     root = skills_dir()
     root.mkdir(parents=True, exist_ok=True)
     skills = [
@@ -83,6 +98,7 @@ def list_skills() -> list[dict[str, Any]]:
 def get_skill(name: str) -> dict[str, Any]:
     if not SKILL_NAME_RE.fullmatch(name):
         raise ValueError("Invalid skill name")
+    seed_builtin_skills()
     path = skills_dir() / name
     if not (path / "SKILL.md").is_file():
         raise FileNotFoundError(name)

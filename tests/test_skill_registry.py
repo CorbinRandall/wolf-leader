@@ -13,6 +13,7 @@ from ide_storage.skill_registry import (
     list_skills,
     publish_prompt,
     skill_archive,
+    seed_builtin_skills,
 )
 
 
@@ -45,7 +46,7 @@ Follow the demo workflow.
     )
     assert result["name"] == "demo-skill"
     assert result["file_count"] == 2
-    assert list_skills()[0]["description"] == "Demonstrate a portable workflow."
+    assert get_skill("demo-skill")["description"] == "Demonstrate a portable workflow."
     assert get_skill("demo-skill")["content"] == manifest
 
     with zipfile.ZipFile(io.BytesIO(skill_archive("demo-skill"))) as archive:
@@ -86,3 +87,10 @@ def test_install_prompt_documents_network_fallback():
     prompt = install_prompt("http://wolf-leader.local:6971")
     assert "If http://wolf-leader.local:6971 is unreachable" in prompt
     assert "configured for this device" in prompt
+
+
+def test_builtin_wolf_skills_are_seeded(skills_root):
+    seed_builtin_skills()
+    names = {skill["id"] for skill in list_skills()}
+    assert {"wolfhowl", "wolfeat"} <= names
+    assert (skills_root / "wolfhowl" / "scripts" / "wolfhowl.sh").is_file()

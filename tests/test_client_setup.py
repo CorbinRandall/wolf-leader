@@ -49,6 +49,8 @@ def test_agent_prompt_explains_codex_save_setup():
 def test_client_bundle_contains_codex_save_skill():
     with tarfile.open(fileobj=io.BytesIO(build_client_bundle()), mode="r:gz") as archive:
         assert "examples/codex/skills/save/SKILL.md" in archive.getnames()
+        assert "examples/shared/skills/wolfhowl/SKILL.md" in archive.getnames()
+        assert "examples/shared/skills/wolfeat/SKILL.md" in archive.getnames()
 
 
 def test_payload_reports_server_identity(monkeypatch):
@@ -84,4 +86,5 @@ def test_client_bundle_contains_cursor_and_codex_installers():
     assert "scripts/install-cursor-client.sh" in names
     assert "scripts/install-codex-client.sh" in names
     assert "scripts/verify-codex-client.sh" in names
+    assert "scripts/install-agent-skills.sh" in names
     assert "examples/codex/hooks.json.template" in names

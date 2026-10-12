@@ -6,6 +6,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 mkdir -p data/projects
+mkdir -p data/skills
 
 copy_if_missing() {
   local src="$1"
@@ -25,6 +26,15 @@ install -m 644 examples/AGENTS.md data/AGENTS.md
 install -m 644 examples/ONBOARDING.md data/ONBOARDING.md
 echo "  ~ AGENTS.md"
 echo "  ~ ONBOARDING.md"
+
+for skill in examples/shared/skills/*; do
+  [[ -d "$skill" && -f "$skill/SKILL.md" ]] || continue
+  destination="data/skills/$(basename "$skill")"
+  if [[ ! -e "$destination" ]]; then
+    cp -R "$skill" "$destination"
+    echo "  + skills/$(basename "$skill")"
+  fi
+done
 
 if [[ ! -f data/INDEX.md ]]; then
   cat > data/INDEX.md <<'EOF'

@@ -12,8 +12,10 @@ from ide_storage.runtime_config import runtime_config
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CURSOR_EXAMPLES = REPO_ROOT / "examples" / "cursor"
 CODEX_EXAMPLES = REPO_ROOT / "examples" / "codex"
+SHARED_EXAMPLES = REPO_ROOT / "examples" / "shared"
 INSTALL_SCRIPT = REPO_ROOT / "scripts" / "install-cursor-client.sh"
 CODEX_INSTALL_SCRIPT = REPO_ROOT / "scripts" / "install-codex-client.sh"
+AGENT_SKILLS_INSTALL_SCRIPT = REPO_ROOT / "scripts" / "install-agent-skills.sh"
 INSTALL_FROM_HUB = REPO_ROOT / "scripts" / "install-client-from-hub.sh"
 VERIFY_SCRIPT = REPO_ROOT / "scripts" / "verify-cursor-client.sh"
 CODEX_VERIFY_SCRIPT = REPO_ROOT / "scripts" / "verify-codex-client.sh"
@@ -25,6 +27,7 @@ AGENTS_MD = REPO_ROOT / "examples" / "AGENTS.md"
 BUNDLE_SCRIPTS = (
     INSTALL_SCRIPT,
     CODEX_INSTALL_SCRIPT,
+    AGENT_SKILLS_INSTALL_SCRIPT,
     INSTALL_FROM_HUB,
     VERIFY_SCRIPT,
     CODEX_VERIFY_SCRIPT,
@@ -103,9 +106,16 @@ If curl pipe fails:
   mkdir -p /tmp/wl-client && tar xzf /tmp/wl-client.tar.gz -C /tmp/wl-client
   WOLF_LEADER_API={api} WOLF_LEADER_MCP={mcp} WOLF_LEADER_CLIENT=<cursor-or-codex> WORKSPACE=<WORKSPACE> /tmp/wl-client/scripts/install-client-from-hub.sh
 
-This installs /save and /new skills, hub URLs, recall hooks, and the automatic save hook. Cursor also receives its MCP entry and rule. Keep existing MCP servers and unrelated hooks.
+This installs /save, /new, /wolfhowl, and /wolfeat, plus hub URLs, recall hooks, and the automatic save hook. Cursor also receives its MCP entry and rule. Keep existing MCP servers and unrelated hooks.
 
-Reload the client. For Codex, open Settings → Hooks and trust all three Wolf Leader hooks; Codex skips untrusted hooks. Confirm /save and /new appear. Setup is incomplete until the installed verifier passes and one test checkpoint reaches the hub.
+For another skill-capable agent, set `WOLF_LEADER_CLIENT=agent` and `AGENT_SKILLS_DIR` to that agent's user-level skills directory. This installs the portable /wolfhowl and /wolfeat skills; MCP setup remains client-specific.
+
+WOLF_LEADER_API={api} \
+WOLF_LEADER_CLIENT=agent \
+AGENT_SKILLS_DIR=<AGENT_SKILLS_DIR> \
+  bash -c "$(curl -fsSL {api}/api/client-setup/install.sh)"
+
+Reload the client. For Codex, open Settings → Hooks and trust all three Wolf Leader hooks; Codex skips untrusted hooks. Confirm /save, /new, /wolfhowl, and /wolfeat appear. Setup is incomplete until the installed verifier passes and one test checkpoint reaches the hub.
 
 ## Step 5 — Verify setup
 curl -s "{api}/health"
@@ -118,7 +128,7 @@ During: remember() for durable decisions.
 In the background: the automatic save hook checkpoints meaningful transcript updates when a turn stops. It is best-effort; check the last-save status if needed.
 End: use /save or MCP save_session for a deliberate final checkpoint. Automatic saving supplements this explicit checkpoint.
 
-Report: OS, agent/IDE, friendly device name, WORKSPACE used, selected model policy, MCP connected, exact API and MCP URLs, hub health, save/new skill paths, hook paths, Codex hook trust when applicable, and the successful test checkpoint. Fix setup errors before finishing; never report setup complete with a missing skill or inactive save hook.
+Report: OS, agent/IDE, friendly device name, WORKSPACE used, selected model policy, MCP connected, exact API and MCP URLs, hub health, all four skill paths, hook paths, Codex hook trust when applicable, and the successful test checkpoint. Fix setup errors before finishing; never report setup complete with a missing skill or inactive save hook.
 """
 
 
@@ -167,6 +177,12 @@ def build_client_bundle() -> bytes:
 
     if CODEX_EXAMPLES.is_dir():
         for path in CODEX_EXAMPLES.rglob("*"):
+            if path.is_file():
+                rel = path.relative_to(REPO_ROOT)
+                paths.append((path, str(rel)))
+
+    if SHARED_EXAMPLES.is_dir():
+        for path in SHARED_EXAMPLES.rglob("*"):
             if path.is_file():
                 rel = path.relative_to(REPO_ROOT)
                 paths.append((path, str(rel)))

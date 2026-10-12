@@ -113,8 +113,9 @@ Times shown to humans are local, `HH:MM MM/DD/YYYY`, using `WOLF_TZ`.
 }
 ```
 
-Then copy `examples/cursor/rules/wolf-leader-hub.mdc` into `~/.cursor/rules/` and the skills in
-`examples/cursor/skills/` into `~/.cursor/skills/`. The installer does all of this for you.
+Then use the dashboard's **Setup** prompt. Cursor and Codex receive all four Wolf Leader skills,
+hooks, and client configuration. Other skill-capable agents can install the portable skills from
+the dashboard's **Skills** tab. The desktop installer does this for supported clients.
 
 | Port | Service |
 |---|---|

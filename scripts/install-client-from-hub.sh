@@ -55,6 +55,7 @@ clients=()
 case "$WOLF_LEADER_CLIENT" in
   cursor) clients=(cursor) ;;
   codex) clients=(codex) ;;
+  agent) clients=(agent) ;;
   all) clients=(cursor codex) ;;
   auto)
     [[ -d "${HOME}/.cursor" ]] && clients+=(cursor)
@@ -63,7 +64,7 @@ case "$WOLF_LEADER_CLIENT" in
     fi
     ;;
   *)
-    echo "ERROR: WOLF_LEADER_CLIENT must be cursor, codex, all, or auto" >&2
+    echo "ERROR: WOLF_LEADER_CLIENT must be cursor, codex, agent, all, or auto" >&2
     exit 2
     ;;
 esac
@@ -77,8 +78,10 @@ rc=0
 for client in "${clients[@]}"; do
   if [[ "$client" == cursor ]]; then
     bash "$TMP/scripts/install-cursor-client.sh" "${INSTALL_ARGS[@]}" || rc=1
-  else
+  elif [[ "$client" == codex ]]; then
     bash "$TMP/scripts/install-codex-client.sh" || rc=1
+  else
+    bash "$TMP/scripts/install-agent-skills.sh" || rc=1
   fi
 done
 

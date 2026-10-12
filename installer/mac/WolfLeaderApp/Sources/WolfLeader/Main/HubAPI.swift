@@ -450,6 +450,29 @@ extension HubClient {
         try await get("/api/kanban/columns", as: HubList<HubKanbanColumn>.self).items
     }
 
+    func createKanbanColumn(label: String, description: String) async throws -> [HubKanbanColumn] {
+        let body = try JSONSerialization.data(withJSONObject: ["label": label, "description": description])
+        let response = try await data("/api/kanban/columns", method: "POST", body: body)
+        return try JSONDecoder().decode(HubList<HubKanbanColumn>.self, from: response).items
+    }
+
+    func updateKanbanColumn(status: String, label: String, description: String) async throws -> [HubKanbanColumn] {
+        let body = try JSONSerialization.data(withJSONObject: ["label": label, "description": description])
+        let response = try await data("/api/kanban/columns/\(status)", method: "PUT", body: body)
+        return try JSONDecoder().decode(HubList<HubKanbanColumn>.self, from: response).items
+    }
+
+    func reorderKanbanColumns(_ statuses: [String]) async throws -> [HubKanbanColumn] {
+        let body = try JSONSerialization.data(withJSONObject: ["statuses": statuses])
+        let response = try await data("/api/kanban/columns-order", method: "PUT", body: body)
+        return try JSONDecoder().decode(HubList<HubKanbanColumn>.self, from: response).items
+    }
+
+    func deleteKanbanColumn(status: String, moveTo: String) async throws -> [HubKanbanColumn] {
+        let response = try await data("/api/kanban/columns/\(status)", query: ["move_to": moveTo], method: "DELETE")
+        return try JSONDecoder().decode(HubList<HubKanbanColumn>.self, from: response).items
+    }
+
     func updateProjectStatus(id: Int, status: String) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["status": status])
         _ = try await data("/api/projects/\(id)", method: "PUT", body: body)

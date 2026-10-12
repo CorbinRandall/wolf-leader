@@ -219,7 +219,8 @@ def test_howl_does_not_create_a_project_without_the_users_choice(tmp_path, monke
     monkeypatch.delenv("IDE_STORAGE_VAULT_DIR", raising=False)
 
     workspace = str(tmp_path / "brand-new-folder")
-    report = run_howl(workspace_path=workspace, content="decision: first note", session_id="s-1")
+    # No session_id: with one, the hub probes its own Cursor transcript folder first.
+    report = run_howl(workspace_path=workspace, content="decision: first note")
 
     assert report["ok"] is False
     assert report["needs_project_choice"] is True
@@ -228,7 +229,6 @@ def test_howl_does_not_create_a_project_without_the_users_choice(tmp_path, monke
     created = run_howl(
         workspace_path=workspace,
         content="decision: first note",
-        session_id="s-1",
         create_project=True,
         project_name="Brand New",
     )

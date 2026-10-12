@@ -1,0 +1,45 @@
+name: Build Windows installer
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing GitHub release tag, such as v2.1.4
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Install Inno Setup
+        shell: powershell
+        run: choco install innosetup --yes --no-progress
+
+      - name: Build installer
+        shell: powershell
+        run: |
+          $tag = "${{ inputs.tag || github.ref_name }}"
+          $version = $tag.TrimStart("v")
+          cmd /c installer\windows\build.bat $version
+          if (-not (Test-Path "dist\WolfLeaderSetup-$version.exe")) {
+            throw "Windows installer was not created"
+          }
+
+      - name: Upload installer to release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ inputs.tag || github.ref_name }}"
+          $version = $tag.TrimStart("v")
+          gh release upload $tag "dist\WolfLeaderSetup-$version.exe" --clobber

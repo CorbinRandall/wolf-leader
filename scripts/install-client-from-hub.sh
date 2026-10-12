@@ -94,5 +94,5 @@ fi
 echo ""
 echo "Client install and file verification complete. Reload the installed client."
 echo "For Codex, review and trust Wolf Leader hooks in Settings → Hooks before automatic saves can run."
-echo "Confirm /save appears, then complete one test save before considering setup finished."
+echo "Confirm /wolfhowl and /wolfeat appear, then complete one test /wolfhowl before considering setup finished."
 echo "Hub: $API/health"

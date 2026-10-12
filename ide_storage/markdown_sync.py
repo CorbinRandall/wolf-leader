@@ -188,7 +188,7 @@ def _build_save_guide() -> str:
 
 **Use at the end of any agent chat** — Claude, Cursor, Codex, etc.
 
-This guide is the **canonical checklist**. Client `/save` skills stay thin: fetch
+This guide is the **canonical checklist**. The `/wolfhowl` skill covers this for clients that have it; agents without the skill fetch
 this URL and follow it. Timeline rules, descriptors, and path details live here
 so you do not rewrite skills every time the process changes.
 

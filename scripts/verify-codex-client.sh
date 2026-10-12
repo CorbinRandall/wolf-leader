@@ -16,11 +16,10 @@ check_file() {
   fi
 }
 
-check_file "save skill" "$AGENT_SKILLS_DIR/save/SKILL.md"
-check_file "save runner" "$AGENT_SKILLS_DIR/save/scripts/save-session.sh"
-check_file "new skill" "$AGENT_SKILLS_DIR/new/SKILL.md"
 check_file "wolfhowl skill" "$AGENT_SKILLS_DIR/wolfhowl/SKILL.md"
 check_file "wolfhowl runner" "$AGENT_SKILLS_DIR/wolfhowl/scripts/wolfhowl.sh"
+check_file "wolfhowl transcript helper" "$AGENT_SKILLS_DIR/wolfhowl/scripts/session.py"
+check_file "wolfhowl curl fallback" "$AGENT_SKILLS_DIR/wolfhowl/scripts/wolfhowl-curl.sh"
 check_file "wolfeat skill" "$AGENT_SKILLS_DIR/wolfeat/SKILL.md"
 check_file "wolfeat runner" "$AGENT_SKILLS_DIR/wolfeat/scripts/wolfeat.sh"
 check_file "Codex hooks config" "$CODEX_DIR/hooks.json"

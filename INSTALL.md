@@ -162,13 +162,14 @@ This installs into `~/.cursor/`:
 
 | Piece | Path |
 |-------|------|
-| `/save` skill | `skills/save/SKILL.md` |
+| `/wolfhowl` skill (save) | `skills/wolfhowl/SKILL.md` |
+| `/wolfeat` skill (recall) | `skills/wolfeat/SKILL.md` |
 | MCP | `mcp.json` (`wolf-leader` + legacy `ide-storage` key) |
 | Hooks (opt-in, `WOLF_LEADER_HOOKS=1`) | `hooks.json`, `hooks/wolf-leader-*.sh` |
 | Rule | `rules/wolf-leader-hub.mdc` |
 | Hub URLs | `wolf-leader.env` |
 
-Reload the Cursor window so `/save` appears in the `/` menu.
+Reload the Cursor window so `/wolfhowl` and `/wolfeat` appear in the `/` menu.
 
 **Manual / partial setup:**
 
@@ -211,7 +212,7 @@ Your `data/` and `.env` are untouched.
 |-------|-----|
 | MCP won't connect | Check firewall on 6972; verify `IDE_STORAGE_MCP_URL` matches what clients use |
 | Empty Web UI | Run `scripts/init-data.sh`; check `data/ide-work.db` permissions |
-| Agent brief 404 | Create project in UI or register via API; run `/save` once |
+| Agent brief 404 | Create project in UI or register via API; run `/wolfhowl` once |
 | Port in use | Change `PORT` / `MCP_PORT` in `.env` |
 
 Health check: `curl -s http://127.0.0.1:6971/health`
@@ -230,4 +231,4 @@ Clients (Cursor, Claude, scripts, …)
 └─────────────────────────────┘
 ```
 
-Distillation pipeline (`/save`): extract memories → `SPEC.yaml` → `AGENT_BRIEF.md` → archive session.
+Distillation pipeline (`/wolfhowl`): extract memories → `SPEC.yaml` → `AGENT_BRIEF.md` → archive session.

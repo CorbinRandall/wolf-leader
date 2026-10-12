@@ -321,6 +321,8 @@ def _collect_parts(
 
 
 def _parts_to_paragraph(parts: list[str], max_len: int) -> str:
+    if not parts:
+        return ""
     if len(parts) == 1:
         summary = parts[0]
     else:

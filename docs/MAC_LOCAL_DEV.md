@@ -96,7 +96,7 @@ Verify:
 ./scripts/verify-cursor-client.sh
 ```
 
-**Reload Cursor window** — `/save` and `/new` should appear.
+**Reload Cursor window** — `/wolfhowl` and `/wolfeat` should appear.
 
 ---
 
@@ -178,4 +178,4 @@ You are setting up Wolf Leader local dev on macOS.
 4. Use MCP `wolf-leader` at `http://127.0.0.1:6972/mcp` for project work in this repo.
 5. Do **not** deploy to production unless I ask.
 
-Report: Docker status, health URL, verify output, and whether `/save` `/new` appear after reload.
+Report: Docker status, health URL, verify output, and whether `/wolfhowl` `/wolfeat` appear after reload.

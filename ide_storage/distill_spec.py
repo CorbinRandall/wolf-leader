@@ -375,7 +375,7 @@ def _brief_from_spec(spec_yaml: str, project: dict, slug: str) -> str:
         "",
         "1. Load SPEC.yaml fields first; archived chats are optional drill-down.",
         "2. Follow `continue_mode` — do not redeploy if mode is compose_maintain.",
-        "3. Call `remember()` for new decisions; `/save` at session end.",
+        "3. Call `remember()` for new decisions; `/wolfhowl` at session end.",
         "",
     ]
     return "\n".join(lines)

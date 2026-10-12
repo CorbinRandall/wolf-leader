@@ -189,9 +189,9 @@ wl_preflight() {
   fi
 
   if wl_has_cmd python3; then
-    echo "  Python runtime    OK (/save and /new full path with transcript upload)"
+    echo "  Python runtime    OK (/wolfhowl full path with transcript upload)"
   else
-    echo "  Python runtime    WARN (not found — /save and /new use curl fallback; no local transcript upload)"
+    echo "  Python runtime    WARN (not found — /wolfhowl uses a limited curl fallback; no local transcript upload)"
   fi
 
   if [[ -f "$env_file" ]]; then

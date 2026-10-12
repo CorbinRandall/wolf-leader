@@ -122,7 +122,7 @@ This file links this compose stack to the centralized {PRODUCT_NAME} hub ({PRODU
 2. Fallback (same host shell): `curl -s {cfg['local_base_url']}/api/projects/{slug}/agent-brief`
 
 **Session end:**
-- Type `/save` or MCP `save_session` — checkpoint project (memories + brief); session archived
+- Type `/wolfhowl` or MCP `save_session` — checkpoint project (memories + brief); session archived
 
 **Setup (new devices):** {cfg['onboarding_web_url']}
 **Hub docs:** `{onboarding_path}`

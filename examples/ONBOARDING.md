@@ -38,19 +38,19 @@ In the desktop app or server dashboard, open **Setup**, click **Copy setup promp
 1. Use the absolute project folder that is open in the IDE.
 2. Ask for a friendly device name and model policy: economy, balanced, or maximum quality.
 3. Add the `wolf-leader` MCP server without replacing unrelated MCP servers.
-4. Install `/save`, `/new`, `/wolfhowl`, and `/wolfeat` for Cursor or Codex.
+4. Install `/wolfhowl` and `/wolfeat` for Cursor or Codex. They replace the old `/save` and `/new`, which the installer removes.
 5. Install the portable Wolf Howl and Wolf Eat skills into any other skill-capable agent.
 6. Add the workspace `AGENTS.md`, recall hooks, and automatic save hooks.
 7. Reload the client and verify one test checkpoint reaches the hub.
 
 Codex users must open **Settings → Hooks** and trust all three Wolf Leader hooks. Automatic saves do not run until they are trusted.
 
-## What the four skills do
+## What the two skills do
 
-- `/save`: checkpoint the current chat into its existing Wolf Leader project.
-- `/new`: connect a workspace to a new Wolf Leader project.
-- `/wolfhowl`: broadcast a rich checkpoint with git and file context.
-- `/wolfeat`: pull the newest project context onto another machine.
+- `/wolfhowl`: save. It reads the chat from disk, matches it to an existing project, and uploads it with git and file context. If nothing matches, it asks whether this is an existing project or a new one before creating anything.
+- `/wolfeat`: recall. It pulls the newest project context onto this machine, or walks through connecting a workspace that is not set up yet.
+
+Older guides mention `/save` and `/new`. `/wolfhowl` now does everything both did.
 
 Portable skills are also available in the dashboard’s **Skills** tab. Download all of them as a ZIP, or use **Copy install prompt** for an agent-specific install.
 
@@ -61,7 +61,7 @@ Portable skills are also available in the dashboard’s **Skills** tab. Download
 - MCP: call `resolve_project`, then `recall`
 - Confirm all expected slash skills are visible after reloading the agent.
 - Confirm the client verifier passes.
-- Make one test `/save` and confirm it appears in the project.
+- Make one test `/wolfhowl` and confirm it appears in the project.
 
 Setup is incomplete if a skill is missing, MCP points to the wrong host, a Codex hook is untrusted, or the test save does not reach the hub.
 
@@ -70,8 +70,8 @@ Setup is incomplete if a skill is missing, MCP points to the wrong host, a Codex
 1. Start with `resolve_project` and `recall` or `get_brief`.
 2. Use `remember` for durable decisions and constraints.
 3. Let automatic saves checkpoint meaningful turns.
-4. Use `/save` for a deliberate checkpoint.
-5. Use `/wolfhowl` when another machine or collaborator needs the complete state.
+4. Use `/wolfhowl` for a deliberate checkpoint.
+5. Use `/wolfeat` to pick the work up later or on another machine.
 
 ## Advanced: run the hub yourself
 

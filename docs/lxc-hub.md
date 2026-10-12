@@ -80,8 +80,7 @@ on any NAS. The database lives on a local disk and its backups go on the drive.
 
 ## Skills
 
-* `/save` — light checkpoint.
-* `/wolfhowl` — save + this machine's path alias + git state + embed + file catalog + Obsidian notes;
+* `/wolfhowl` — the save command (replaces `/save` and `/new`): save + this machine's path alias + git state + embed + file catalog + Obsidian notes;
   mirrors the repo's files to `W:\wolf-leader\projects\<slug>\`; then *offers* commit/push, ingest
   cited file bodies, start a job. Guide: `/api/howl-guide`.
 * `/wolfeat` — pull brief, memories, howls (with git SHAs), related notes, open jobs; then *offers*

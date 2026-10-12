@@ -32,7 +32,7 @@ docker=no
 obsidian=no
 cursor=yes
 claude_code=no
-; existing Wolf Leader client files in ~/.cursor (skills/save or rules/wolf-leader-hub.mdc): yes | no
+; existing Wolf Leader client files in ~/.cursor (skills/wolfhowl or rules/wolf-leader-hub.mdc): yes | no
 wolf_client=no
 
 [backup]

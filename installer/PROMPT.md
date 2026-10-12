@@ -49,7 +49,7 @@ docker=<yes|no>
 obsidian=<yes|no>
 cursor=<yes|no>
 claude_code=<yes|no>
-wolf_client=<yes if ~/.cursor/skills/save or ~/.cursor/rules/wolf-leader-hub.mdc exists, else no>
+wolf_client=<yes if ~/.cursor/skills/wolfhowl, ~/.cursor/skills/save, or ~/.cursor/rules/wolf-leader-hub.mdc exists, else no>
 
 [backup]
 done=<yes|no>

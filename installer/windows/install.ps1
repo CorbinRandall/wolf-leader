@@ -198,6 +198,18 @@ function Write-TextFile([string]$Path, [string]$Text) {
     [IO.File]::WriteAllText($Path, $Text, (New-Object Text.UTF8Encoding($false)))
 }
 
+# /save and /new were folded into /wolfhowl and /wolfeat. Only remove ours.
+function Remove-LegacySkills([string]$SkillsDir) {
+    foreach ($name in @('save', 'new', 'save-new')) {
+        $dir = Join-Path $SkillsDir $name
+        $doc = Join-Path $dir 'SKILL.md'
+        if ((Test-Path -LiteralPath $doc) -and ((Get-Content -Raw -LiteralPath $doc) -match '(?i)wolf leader')) {
+            if ($DryRun) { Plan "remove old skill $dir" }
+            else { Remove-Item -LiteralPath $dir -Recurse -Force }
+        }
+    }
+}
+
 function Copy-Tree([string]$From, [string]$To) {
     if (-not (Test-Path -LiteralPath $From)) { Fail "missing $From (installer bundle incomplete)"; return }
     $count = 0
@@ -317,8 +329,8 @@ function Set-EnvKey([System.Collections.Generic.List[string]]$Lines, [string]$Ke
 function Get-PlannedTargets($Answer) {
     $t = New-Object 'System.Collections.Generic.List[string]'
     $cursor = Join-Path $env:USERPROFILE '.cursor'
-    $skillSrc = Join-Path $Root 'examples\cursor\skills'
-    $skillNames = @('save', 'new', 'wolfhowl', 'wolfeat')
+    $skillSrc = Join-Path $Root 'examples\shared\skills'
+    $skillNames = @('wolfhowl', 'wolfeat')
     if (Test-Path -LiteralPath $skillSrc) { $skillNames = @(Get-ChildItem -LiteralPath $skillSrc -Directory | ForEach-Object { $_.Name }) }
     $skillHomes = @(Join-Path $cursor 'skills')
     if (Test-Yes $Answer 'claude_code') { $skillHomes += (Join-Path $env:USERPROFILE '.claude\skills') }
@@ -550,13 +562,14 @@ function Invoke-Client($Answer) {
     $cursor = Join-Path $env:USERPROFILE '.cursor'
     $ex = Join-Path $Root 'examples'
 
-    Copy-Tree (Join-Path $ex 'cursor\skills') (Join-Path $cursor 'skills')
+    Remove-LegacySkills (Join-Path $cursor 'skills')
+    Copy-Tree (Join-Path $ex 'shared\skills') (Join-Path $cursor 'skills')
     Copy-Tree (Join-Path $ex 'cursor\rules') (Join-Path $cursor 'rules')
     $agents = Join-Path $ex 'AGENTS.md'
     if ($DryRun) { Plan "copy AGENTS.md -> $cursor\AGENTS.md" }
     else { Copy-Item -LiteralPath $agents -Destination (Join-Path $cursor 'AGENTS.md') -Force }
     Ok "AGENTS.md -> $cursor"
-    # skills/new/scripts/new-project-session-curl.sh sources ~/.cursor/lib/wolf-leader-client.sh
+    # Client helper scripts source ~/.cursor/lib/wolf-leader-client.sh
     $lib = Join-Path $Root 'scripts\lib\wolf-leader-client.sh'
     if (Test-Path -LiteralPath $lib) {
         if ($DryRun) { Plan "copy lib\wolf-leader-client.sh -> $cursor\lib" }
@@ -576,7 +589,8 @@ function Invoke-Client($Answer) {
     }
 
     if (Test-Yes $Answer 'claude_code') {
-        Copy-Tree (Join-Path $ex 'cursor\skills') (Join-Path $env:USERPROFILE '.claude\skills')
+        Remove-LegacySkills (Join-Path $env:USERPROFILE '.claude\skills')
+        Copy-Tree (Join-Path $ex 'shared\skills') (Join-Path $env:USERPROFILE '.claude\skills')
     } else {
         Skip 'Claude Code skills (claude_code=no)'
     }

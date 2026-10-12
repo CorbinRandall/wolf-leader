@@ -9,6 +9,7 @@ source "${ROOT}/scripts/lib/wolf-leader-client.sh"
 
 CURSOR_DIR="${CURSOR_DIR:-$HOME/.cursor}"
 CURSOR_EXAMPLES="${ROOT}/examples/cursor"
+SHARED_SKILLS="${ROOT}/examples/shared/skills"
 WORKSPACE="${WORKSPACE:-$HOME}"
 DRY_RUN=0
 JSON_OUT=0
@@ -31,7 +32,7 @@ Options:
   -h, --help      This help
 
 Installs under \$CURSOR_DIR:
-  skills/save, skills/new, mcp.json, hooks, rules, wolf-leader.env, AGENTS.md in WORKSPACE
+  skills/wolfhowl, skills/wolfeat, mcp.json, hooks, rules, wolf-leader.env, AGENTS.md in WORKSPACE
 EOF
 }
 
@@ -85,48 +86,43 @@ install_file() {
   wl_step_ok "$(basename "$3")"
 }
 
+remove_legacy_skill() {
+  # /save and /new were folded into /wolfhowl and /wolfeat. Only remove ours.
+  local dir=$1
+  if [[ -f "$dir/SKILL.md" ]] && grep -qi 'wolf leader' "$dir/SKILL.md"; then
+    rm -rf "$dir"
+  fi
+  return 0
+}
+
 if [[ "$DRY_RUN" == 0 ]]; then
   mkdir -p \
-    "$CURSOR_DIR/skills/save/scripts" \
-    "$CURSOR_DIR/skills/new/scripts" \
     "$CURSOR_DIR/skills/wolfhowl/scripts" \
     "$CURSOR_DIR/skills/wolfeat/scripts" \
     "$CURSOR_DIR/hooks" \
     "$CURSOR_DIR/rules"
-  rm -rf "$CURSOR_DIR/skills/save-new"
+  for legacy in save new save-new; do
+    remove_legacy_skill "$CURSOR_DIR/skills/$legacy"
+  done
 fi
 
-run_step "skills/save" install_file 644 \
-  "$CURSOR_EXAMPLES/skills/save/SKILL.md" "$CURSOR_DIR/skills/save/SKILL.md"
-run_step "save-session.sh" install_file 755 \
-  "$CURSOR_EXAMPLES/skills/save/scripts/save-session.sh" "$CURSOR_DIR/skills/save/scripts/save-session.sh"
-run_step "save-session.py" install_file 755 \
-  "$CURSOR_EXAMPLES/skills/save/scripts/save-session.py" "$CURSOR_DIR/skills/save/scripts/save-session.py"
-run_step "save-session-curl.sh" install_file 755 \
-  "$CURSOR_EXAMPLES/skills/save/scripts/save-session-curl.sh" "$CURSOR_DIR/skills/save/scripts/save-session-curl.sh"
-
-run_step "skills/new" install_file 644 \
-  "$CURSOR_EXAMPLES/skills/new/SKILL.md" "$CURSOR_DIR/skills/new/SKILL.md"
-run_step "new-project-session.sh" install_file 755 \
-  "$CURSOR_EXAMPLES/skills/new/scripts/new-project-session.sh" "$CURSOR_DIR/skills/new/scripts/new-project-session.sh"
-run_step "new-project-session.py" install_file 755 \
-  "$CURSOR_EXAMPLES/skills/new/scripts/new-project-session.py" "$CURSOR_DIR/skills/new/scripts/new-project-session.py"
-run_step "new-project-session-curl.sh" install_file 755 \
-  "$CURSOR_EXAMPLES/skills/new/scripts/new-project-session-curl.sh" "$CURSOR_DIR/skills/new/scripts/new-project-session-curl.sh"
-
 run_step "skills/wolfhowl" install_file 644 \
-  "$CURSOR_EXAMPLES/skills/wolfhowl/SKILL.md" "$CURSOR_DIR/skills/wolfhowl/SKILL.md"
+  "$SHARED_SKILLS/wolfhowl/SKILL.md" "$CURSOR_DIR/skills/wolfhowl/SKILL.md"
 run_step "wolfhowl.sh" install_file 755 \
-  "$CURSOR_EXAMPLES/skills/wolfhowl/scripts/wolfhowl.sh" "$CURSOR_DIR/skills/wolfhowl/scripts/wolfhowl.sh"
+  "$SHARED_SKILLS/wolfhowl/scripts/wolfhowl.sh" "$CURSOR_DIR/skills/wolfhowl/scripts/wolfhowl.sh"
 run_step "wolfhowl.py" install_file 755 \
-  "$CURSOR_EXAMPLES/skills/wolfhowl/scripts/wolfhowl.py" "$CURSOR_DIR/skills/wolfhowl/scripts/wolfhowl.py"
+  "$SHARED_SKILLS/wolfhowl/scripts/wolfhowl.py" "$CURSOR_DIR/skills/wolfhowl/scripts/wolfhowl.py"
+run_step "session.py" install_file 755 \
+  "$SHARED_SKILLS/wolfhowl/scripts/session.py" "$CURSOR_DIR/skills/wolfhowl/scripts/session.py"
+run_step "wolfhowl-curl.sh" install_file 755 \
+  "$SHARED_SKILLS/wolfhowl/scripts/wolfhowl-curl.sh" "$CURSOR_DIR/skills/wolfhowl/scripts/wolfhowl-curl.sh"
 run_step "sync_share.py" install_file 755 \
-  "$CURSOR_EXAMPLES/skills/wolfhowl/scripts/sync_share.py" "$CURSOR_DIR/skills/wolfhowl/scripts/sync_share.py"
+  "$SHARED_SKILLS/wolfhowl/scripts/sync_share.py" "$CURSOR_DIR/skills/wolfhowl/scripts/sync_share.py"
 
 run_step "skills/wolfeat" install_file 644 \
-  "$CURSOR_EXAMPLES/skills/wolfeat/SKILL.md" "$CURSOR_DIR/skills/wolfeat/SKILL.md"
+  "$SHARED_SKILLS/wolfeat/SKILL.md" "$CURSOR_DIR/skills/wolfeat/SKILL.md"
 run_step "wolfeat.sh" install_file 755 \
-  "$CURSOR_EXAMPLES/skills/wolfeat/scripts/wolfeat.sh" "$CURSOR_DIR/skills/wolfeat/scripts/wolfeat.sh"
+  "$SHARED_SKILLS/wolfeat/scripts/wolfeat.sh" "$CURSOR_DIR/skills/wolfeat/scripts/wolfeat.sh"
 
 # Automatic recall and checkpoint hooks are part of the standard client setup.
 # Set WOLF_LEADER_HOOKS=0 only when the owner explicitly opts out.

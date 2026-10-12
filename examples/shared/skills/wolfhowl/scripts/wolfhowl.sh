@@ -10,5 +10,4 @@ fi
 if python -c "" >/dev/null 2>&1; then
   exec python "${SCRIPT_DIR}/wolfhowl.py" "$@"
 fi
-echo "wolfhowl needs python3 on this machine" >&2
-exit 1
+exec bash "${SCRIPT_DIR}/wolfhowl-curl.sh" "$@"

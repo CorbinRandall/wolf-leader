@@ -267,13 +267,14 @@ RESTORE
 snapshot_targets() {
   local d f
   for f in .cursor/mcp.json .cursor/AGENTS.md .cursor/wolf-leader.env .cursor/skills/save-new \
-    .claude/skills/save-new .gitconfig; do
+    .cursor/skills/save .cursor/skills/new .claude/skills/save-new .claude/skills/save \
+    .claude/skills/new .gitconfig; do
     printf '%s\n' "$HOME/$f"
   done
   for f in "$ROOT"/examples/cursor/rules/*.mdc; do
     [ -f "$f" ] && printf '%s\n' "$HOME/.cursor/rules/$(basename "$f")"
   done
-  for d in "$ROOT"/examples/cursor/skills/*; do
+  for d in "$ROOT"/examples/shared/skills/*; do
     [ -d "$d" ] || continue
     printf '%s\n' "$HOME/.cursor/skills/$(basename "$d")" "$HOME/.claude/skills/$(basename "$d")"
   done
@@ -614,7 +615,12 @@ install_skills() {
     run find "$dest/$name" -name __pycache__ -type d -prune -exec rm -rf {} +
     run find "$dest/$name" -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod +x {} +
   done
-  run rm -rf "$dest/save-new"
+  # /save and /new were folded into /wolfhowl and /wolfeat. Only remove ours.
+  for name in save new save-new; do
+    if [ -f "$dest/$name/SKILL.md" ] && grep -qi 'wolf leader' "$dest/$name/SKILL.md"; then
+      run rm -rf "$dest/$name"
+    fi
+  done
 }
 
 step "Cursor / Claude Code client"
@@ -622,11 +628,12 @@ if ! has_toggle client; then
   skip "not selected"
 else
   EX="$ROOT/examples/cursor"
-  if [ ! -d "$EX/skills" ] || [ ! -d "$EX/rules" ]; then
+  SKILLS_SRC="$ROOT/examples/shared/skills"
+  if [ ! -d "$SKILLS_SRC" ] || [ ! -d "$EX/rules" ]; then
     fatal "client files are missing from this installer ($EX)"
   else
     CURSOR_DIR="$HOME/.cursor"
-    install_skills "$EX/skills" "$CURSOR_DIR/skills"
+    install_skills "$SKILLS_SRC" "$CURSOR_DIR/skills"
     run mkdir -p "$CURSOR_DIR/rules"
     for f in "$EX"/rules/*.mdc; do
       run cp "$f" "$CURSOR_DIR/rules/"
@@ -635,7 +642,7 @@ else
       run cp "$ROOT/examples/AGENTS.md" "$CURSOR_DIR/AGENTS.md"
     fi
     if [ "$(wl_cfg detected claude_code)" = yes ]; then
-      install_skills "$EX/skills" "$HOME/.claude/skills"
+      install_skills "$SKILLS_SRC" "$HOME/.claude/skills"
     else
       skip "Claude Code skills (answer file says claude_code=no)"
     fi

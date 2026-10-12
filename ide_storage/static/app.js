@@ -869,7 +869,7 @@ async function selectProject(id) {
   $("#project-chats-list").innerHTML = chatList.length
     ? chatList.map((c) => `
       <button type="button" class="link-item" data-goto-chat="${c.id}">${escapeHtml(chatTitle(c))} — ${formatDate(c.updated_at)}</button>`).join("")
-    : `<p class="muted">No archived sessions yet. Use /save to checkpoint project knowledge.</p>`;
+    : `<p class="muted">No archived sessions yet. Use /wolfhowl to checkpoint project knowledge.</p>`;
 
   $$("[data-goto-chat]").forEach((b) => b.addEventListener("click", () => {
     switchTab("archive");
@@ -1172,7 +1172,7 @@ async function loadLeftOff(projectId, cached) {
     bindLogEntryClicks("#left-off-latest");
   } else {
     latestEl.classList.add("muted");
-    latestEl.textContent = "Nothing saved yet — /save after a chat to fill this in.";
+    latestEl.textContent = "Nothing saved yet — /wolfhowl after a chat to fill this in.";
   }
 
   const rest = entries.length > 1 ? entries.slice(1) : [];

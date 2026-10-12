@@ -1,6 +1,6 @@
 """/wolfhowl (broadcast) and /wolfeat (pull) — the hub side.
 
-``run_howl`` = everything ``/save`` does, then: register this machine's path
+``run_howl`` = the full save pipeline (transcript -> memories -> brief -> archive), then: register this machine's path
 alias, record a ``howls`` row with git state, embed it, refresh the filesystem
 catalog for the project roots on the share, optionally ingest cited file bodies,
 write the Obsidian notes, and hand back a one-paragraph report plus a list of
@@ -53,6 +53,8 @@ def run_howl(
     ingest_cited: bool = False,
     refresh_catalog: bool = True,
     client_os: str | None = None,
+    create_project: bool = False,
+    project_name: str | None = None,
 ) -> dict[str, Any]:
     from ide_storage.save_project import format_save_summary, save_project
 
@@ -60,22 +62,27 @@ def run_howl(
     offers: list[dict[str, Any]] = []
     report: dict[str, Any] = {"ok": False, "kind": "howl", "actions": actions, "offers": offers}
 
-    # 0) Resolve or create the project from the folder we are howling from, so the
-    #    save below always has a home (alias table first, then create-if-new).
+    # 0) Resolve the project from the folder. Creating a project requires an
+    # explicit user choice; an ambiguous howl must not silently create one.
     if not slug and workspace_path:
         from ide_storage.hub import resolve_project
 
         existing = resolve_project(path=workspace_path)
         if existing:
             slug = existing.get("slug")
-        else:
-            created = _create_project_for_path(workspace_path, device_name)
+        elif create_project:
+            created = _create_project_for_path(workspace_path, device_name, project_name=project_name)
             if created:
                 slug = created["slug"]
                 report["created_project"] = {k: created[k] for k in ("id", "slug", "name")}
                 actions.append(f"created project {created['slug']} for {workspace_path}")
+        else:
+            report["needs_project_choice"] = True
+            report["error"] = "No existing project matches this workspace. Ask whether to use an existing project or create a new one."
+            report["projects"] = _project_list()
+            return report
 
-    # 1) The /save plate: transcript or messages -> chat -> memories -> brief.
+    # 1) The save plate: transcript or messages -> chat -> memories -> brief.
     save = save_project(
         session_id,
         project_slug=slug,
@@ -294,12 +301,17 @@ def ensure_share_remote(slug: str) -> dict[str, Any]:
     return out
 
 
-def _create_project_for_path(workspace_path: str, device_name: str | None) -> dict[str, Any] | None:
+def _create_project_for_path(
+    workspace_path: str,
+    device_name: str | None,
+    *,
+    project_name: str | None = None,
+) -> dict[str, Any] | None:
     """New folder, new project: name from the folder, unique slug, path alias registered."""
     import re
 
     base = re.split(r"[\\/]+", workspace_path.strip().rstrip("\\/"))[-1] or "project"
-    name = base.replace("_", " ").replace("-", " ").strip().title() or "Project"
+    name = project_name or base.replace("_", " ").replace("-", " ").strip().title() or "Project"
     slug_base = re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-")[:60] or "project"
     now = _now()
     hub_path = to_hub_path(workspace_path) or workspace_path
@@ -550,26 +562,27 @@ def howl_guide() -> str:
 
 You are the agent. This is a suggested plate, not a script. Skip a step if it clearly does not apply, say so in one line.
 
-## Default plate (no questions)
-1. Work out the project: use the workspace folder path you are in. Any spelling is fine — `{a['windows']}…`, `{a['hub']}…`, `{a['nas']}…`, UNC — the hub maps them. If the folder is new to the hub, the howl creates the project and registers this path.
+## Default plate
+1. Work out the project from the workspace path or `resolve_project`. Any spelling is fine — `{a['windows']}…`, `{a['hub']}…`, `{a['nas']}…`, UNC — the hub maps them. If no project matches confidently, stop and ask whether this belongs to an existing project or should become a new one. Create only after the user chooses new.
 2. Collect git state locally (cheap, and you can see the repo even if the hub cannot): `git rev-parse HEAD`, `git rev-parse --abbrev-ref HEAD`, `git remote get-url origin`, `git status --porcelain | wc -l`.
 3. POST `{base}/api/howl` with:
-   - `session_id` (Cursor) **or** `messages` (any agent), `title`, `workspace_path`, `device_name` (hostname),
+   - `slug`, `session_id`, and `messages` (the bundled Python runner reads the local transcript for you — do not retype the conversation), `title`, `workspace_path`, `device_name` (hostname),
+   - for a project the user confirmed is new: create it first (`POST {base}/api/projects` with `name`, `slug`, `path`, `description`, `metadata.semantic_descriptor`) or send `create_project: true` with `project_name`,
    - `git: {{commit, branch, remote, dirty_files, is_repo}}`,
    - optionally `cited_paths` (files this chat attached/changed) and `ingest_cited: true` **only if the user already said yes**.
-4. The hub saves the conversation (same as /save), extracts memories, embeds everything into pgvector, records the howl, refreshes the file catalog for the project's folder on the share, and writes the Obsidian notes to `{a['windows']}wolf-leader\\vault`.
+4. The hub saves the conversation, extracts memories, embeds everything into pgvector, records the howl, refreshes the file catalog for the project's folder on the share, and writes the Obsidian notes to `{a['windows']}wolf-leader\\vault`.
 5. If the repo has no `origin`, the hub creates a bare repo at `{a['windows']}wolf-leader\\git\\<slug>.git` (= `{a['hub']}/wolf-leader/git/<slug>.git`) and returns it as `git_remote`. The bundled runner sets `origin` to it for you (config only; nothing is pushed). Never point a project at GitHub or any other host unless the user asks.
 6. Reply with the hub's `summary` paragraph, verbatim, then the offers.
 
 ## Offers (ask, never assume)
 The response has `offers[]`. Present the relevant ones as a short question:
-- `git_commit` / `git_init` / `git_push` — commit and push the project repo to its `origin` (the share) so the howl points at a real SHA. If yes, run the git commands yourself, then PUT `{base}/api/howls/<id>/git` with the new commit/branch.
+- `git_commit` / `git_init` / `git_push` — commit and push the project repo to its `origin` (the share) so the howl points at a real SHA. If yes, run the bundled runner with `--git-only --howl-id <id>` plus `--git-init`, `--commit "<what changed>"`, and/or `--push`; it pins the new SHA to the howl. Without the runner: run the git commands yourself, then PUT `{base}/api/howls/<id>/git` with the new commit/branch.
 - `ingest_files` — chunk + embed the bodies of cited/changed files so /wolfeat and search can quote them. If yes: POST `{base}/api/ingest-files` with `{{project_id, paths, howl_id}}`.
 - `move_to_share` — the folder is not on `{a['windows']}`; suggest cloning there.
 - `start_job` — connectors: watch a deploy, pull a model. POST `{base}/api/jobs`.
 
 ## Never
-Do not delete, force-push, reset, or touch anything outside the project folder and `{a['windows']}wolf-leader\\`. /save is unchanged; use it when you want a light checkpoint without git/catalog/vault.
+Do not delete, force-push, reset, or touch anything outside the project folder and `{a['windows']}wolf-leader\\`. Never create a project without the user choosing new. /wolfhowl is the only deliberate save command; it replaces the old /save and /new.
 """
 
 

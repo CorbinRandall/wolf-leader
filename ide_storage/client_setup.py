@@ -106,16 +106,16 @@ If curl pipe fails:
   mkdir -p /tmp/wl-client && tar xzf /tmp/wl-client.tar.gz -C /tmp/wl-client
   WOLF_LEADER_API={api} WOLF_LEADER_MCP={mcp} WOLF_LEADER_CLIENT=<cursor-or-codex> WORKSPACE=<WORKSPACE> /tmp/wl-client/scripts/install-client-from-hub.sh
 
-This installs /save, /new, /wolfhowl, and /wolfeat, plus hub URLs, recall hooks, and the automatic save hook. Cursor also receives its MCP entry and rule. Keep existing MCP servers and unrelated hooks.
+This installs /wolfhowl (save) and /wolfeat (recall), removes the old /save and /new skills they replace, plus hub URLs, recall hooks, and the automatic save hook. Cursor also receives its MCP entry and rule. Keep existing MCP servers and unrelated hooks.
 
 For another skill-capable agent, set `WOLF_LEADER_CLIENT=agent` and `AGENT_SKILLS_DIR` to that agent's user-level skills directory. This installs the portable /wolfhowl and /wolfeat skills; MCP setup remains client-specific.
 
-WOLF_LEADER_API={api} \
-WOLF_LEADER_CLIENT=agent \
-AGENT_SKILLS_DIR=<AGENT_SKILLS_DIR> \
+WOLF_LEADER_API={api} \\
+WOLF_LEADER_CLIENT=agent \\
+AGENT_SKILLS_DIR=<AGENT_SKILLS_DIR> \\
   bash -c "$(curl -fsSL {api}/api/client-setup/install.sh)"
 
-Reload the client. For Codex, open Settings → Hooks and trust all three Wolf Leader hooks; Codex skips untrusted hooks. Confirm /save, /new, /wolfhowl, and /wolfeat appear. Setup is incomplete until the installed verifier passes and one test checkpoint reaches the hub.
+Reload the client. For Codex, open Settings → Hooks and trust all three Wolf Leader hooks; Codex skips untrusted hooks. Confirm /wolfhowl and /wolfeat appear. Setup is incomplete until the installed verifier passes and one test checkpoint reaches the hub.
 
 ## Step 5 — Verify setup
 curl -s "{api}/health"
@@ -126,9 +126,9 @@ Place AGENTS.md in the workspace root (included in the hub client bundle).
 Start: let the session-start hook inject Wolf Leader context; confirm the matching project with resolve_project({{ path: "<WORKSPACE>" }}) and recall() or get_brief() before project work.
 During: remember() for durable decisions.
 In the background: the automatic save hook checkpoints meaningful transcript updates when a turn stops. It is best-effort; check the last-save status if needed.
-End: use /save or MCP save_session for a deliberate final checkpoint. Automatic saving supplements this explicit checkpoint.
+End: use /wolfhowl for a deliberate final checkpoint (it asks before creating a new project); /wolfeat picks the work back up. Automatic saving supplements this explicit checkpoint.
 
-Report: OS, agent/IDE, friendly device name, WORKSPACE used, selected model policy, MCP connected, exact API and MCP URLs, hub health, all four skill paths, hook paths, Codex hook trust when applicable, and the successful test checkpoint. Fix setup errors before finishing; never report setup complete with a missing skill or inactive save hook.
+Report: OS, agent/IDE, friendly device name, WORKSPACE used, selected model policy, MCP connected, exact API and MCP URLs, hub health, both skill paths, hook paths, Codex hook trust when applicable, and the successful test checkpoint. Fix setup errors before finishing; never report setup complete with a missing skill or inactive save hook.
 """
 
 
@@ -139,7 +139,7 @@ def client_setup_payload(*, legacy_profile: str | None = None) -> dict[str, Any]
         "label": "Any device · any agent",
         "description": (
             "Complete setup flow for macOS, Windows, Linux, local or remote. "
-            "Includes verified save skills and automatic checkpoint hooks for Cursor and Codex, plus MCP guidance for other clients."
+            "Includes the verified /wolfhowl and /wolfeat skills and automatic checkpoint hooks for Cursor and Codex, plus MCP guidance for other clients."
         ),
         "workspace": "<your project root>",
         "server": runtime_config().as_dict(),

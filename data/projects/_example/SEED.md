@@ -15,7 +15,7 @@ Template for a Docker Compose stack tracked in Wolf Leader.
 ## Agent workflow
 1. MCP `set_project({ slug: "my-slug" })` → `recall()`
 2. Read `handoff_tier` before acting
-3. `/save` at session end
+3. `/wolfhowl` at session end
 
 ## Rebuild minimum
 ```bash

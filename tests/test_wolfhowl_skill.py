@@ -219,7 +219,6 @@ def test_howl_does_not_create_a_project_without_the_users_choice(tmp_path, monke
     monkeypatch.delenv("IDE_STORAGE_VAULT_DIR", raising=False)
 
     workspace = str(tmp_path / "brand-new-folder")
-    # Messages, as the runner sends them: without any, the hub probes its own Cursor folder.
     messages = [
         {"role": "user", "content": "start a brand new thing"},
         {"role": "assistant", "content": "decision: first note"},

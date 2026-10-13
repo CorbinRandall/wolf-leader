@@ -14,7 +14,8 @@ export function baseOptions(): BaseLayoutProps {
           {appName}
         </span>
       ),
-      url: '/docs',
+      // The name in the top-left corner goes to the wiki's front page.
+      url: '/',
     },
     links: [
       { text: 'Projects', url: '/docs/projects', active: 'nested-url' },

@@ -100,7 +100,7 @@ struct MainView: View {
     private var detail: some View {
         switch section ?? .home {
         case .home:
-            HomeView(openSettings: { section = .settings }, openProjects: { section = .projects }, openWiki: { section = .wiki })
+            HomeView(openSettings: { section = .settings }, openProjects: { section = .projects })
         case .projects:
             ProjectsView()
         case .library:

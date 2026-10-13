@@ -3,64 +3,27 @@ import SwiftUI
 import WebKit
 
 /// The hub's wiki (`/wiki/`) inside the app: same pages, search and links as in a browser.
+/// No chrome of its own: the wiki's own header navigates, and two-finger swipes go back and forward.
 struct WikiView: View {
     @EnvironmentObject private var store: ConfigStore
     @Environment(\.palette) private var p
     @StateObject private var browser = WikiBrowser()
 
     var body: some View {
-        VStack(spacing: 0) {
-            toolbar
-            Divider()
-            ZStack {
-                WikiWebView(browser: browser)
-                if let failure = browser.failure {
-                    MainNotice(symbol: "book.closed", title: "Wiki unavailable", message: failure) {
-                        Button("Try again") { browser.reload() }.buttonStyle(SecondaryButtonStyle())
-                    }
-                    .padding(DS.Spacing.lg)
-                    .frame(maxWidth: 520)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(p.background)
+        ZStack {
+            WikiWebView(browser: browser)
+            if let failure = browser.failure {
+                MainNotice(symbol: "book.closed", title: "Wiki unavailable", message: failure) {
+                    Button("Try again") { browser.reload() }.buttonStyle(SecondaryButtonStyle())
                 }
+                .padding(DS.Spacing.lg)
+                .frame(maxWidth: 520)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(p.background)
             }
         }
         .background(p.background)
         .task(id: store.config.hubURL) { browser.open(home: store.config.wikiURL) }
-    }
-
-    private var toolbar: some View {
-        HStack(spacing: 6) {
-            iconButton("chevron.left", "Back", enabled: browser.canGoBack) { browser.web.goBack() }
-            iconButton("chevron.right", "Forward", enabled: browser.canGoForward) { browser.web.goForward() }
-            iconButton("arrow.clockwise", "Reload") { browser.reload() }
-            iconButton("house", "Wiki home") { browser.goHome() }
-            Text(browser.title.isEmpty ? "Wiki" : browser.title)
-                .font(DS.Font.bodySmall.weight(.semibold))
-                .foregroundStyle(p.text)
-                .lineLimit(1)
-                .padding(.leading, 6)
-            if browser.loading { ProgressView().controlSize(.small).padding(.leading, 4) }
-            Spacer(minLength: 8)
-            Button("Open in browser") { MainLinks.open(browser.web.url ?? store.config.wikiURL) }
-                .buttonStyle(OutlineButtonStyle())
-        }
-        .padding(.horizontal, DS.Spacing.md)
-        .padding(.vertical, 8)
-    }
-
-    private func iconButton(_ symbol: String, _ label: String, enabled: Bool = true, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 13, weight: .semibold))
-                .frame(width: 28, height: 26)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(enabled ? p.text : p.textMuted.opacity(0.5))
-        .disabled(!enabled)
-        .help(label)
-        .accessibilityLabel(label)
     }
 }
 
@@ -68,14 +31,9 @@ struct WikiView: View {
 @MainActor
 final class WikiBrowser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate {
     let web: WKWebView
-    @Published var title = ""
-    @Published var loading = false
-    @Published var canGoBack = false
-    @Published var canGoForward = false
     @Published var failure: String?
 
     private var home: URL?
-    private var watchers: [NSKeyValueObservation] = []
 
     override init() {
         web = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
@@ -84,12 +42,6 @@ final class WikiBrowser: NSObject, ObservableObject, WKNavigationDelegate, WKUID
         web.uiDelegate = self
         web.allowsBackForwardNavigationGestures = true
         web.allowsMagnification = true
-        watchers = [
-            web.observe(\.title) { [weak self] view, _ in Task { @MainActor in self?.title = view.title ?? "" } },
-            web.observe(\.isLoading) { [weak self] view, _ in Task { @MainActor in self?.loading = view.isLoading } },
-            web.observe(\.canGoBack) { [weak self] view, _ in Task { @MainActor in self?.canGoBack = view.canGoBack } },
-            web.observe(\.canGoForward) { [weak self] view, _ in Task { @MainActor in self?.canGoForward = view.canGoForward } },
-        ]
     }
 
     /// Load the wiki's front page, unless this hub's wiki is already showing.

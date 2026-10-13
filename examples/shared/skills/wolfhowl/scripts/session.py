@@ -60,6 +60,15 @@ def load_env() -> tuple[str, Path | None]:
     return api.rstrip("/"), root
 
 
+# A turn that is nothing but one <snake_case_tag>…</snake_case_tag> block is the client
+# talking to the model (page context, tool plumbing), not the person.
+_WRAPPED_BLOCK = re.compile(r"^\s*<([a-z][a-z0-9]*(?:[_-][a-z0-9]+)+)>.*</\1>\s*$", re.S)
+
+
+def is_injected(text: str) -> bool:
+    return text.lstrip().startswith(INJECTED_PREFIXES) or bool(_WRAPPED_BLOCK.match(text))
+
+
 def session_id_from_env() -> str:
     for name in SESSION_ENV_VARS:
         value = (os.environ.get(name) or "").strip()
@@ -119,7 +128,7 @@ def parse_transcript(path: Path) -> list[dict[str, str]]:
             continue
         if role == "user":
             text = clean_user(text)
-            if not text or text.lstrip().startswith(INJECTED_PREFIXES):
+            if not text or is_injected(text):
                 continue
             flush()
             messages.append({"role": "user", "content": truncate(text)})

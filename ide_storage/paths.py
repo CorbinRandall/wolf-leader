@@ -144,8 +144,13 @@ def register_project_path(
     *,
     kind: str = "workspace",
     device_name: str | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
-    """Record ``path`` (and its hub spelling) as an alias for the project."""
+    """Record ``path`` (and its hub spelling) as an alias for the project.
+
+    Skipped (``shared_with`` lists the owners) when another project already has
+    this folder, unless ``force`` is set.
+    """
     path = (path or "").strip()
     if not path:
         return {"added": 0}
@@ -154,6 +159,25 @@ def register_project_path(
     hub = to_hub_path(path)
     if hub and hub != path:
         to_add.append(hub)
+    # A folder already registered to another project stays theirs: adding it here
+    # too would make every later save from that folder ambiguous.
+    norms = [_norm(p) for p in to_add]
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"""
+            SELECT DISTINCT p.slug
+            FROM project_paths pp
+            JOIN projects p ON p.id = pp.project_id
+            WHERE pp.project_id != ?
+              AND COALESCE(p.status, 'active') != 'archived'
+              AND lower(replace(rtrim(pp.path, '/\\'), '\\', '/')) IN ({",".join("?" * len(norms))})
+            """,
+            [project_id, *norms],
+        )
+        shared_with = sorted(r["slug"] for r in cur.fetchall() if r["slug"])
+    if shared_with and not force:
+        return {"added": 0, "paths": [], "hub_path": hub, "shared_with": shared_with}
     added = 0
     with db_conn() as conn:
         cur = conn.cursor()
@@ -171,28 +195,44 @@ def register_project_path(
     return {"added": added, "paths": to_add, "hub_path": hub}
 
 
-def resolve_project_id_by_path(path: str) -> int | None:
-    """Longest-prefix match of ``path`` against project_paths, in SQL."""
+def projects_at_path(path: str) -> list[dict[str, Any]]:
+    """Projects registered at the closest matching folder for ``path`` (longest prefix).
+
+    More than one means the folder is shared (a home directory, a general
+    workspace): it cannot say which project a session belongs to.
+    """
     cands = match_candidates(path)
     if not cands:
-        return None
+        return []
     placeholders = ",".join("?" * len(cands))
     with db_conn() as conn:
         cur = conn.cursor()
         cur.execute(
             f"""
-            SELECT pp.project_id, pp.path
+            SELECT pp.project_id, pp.path, p.slug, p.name
             FROM project_paths pp
             JOIN projects p ON p.id = pp.project_id
             WHERE COALESCE(p.status, 'active') != 'archived'
               AND lower(replace(rtrim(pp.path, '/\\'), '\\', '/')) IN ({placeholders})
-            ORDER BY length(pp.path) DESC
-            LIMIT 1
+            ORDER BY length(pp.path) DESC, pp.project_id
             """,
             cands,
         )
-        row = cur.fetchone()
-    return int(row["project_id"]) if row else None
+        rows = [dict(r) for r in cur.fetchall()]
+    if not rows:
+        return []
+    closest = _norm(rows[0]["path"])
+    seen: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        if _norm(row["path"]) == closest:
+            seen.setdefault(int(row["project_id"]), {"id": int(row["project_id"]), "slug": row["slug"], "name": row["name"]})
+    return list(seen.values())
+
+
+def resolve_project_id_by_path(path: str) -> int | None:
+    """The one project registered at ``path``'s closest folder; None if none or several."""
+    owners = projects_at_path(path)
+    return owners[0]["id"] if len(owners) == 1 else None
 
 
 def project_paths(project_id: int) -> list[dict[str, Any]]:

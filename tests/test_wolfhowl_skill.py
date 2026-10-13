@@ -38,6 +38,7 @@ def test_parse_transcript_reads_cursor_codex_and_claude_code(tmp_path):
         {"type": "session_meta", "payload": {"id": SID}},
         {"type": "response_item", "payload": {"type": "message", "role": "developer", "content": [{"type": "input_text", "text": "rules"}]}},
         {"type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "<environment_context>cwd</environment_context>"}]}},
+        {"type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": '<external_codex_apps_open_page>{"page_id":null}</external_codex_apps_open_page>'}]}},
         {"type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "fix the fan curve"}]}},
         {"type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Looking."}]}},
         {"type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Done."}]}},
@@ -237,3 +238,92 @@ def test_howl_does_not_create_a_project_without_the_users_choice(tmp_path, monke
         project_name="Brand New",
     )
     assert created["created_project"]["name"] == "Brand New"
+
+
+def _project(slug: str, path: str | None = None) -> int:
+    from ide_storage.db import db_conn
+
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO projects (name, path, slug, status, created_at, updated_at) VALUES (?, ?, ?, 'active', 'now', 'now')",
+            (slug.title(), path or "", slug),
+        )
+        conn.commit()
+        cur.execute("SELECT id FROM projects WHERE slug = ?", (slug,))
+        return int(cur.fetchone()["id"])
+
+
+def test_a_folder_shared_by_several_projects_resolves_to_none(tmp_path):
+    from ide_storage.hub import resolve_project
+    from ide_storage.howl import run_eat, run_howl
+    from ide_storage.paths import register_project_path
+
+    shared, own = str(tmp_path / "workspace"), str(tmp_path / "workspace" / "fans")
+    cooling, video, fans = _project("cooling"), _project("video"), _project("fans")
+    register_project_path(cooling, shared)
+    register_project_path(video, shared, force=True)  # how old data came to share a folder
+    register_project_path(fans, own)
+
+    assert resolve_project(path=shared) is None
+    assert resolve_project(path=shared + "/notes") is None
+    # A project with its own folder inside the shared one still resolves.
+    assert resolve_project(path=own + "/src")["slug"] == "fans"
+
+    messages = [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "decision: hi"}]
+    howl = run_howl(workspace_path=shared, messages=messages, session_id="s-shared")
+    assert howl["needs_project_choice"] is True
+    assert sorted(c["slug"] for c in howl["candidates"]) == ["cooling", "video"]
+    assert sorted(c["slug"] for c in run_eat(workspace_path=shared)["candidates"]) == ["cooling", "video"]
+
+
+def test_projects_sharing_a_legacy_path_do_not_resolve(tmp_path):
+    from ide_storage.hub import resolve_project
+
+    home = str(tmp_path / "root")
+    _project("ssh-setup", home)
+    _project("cache-drive", home)
+
+    assert resolve_project(path=home) is None
+
+
+def test_howl_does_not_link_a_folder_another_project_owns(tmp_path, monkeypatch):
+    from ide_storage.howl import run_howl
+    from ide_storage.paths import project_paths, register_project_path
+
+    monkeypatch.setenv("WOLF_WIKI_ENABLED", "0")
+    monkeypatch.setenv("WOLF_SHARE_ROOT", str(tmp_path / "share"))
+    workspace = str(tmp_path / "lab")
+    cooling, immich = _project("cooling"), _project("immich")
+    register_project_path(cooling, workspace)
+
+    messages = [{"role": "user", "content": "immich compose"}, {"role": "assistant", "content": "decision: done"}]
+    report = run_howl(slug="immich", workspace_path=workspace, messages=messages, session_id="s-immich")
+
+    assert report["ok"] is True
+    assert report["path_alias"]["shared_with"] == ["cooling"]
+    assert "not linked" in report["note"] or "was not" in report["note"]
+    assert project_paths(immich) == []
+
+
+def test_howl_only_creates_a_share_repo_when_there_is_a_commit(tmp_path, monkeypatch):
+    from ide_storage.howl import run_howl
+
+    monkeypatch.setenv("WOLF_WIKI_ENABLED", "0")
+    monkeypatch.setenv("WOLF_SHARE_ROOT", str(tmp_path / "share"))
+    _project("recipes")
+    messages = [{"role": "user", "content": "recipes"}, {"role": "assistant", "content": "decision: done"}]
+    repos = tmp_path / "share" / "wolf-leader" / "git"
+
+    for git in ({"is_repo": False}, {"is_repo": True, "commit": None, "dirty_files": 3}):
+        report = run_howl(slug="recipes", workspace_path=str(tmp_path / "r"), messages=messages, session_id="s-r", git=git)
+        assert report["ok"] is True
+        assert "git_remote" not in report
+        assert not repos.exists()
+
+    report = run_howl(
+        slug="recipes", workspace_path=str(tmp_path / "r"), messages=messages, session_id="s-r",
+        git={"is_repo": True, "commit": "abc123", "branch": "main", "dirty_files": 0},
+    )
+    assert report["git_remote"]["created"] is True
+    assert (repos / "recipes.git" / "objects").is_dir()

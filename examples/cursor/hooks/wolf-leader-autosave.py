@@ -7,6 +7,10 @@ from pathlib import Path
 API=(os.environ.get("WOLF_LEADER_API_LOCAL") or os.environ.get("WOLF_LEADER_API") or "http://127.0.0.1:6971").rstrip("/")
 CLIENT_DIR=Path(os.environ.get("WOLF_LEADER_CLIENT_DIR") or (Path.home()/".cursor"))
 
+# Client-injected "user" turns: not the person talking, so never the title or the match text.
+INJECTED_PREFIXES=("<recommended_plugins>","<environment_context>","# AGENTS.md instructions","<heartbeat>","<system-reminder>","<skills_instructions>","<codex_apps_client_time_context>")
+WRAPPED_BLOCK=re.compile(r"^\s*<([a-z][a-z0-9]*(?:[_-][a-z0-9]+)+)>.*</\1>\s*$", re.S)
+
 def call(method, path, body=None, timeout=180):
     data=json.dumps(body).encode() if body is not None else None
     req=urllib.request.Request(API+path,data=data,method=method,headers={"Content-Type":"application/json"} if data else {})
@@ -27,7 +31,7 @@ def parse(path):
         elif row.get("role") in ("user","assistant"):
             role=row.get("role"); content=text_blocks(row.get("message",{}).get("content"))
         if role not in ("user","assistant") or not content.strip(): continue
-        if role=="user" and content.lstrip().startswith(("<recommended_plugins>","<environment_context>","# AGENTS.md instructions","<heartbeat>")): continue
+        if role=="user" and (content.lstrip().startswith(INJECTED_PREFIXES) or WRAPPED_BLOCK.match(content)): continue
         messages.append({"role":role,"content":content.strip(),**({"created_at":created} if created else {})})
     return messages
 

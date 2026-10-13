@@ -77,8 +77,18 @@ def run_howl(
                 report["created_project"] = {k: created[k] for k in ("id", "slug", "name")}
                 actions.append(f"created project {created['slug']} for {workspace_path}")
         else:
+            from ide_storage.paths import projects_at_path
+
+            shared = projects_at_path(workspace_path)
             report["needs_project_choice"] = True
-            report["error"] = "No existing project matches this workspace. Ask whether to use an existing project or create a new one."
+            if len(shared) > 1:
+                report["error"] = (
+                    f"{len(shared)} projects use this folder, so it cannot pick one. "
+                    "Ask which project this belongs to, or whether it is new."
+                )
+                report["candidates"] = shared
+            else:
+                report["error"] = "No existing project matches this workspace. Ask whether to use an existing project or create a new one."
             report["projects"] = _project_list()
             return report
 
@@ -121,6 +131,11 @@ def run_howl(
             report["path_alias"] = reg
             if reg.get("added"):
                 actions.append(f"registered path alias {workspace_path}")
+            elif reg.get("shared_with"):
+                report["note"] = (
+                    f"{workspace_path} is also used by {', '.join(reg['shared_with'])}, so it was not "
+                    "linked to this project. Saves from this folder are matched by content, or ask."
+                )
         except Exception as exc:  # noqa: BLE001
             report["path_alias"] = {"error": str(exc)}
 
@@ -138,7 +153,9 @@ def run_howl(
                 break
     # 3b) No remote -> make one on the share. A bare repo under wolf-leader/git/
     #     is created (idempotent); the client adds it as `origin` and pushes on offer.
-    if not git_info.get("remote") and (git_info.get("is_repo") or workspace_path):
+    #     Only once there is a commit to put in it: a repo is made for work that
+    #     exists, never as an empty placeholder for every folder that howls.
+    if not git_info.get("remote") and git_info.get("is_repo") and git_info.get("commit"):
         remote = ensure_share_remote(save.get("project_slug") or f"project-{project_id}")
         key = {"windows": "windows", "win32": "windows", "mac": "mac", "darwin": "mac"}.get((client_os or "").lower())
         remote["client"] = (remote.get(key) if key else None) or remote["hub"]
@@ -397,6 +414,16 @@ def run_eat(
     if project is None and (slug or workspace_path):
         project = resolve_project(slug=slug, path=workspace_path)
     if project is None:
+        from ide_storage.paths import projects_at_path
+
+        shared = projects_at_path(workspace_path) if workspace_path else []
+        if len(shared) > 1:
+            return {
+                "ok": False,
+                "error": f"{len(shared)} projects use this folder; pass slug=<slug> for the one you want",
+                "candidates": shared,
+                "projects": _project_list(),
+            }
         return {
             "ok": False,
             "error": "no project matched; pass slug=<slug> or a workspace_path that is registered",
@@ -571,7 +598,7 @@ You are the agent. This is a suggested plate, not a script. Skip a step if it cl
    - `git: {{commit, branch, remote, dirty_files, is_repo}}`,
    - optionally `cited_paths` (files this chat attached/changed) and `ingest_cited: true` **only if the user already said yes**.
 4. The hub saves the conversation, extracts memories, embeds everything into pgvector, records the howl, refreshes the file catalog for the project's folder on the share, and writes the Obsidian notes to `{a['windows']}wolf-leader\\vault`.
-5. If the repo has no `origin`, the hub creates a bare repo at `{a['windows']}wolf-leader\\git\\<slug>.git` (= `{a['hub']}/wolf-leader/git/<slug>.git`) and returns it as `git_remote`. The bundled runner sets `origin` to it for you (config only; nothing is pushed). Never point a project at GitHub or any other host unless the user asks.
+5. If the repo has commits but no `origin`, the hub creates a bare repo at `{a['windows']}wolf-leader\\git\\<slug>.git` (= `{a['hub']}/wolf-leader/git/<slug>.git`) and returns it as `git_remote`. The bundled runner sets `origin` to it for you (config only; nothing is pushed). Never point a project at GitHub or any other host unless the user asks.
 6. Reply with the hub's `summary` paragraph, verbatim, then the offers.
 
 ## Offers (ask, never assume)

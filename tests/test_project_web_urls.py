@@ -32,3 +32,26 @@ def test_unknown_project_slug_is_404():
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Project not found"}
+
+
+def test_wiki_pages_are_revalidated_but_build_assets_are_cached(tmp_path):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from ide_storage.main import _WikiFiles
+
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "index.html").write_text("<h1>front</h1>")
+    (tmp_path / "docs" / "index.html").write_text("<h1>overview</h1>")
+    (tmp_path / "_next" / "static" / "chunks").mkdir(parents=True)
+    (tmp_path / "_next" / "static" / "chunks" / "app-abc123.js").write_text("1")
+    site = FastAPI()
+    site.mount("/wiki", _WikiFiles(directory=str(tmp_path), html=True), name="wiki")
+    client = TestClient(site)
+
+    assert client.get("/wiki/").headers["cache-control"] == "no-cache"
+    page = client.get("/wiki/docs/")
+    assert page.headers["cache-control"] == "no-cache"
+    # A re-check with the page's ETag costs no download when nothing changed.
+    assert client.get("/wiki/docs/", headers={"If-None-Match": page.headers["etag"]}).status_code == 304
+    assert "immutable" in client.get("/wiki/_next/static/chunks/app-abc123.js").headers["cache-control"]

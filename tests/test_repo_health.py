@@ -148,6 +148,19 @@ def test_notes_are_committed_on_request_and_left_alone_when_clean(share):
     assert after["uncommitted"] == 0
     assert after["last_subject"] == "notes: 2 changed file(s)"
 
+    # origin spelled as another machine sees the share still reaches the hub's bare repo.
+    bare = share / "wolf-leader" / "git" / "corbin-notes.git"
+    bare.parent.mkdir(parents=True)
+    _git(share, "init", "-q", "--bare", str(bare))
+    _git(vault, "remote", "add", "origin", "/somewhere/else/wolf-leader/git/corbin-notes.git")
+    (vault / "Pushed.md").write_text("p\n")
+    assert commit_notes()[0]["pushed"] is True
+    assert subprocess.run(["git", "-C", str(bare), "log", "-1", "--format=%s", "--all"],
+                          capture_output=True, text=True).stdout.strip() == "notes: 1 changed file(s)"
+    _git(vault, "remote", "set-url", "origin", "git@github.com:someone/notes.git")
+    (vault / "Private.md").write_text("p\n")
+    assert "pushed" not in commit_notes()[0]
+
     # A vault can opt out.
     (vault / "Later.md").write_text("x\n")
     _git(vault, "config", "autosave.skip", "true")

@@ -5,6 +5,7 @@ Usage:
   wolfhowl.py [SLUG] --session-id ID            save to a matched or named project
   wolfhowl.py SLUG --new --project-name "Name"  create the project, then save
   wolfhowl.py --git-only --howl-id N --commit "msg" [--git-init] [--push]
+  wolfhowl.py SLUG --create-repo [--plan]       version this folder and push it to the hub
 
 Everything mechanical happens here, not in the model: read this chat's local
 transcript (Cursor, Codex, Claude Code), match it to an existing project, collect
@@ -23,6 +24,7 @@ import socket
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -197,6 +199,141 @@ def git_followup(cwd: str, *, init: bool, message: str | None, push: bool) -> di
     return {"done": done, **git_state(cwd)}
 
 
+# Never committed by --create-repo: secrets, local data, dependencies, build junk.
+SAFE_IGNORE = (
+    ".env", ".env.*", "!.env.example", "secrets.*", "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*", "id_ed25519*",
+    "credentials*.json", "*.sqlite", "*.sqlite3", "*.db", "*.dump", "*.sql.gz",
+    "node_modules/", "__pycache__/", "*.pyc", ".venv/", "venv/", ".DS_Store", "*.log",
+)
+MAX_REPO_FILE_MB = 25
+
+
+def plan_repo(cwd: str) -> dict:
+    """What --create-repo would do in ``cwd``. Changes nothing."""
+    import fnmatch
+
+    root = Path(cwd)
+    is_repo = _git(["rev-parse", "--is-inside-work-tree"], cwd) == "true"
+    top = _git(["rev-parse", "--show-toplevel"], cwd) if is_repo else None
+    plan: dict = {
+        "folder": str(root), "is_repo": is_repo, "commits": 0, "to_commit": [], "ignored": [], "too_big": [],
+        "nested_repos": [], "warnings": [],
+    }
+    if is_repo and top and Path(top).resolve() != root.resolve():
+        plan["blocked"] = f"this folder is inside another git repo ({top}); create the repo there, or move this folder out"
+        return plan
+    if is_repo:
+        plan["commits"] = int(_git(["rev-list", "--count", "HEAD"], cwd) or 0)
+        plan["remote"] = _git(["remote", "get-url", "origin"], cwd)
+        # git already knows what is ignored and what changed.
+        changed = [ln[3:].strip().strip('"') for ln in (_git(["status", "--porcelain", "-uall"], cwd) or "").splitlines() if ln.strip()]
+    else:
+        changed = []
+        patterns = [pat.rstrip("/") for pat in SAFE_IGNORE if not pat.startswith("!")]
+        for path in sorted(root.rglob("*")):
+            rel = path.relative_to(root)
+            parts = rel.parts
+            if ".git" in parts:
+                if path.name == ".git" and len(parts) > 1:
+                    plan["nested_repos"].append(str(rel.parent) + "/")
+                continue
+            if any(str(rel).startswith(n) for n in plan["nested_repos"]):
+                continue
+            hit = next((pat for pat in patterns if any(fnmatch.fnmatch(part, pat) for part in parts)), None)
+            if hit and rel.name != ".env.example":
+                if not any(str(rel).startswith(i.rstrip("/") + "/") for i in plan["ignored"]):
+                    plan["ignored"].append(str(rel) + ("/" if path.is_dir() else ""))
+                continue
+            if path.is_file():
+                changed.append(str(rel))
+    for rel in changed:
+        full = root / rel
+        if full.is_file() and full.stat().st_size > MAX_REPO_FILE_MB * 1024 * 1024:
+            plan["too_big"].append(rel)
+        else:
+            plan["to_commit"].append(rel)
+    if plan["too_big"]:
+        plan["warnings"].append(f"{len(plan['too_big'])} file(s) over {MAX_REPO_FILE_MB} MB will be left out of git")
+    if plan["nested_repos"]:
+        plan["warnings"].append(f"{len(plan['nested_repos'])} folder(s) are their own git repos and will be left out")
+    if not plan["to_commit"] and not plan["commits"]:
+        plan["blocked"] = "there is nothing to commit in this folder"
+    return plan
+
+
+def create_repo(api: str, cwd: str, slug: str, message: str | None, push: bool) -> dict:
+    """Put a project folder under git and give it a home on the hub. Never forces, resets, or deletes."""
+    plan = plan_repo(cwd)
+    if plan.get("blocked"):
+        raise RuntimeError(plan["blocked"])
+    done: list[str] = []
+
+    def run(*cmd: str) -> None:
+        r = subprocess.run(["git", "-C", cwd, *cmd], capture_output=True, text=True, timeout=300)
+        if r.returncode != 0:
+            raise RuntimeError(f"git {' '.join(cmd)}: {(r.stderr or r.stdout).strip()}")
+
+    if not plan["is_repo"]:
+        run("init", "-q", "-b", "main")
+        done.append("git init")
+    extra = [*plan["nested_repos"], *plan["too_big"]]
+    ignore = Path(cwd) / ".gitignore"
+    existing = ignore.read_text(encoding="utf-8", errors="replace") if ignore.is_file() else ""
+    wanted = [pat for pat in (*([] if plan["is_repo"] and existing else SAFE_IGNORE), *extra) if pat not in existing.splitlines()]
+    if wanted:
+        header = "# Added by Wolf Leader: secrets, local data and large files stay out of git.\n"
+        ignore.write_text((existing.rstrip("\n") + "\n\n" if existing.strip() else "") + header + "\n".join(wanted) + "\n", encoding="utf-8")
+        done.append(".gitignore updated")
+    if (_git(["status", "--porcelain"], cwd) or "").strip():
+        run("add", "-A")
+        run("-c", "user.name=" + (_git(["config", "user.name"], cwd) or "Wolf Leader"),
+            "-c", "user.email=" + (_git(["config", "user.email"], cwd) or "wolf-leader@localhost"),
+            "commit", "-q", "-m", message or f"Start history for {slug}")
+        done.append(f"committed {len(plan['to_commit'])} file(s)")
+    result: dict = {"ok": True, "slug": slug, "done": done, "plan": plan}
+    if push:
+        result["push"] = push_to_hub(api, cwd, slug)
+    result["git"] = git_state(cwd)
+    return result
+
+
+def push_to_hub(api: str, cwd: str, slug: str) -> dict:
+    """Ask the hub for the project's repo, point origin at a spelling this machine can reach, and push."""
+    origin = _git(["remote", "get-url", "origin"], cwd)
+    if not origin:
+        try:
+            remote = api_json("POST", f"{api}/api/projects/by-slug/{urllib.parse.quote(slug)}/repo", {"client_os": client_os()}, timeout=60)
+        except Exception as exc:
+            return {"pushed": False, "why": f"the hub could not provide a repo: {exc}"}
+        # A mounted share path, else SSH to the hub server (WOLF_LEADER_GIT_SSH, e.g. myserver:/srv/share/wolf-leader/git).
+        candidates = [remote.get(key) for key in ("client", "mac", "windows", "unc", "hub")]
+        origin = next((c for c in candidates if c and Path(c).exists()), None)
+        ssh_base = os.environ.get("WOLF_LEADER_GIT_SSH") or _env_value("WOLF_LEADER_GIT_SSH")
+        if not origin and ssh_base and remote.get("name"):
+            origin = f"{ssh_base.rstrip('/')}/{remote['name']}"
+        if not origin:
+            return {"pushed": False, "why": "committed here, but this machine cannot reach the hub's git folder. "
+                    "Mount the Wolf Leader share, or set WOLF_LEADER_GIT_SSH in wolf-leader.env."}
+        r = subprocess.run(["git", "-C", cwd, "remote", "add", "origin", origin], capture_output=True, text=True, timeout=20)
+        if r.returncode != 0:
+            return {"pushed": False, "why": (r.stderr or r.stdout).strip()}
+    r = subprocess.run(["git", "-C", cwd, "push", "-u", "origin", "HEAD"], capture_output=True, text=True, timeout=300)
+    if r.returncode != 0:
+        return {"pushed": False, "origin": origin, "why": (r.stderr or r.stdout).strip()[-400:]}
+    return {"pushed": True, "origin": origin}
+
+
+def _env_value(name: str) -> str | None:
+    for env_file in (".claude", ".codex", ".cursor"):
+        path = Path.home() / env_file / "wolf-leader.env"
+        if path.is_file():
+            for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                key, _, value = line.strip().partition("=")
+                if key == name and value:
+                    return value.strip().strip('"')
+    return None
+
+
 def sync_share(workspace: str, slug: str | None) -> str | None:
     """Mirror the repo's files to the share so the hub can catalog them and /wolfeat can pull them."""
     try:
@@ -257,12 +394,31 @@ def main() -> int:
     ap.add_argument("--push", action="store_true", help="push to origin (only after the user agrees)")
     ap.add_argument("--git-only", action="store_true", help="run the git steps and pin the SHA to --howl-id; do not save again")
     ap.add_argument("--howl-id", type=int, default=None)
+    ap.add_argument("--create-repo", action="store_true",
+                    help="put this folder under git, commit it, and push to the project's repo on the hub (needs SLUG)")
+    ap.add_argument("--plan", action="store_true", help="with --create-repo: only print what would be committed and ignored")
+    ap.add_argument("--no-push", action="store_true", help="with --create-repo: commit locally, do not push")
     args = ap.parse_args()
 
     api, root_hint = load_env()
     workspace = os.environ.get("WOLF_LEADER_WORKSPACE") or os.environ.get("CURSOR_WORKSPACE") or str(Path.cwd())
     device = os.environ.get("WOLF_LEADER_DEVICE") or socket.gethostname()
     wants_git = bool(args.git_init or args.commit or args.push)
+
+    # One command to version a project's folder: no chat is saved.
+    if args.create_repo:
+        if args.plan:
+            print(json.dumps(plan_repo(workspace), indent=2))
+            return 0
+        if not args.slug:
+            print("wolfhowl: --create-repo needs the project's SLUG", file=sys.stderr)
+            return 2
+        try:
+            print(json.dumps(create_repo(api, workspace, args.slug, args.commit, push=not args.no_push), indent=2))
+        except Exception as exc:
+            print(json.dumps({"ok": False, "error": str(exc)}, indent=2))
+            return 1
+        return 0
 
     # Git follow-up after an offer the user accepted: no second save, just pin the SHA.
     if args.git_only:

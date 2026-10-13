@@ -327,3 +327,57 @@ def test_howl_only_creates_a_share_repo_when_there_is_a_commit(tmp_path, monkeyp
     )
     assert report["git_remote"]["created"] is True
     assert (repos / "recipes.git" / "objects").is_dir()
+
+
+def _runner(tmp_path, folder, *args, api="http://127.0.0.1:9"):
+    import os
+
+    env = {"HOME": str(tmp_path / "home"), "PATH": os.environ.get("PATH", ""), "WOLF_LEADER_API": api,
+           "WOLF_LEADER_WORKSPACE": str(folder), "GIT_CONFIG_GLOBAL": os.devnull}
+    (tmp_path / "home").mkdir(exist_ok=True)
+    return subprocess.run([sys.executable, str(SCRIPTS / "wolfhowl.py"), *args],
+                          capture_output=True, text=True, env=env, cwd=folder, timeout=60)
+
+
+def test_create_repo_leaves_secrets_data_and_nested_repos_out(tmp_path):
+    folder = tmp_path / "stack"
+    (folder / "node_modules" / "x").mkdir(parents=True)
+    (folder / "vendor" / "lib").mkdir(parents=True)
+    (folder / "compose.yml").write_text("services: {}\n")
+    (folder / ".env").write_text("TOKEN=real\n")
+    (folder / ".env.example").write_text("TOKEN=\n")
+    (folder / "server.key").write_text("k\n")
+    (folder / "node_modules" / "x" / "i.js").write_text("1\n")
+    (folder / "vendor" / "lib" / "f.txt").write_text("1\n")
+    subprocess.run(["git", "init", "-q", str(folder / "vendor" / "lib")], check=True)
+
+    plan = json.loads(_runner(tmp_path, folder, "--create-repo", "--plan").stdout)
+    assert sorted(plan["to_commit"]) == [".env.example", "compose.yml"]
+    assert sorted(plan["ignored"]) == [".env", "node_modules/", "server.key"]
+    assert plan["nested_repos"] == ["vendor/lib/"]
+    assert not (folder / ".git").exists()  # a plan changes nothing
+
+    assert _runner(tmp_path, folder, "--create-repo").returncode == 2  # needs the slug
+
+    result = json.loads(_runner(tmp_path, folder, "stack", "--create-repo", "--no-push").stdout)
+    assert result["ok"] is True
+    tracked = subprocess.run(["git", "-C", str(folder), "ls-files"], capture_output=True, text=True).stdout.split()
+    assert sorted(tracked) == [".env.example", ".gitignore", "compose.yml"]
+    assert subprocess.run(["git", "-C", str(folder), "status", "--porcelain"], capture_output=True, text=True).stdout == ""
+
+    # Running it again on a clean repo is harmless.
+    again = json.loads(_runner(tmp_path, folder, "stack", "--create-repo", "--no-push").stdout)
+    assert again["ok"] is True and again["done"] == []
+
+
+def test_create_repo_refuses_a_folder_inside_another_repo(tmp_path):
+    outer = tmp_path / "outer"
+    inner = outer / "inner"
+    inner.mkdir(parents=True)
+    (inner / "a.txt").write_text("a\n")
+    subprocess.run(["git", "init", "-q", str(outer)], check=True)
+
+    result = _runner(tmp_path, inner, "inner", "--create-repo", "--no-push")
+
+    assert result.returncode == 1
+    assert "inside another git repo" in json.loads(result.stdout)["error"]

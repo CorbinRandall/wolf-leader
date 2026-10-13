@@ -279,6 +279,18 @@ def notes_status() -> list[dict[str, Any]]:
     return out
 
 
+def _share_push_target(remote: str) -> str | None:
+    """The hub's own bare repo behind ``remote``, or None. Never an outside host on a timer.
+
+    ``origin`` is often spelled the way the host or a client sees the share, so
+    match the repo by name inside the hub's git folder instead of by prefix.
+    """
+    if not remote or "://" in remote or "@" in remote:
+        return None
+    candidate = os.path.join(share_git_dir(), os.path.basename(remote.rstrip("/\\")))
+    return candidate if os.path.isdir(os.path.join(candidate, "objects")) else None
+
+
 _notes_lock = threading.Lock()
 MAX_NOTE_FILE_MB = 25
 
@@ -329,10 +341,9 @@ def commit_notes() -> list[dict[str, Any]]:
                 result["error"] = "git commit failed"
                 continue
             result["committed"] = len(staged)
-            remote = _git(repo, "remote", "get-url", "origin") or ""
-            # Only push to the hub's own share; never to an outside host on a timer.
-            if remote.startswith(share_git_dir()):
-                result["pushed"] = _git(repo, "push", "-q", "origin", "HEAD", timeout=120) is not None
+            target = _share_push_target(_git(repo, "remote", "get-url", "origin") or "")
+            if target:
+                result["pushed"] = _git(repo, "push", "-q", target, "HEAD", timeout=120) is not None
     finally:
         _notes_lock.release()
     return results

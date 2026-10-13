@@ -47,12 +47,16 @@ def resolve_project(
 
         # Alias table first (any machine's spelling of the same folder), then the
         # legacy longest-prefix loop over projects.path / compose_path.
-        from .paths import resolve_project_id_by_path
+        from .paths import projects_at_path
 
         try:
-            alias_pid = resolve_project_id_by_path(path)
+            owners = projects_at_path(path)
         except Exception:
-            alias_pid = None
+            owners = []
+        if len(owners) > 1:
+            # A shared folder (home directory, general workspace) names no single project.
+            return None
+        alias_pid = owners[0]["id"] if owners else None
         if alias_pid is not None:
             cur.execute("SELECT * FROM projects WHERE id = ?", (alias_pid,))
             row = cur.fetchone()
@@ -66,7 +70,8 @@ def resolve_project(
             WHERE COALESCE(status, 'active') != 'archived'
             """
         )
-        best, best_len = None, 0
+        best: dict[int, Dict[str, Any]] = {}
+        best_len = 0
         for row in cur.fetchall():
             project = dict(row)
             for key in ("compose_path", "path"):
@@ -76,9 +81,11 @@ def resolve_project(
                 vnorm = normalize_path(val)
                 if norm == vnorm or norm.startswith(vnorm + os.sep):
                     if len(vnorm) > best_len:
-                        best = project
-                        best_len = len(vnorm)
-        return best
+                        best, best_len = {project["id"]: project}, len(vnorm)
+                    elif len(vnorm) == best_len:
+                        best[project["id"]] = project
+        # Several projects at the same folder: the folder cannot pick one.
+        return next(iter(best.values())) if len(best) == 1 else None
 
 
 def create_project_for_path(

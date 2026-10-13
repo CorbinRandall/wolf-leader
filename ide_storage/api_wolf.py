@@ -68,6 +68,7 @@ class PathBody(BaseModel):
     path: str
     kind: str = "workspace"
     device_name: Optional[str] = None
+    force: bool = False  # link the folder even if another project already has it
 
 
 class JobBody(BaseModel):
@@ -264,7 +265,9 @@ async def add_project_path(project_id: int, body: PathBody):
     from ide_storage.paths import register_project_path
 
     try:
-        return register_project_path(project_id, body.path, kind=body.kind, device_name=body.device_name)
+        return register_project_path(
+            project_id, body.path, kind=body.kind, device_name=body.device_name, force=body.force
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

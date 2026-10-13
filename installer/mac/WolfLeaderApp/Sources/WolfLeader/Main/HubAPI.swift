@@ -968,3 +968,46 @@ extension HubClient {
         _ = try await data("/api/projects/\(projectID)/distill", method: "POST", body: Data("{}".utf8), timeout: 180)
     }
 }
+
+// MARK: - Owners, loose sessions, related projects
+
+struct HubRelatedProject: Identifiable, Hashable {
+    var id: Int
+    var name: String
+}
+
+extension HubClient {
+    func owners() async throws -> [String] {
+        let raw = try await data("/api/owners")
+        return ((try JSONSerialization.jsonObject(with: raw) as? [String: Any])?["owners"] as? [String]) ?? []
+    }
+
+    /// "" clears a hand-set owner.
+    func setOwner(projectID: Int, owner: String) async throws {
+        _ = try await data("/api/projects/\(projectID)", method: "PUT",
+                           body: try JSONSerialization.data(withJSONObject: ["owner": owner]), timeout: 60)
+    }
+
+    /// Ask the hub to file loose sessions that clearly belong to a project. Returns how many it filed.
+    func autoFileSessions() async throws -> Int {
+        let raw = try await data("/api/sessions/auto-file", method: "POST", body: Data("{}".utf8), timeout: 120)
+        return (((try JSONSerialization.jsonObject(with: raw) as? [String: Any])?["filed"] as? [Any]) ?? []).count
+    }
+
+    func deleteSession(id: Int) async throws {
+        _ = try await data("/api/chats/\(id)", method: "DELETE", timeout: 60)
+    }
+
+    /// Projects the hub considers closest to this one (by what their journals say).
+    func relatedProjects(slug: String) async throws -> [HubRelatedProject] {
+        let raw = try await data("/api/eat", query: ["slug": slug], timeout: 60)
+        let brief = (try JSONSerialization.jsonObject(with: raw) as? [String: Any])?["brief"] as? [String: Any]
+        let related = (brief?["related"] as? [[String: Any]]) ?? []
+        var seen = Set<Int>()
+        return related.compactMap { item in
+            guard item["kind"] as? String == "project", let id = item["id"] as? Int, seen.insert(id).inserted,
+                  (item["similarity"] as? Double ?? 0) >= 0.6 else { return nil }
+            return HubRelatedProject(id: id, name: (item["title"] as? String) ?? "Project")
+        }
+    }
+}

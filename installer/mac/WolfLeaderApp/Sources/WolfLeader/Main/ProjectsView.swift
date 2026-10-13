@@ -2,33 +2,33 @@ import AppKit
 import SwiftUI
 
 enum ProjectsTab: String, Hashable {
-    case progress, board, list, todo, unfiled
+    case focus, board, all
 }
 
-/// Projects: one set of projects, seen three ways (progress cards, the board, a plain list), plus
-/// the goals across all of them and the sessions that belong to none. Every view opens the same
-/// project page, and a change made in one shows up in the others.
+/// Projects answers three questions, in this order: what am I working on, what is next, and where
+/// is everything else. Focus shows only the few projects in play with their next step; Board is the
+/// same projects by stage; All is every project, searchable. Every view opens the same project page.
 struct ProjectsView: View {
     @EnvironmentObject private var store: ConfigStore
     @Environment(\.palette) private var p
     @StateObject private var model = ProjectsModel()
-    @AppStorage("wl.projects.tab") private var tabRaw = ProjectsTab.progress.rawValue
+    @AppStorage("wl.projects.tab") private var tabRaw = ProjectsTab.focus.rawValue
     @State private var query = ""
     @State private var openID: Int?
     @State private var promptFor: ProjectEntry?
     @State private var columnEditor: ColumnEditorContext?
+    @State private var showLoose = false
+    @State private var stageFilter = "open"
 
     private var tab: Binding<ProjectsTab> {
-        Binding(get: { ProjectsTab(rawValue: tabRaw) ?? .progress }, set: { tabRaw = $0.rawValue })
+        Binding(get: { ProjectsTab(rawValue: tabRaw) ?? .focus }, set: { tabRaw = $0.rawValue })
     }
 
     private var tabs: [WLTab<ProjectsTab>] {
         [
-            WLTab(id: .progress, title: "Progress", icon: "square.grid.2x2"),
+            WLTab(id: .focus, title: "Focus", icon: "scope"),
             WLTab(id: .board, title: "Board", icon: "rectangle.3.group"),
-            WLTab(id: .list, title: "List", icon: "list.bullet"),
-            WLTab(id: .todo, title: "To do", icon: "checklist"),
-            WLTab(id: .unfiled, title: "Unfiled", icon: "tray", attention: !model.unfiled.isEmpty),
+            WLTab(id: .all, title: "All projects", icon: "list.bullet"),
         ]
     }
 
@@ -37,7 +37,8 @@ struct ProjectsView: View {
     var body: some View {
         Group {
             if let openID, let entry = model.entry(openID) {
-                ProjectPage(entry: entry, model: model, back: { self.openID = nil }, prompt: { promptFor = $0 })
+                ProjectPage(entry: entry, model: model, back: { self.openID = nil }, prompt: { promptFor = $0 },
+                            open: { self.openID = $0 })
                     .id(openID)
             } else {
                 overview
@@ -48,6 +49,7 @@ struct ProjectsView: View {
         .sheet(item: $promptFor) { entry in
             BuildPromptSheet(entry: entry, onDone: { await model.reload() })
         }
+        .sheet(isPresented: $showLoose) { LooseSessionsSheet(model: model) }
         .sheet(item: $columnEditor) { editor in
             KanbanColumnEditor(context: editor) { label, description in
                 model.perform { hub in
@@ -64,7 +66,7 @@ struct ProjectsView: View {
 
     private var overview: some View {
         MainPage {
-            WLPageHeader(title: "Projects", subtitle: "\(model.entries.count) projects. The same work, seen as progress, a board, or a list.") {
+            WLPageHeader(title: "Projects", subtitle: "What you are working on, what is next, and where everything else is.") {
                 HStack(spacing: 8) {
                     WLSearchField(text: $query, placeholder: "Search projects and goals").frame(width: 260)
                     if tab.wrappedValue == .board {
@@ -84,34 +86,104 @@ struct ProjectsView: View {
                 ProgressView("Reading the journal…")
             } else {
                 switch tab.wrappedValue {
-                case .progress: progress
+                case .focus: focus
                 case .board:
                     ProjectBoard(model: model, entries: shown, open: { openID = $0.id }, editColumn: { columnEditor = ColumnEditorContext(column: $0) })
-                case .list: list
-                case .todo: todo
-                case .unfiled: unfiledList
+                case .all: list
                 }
             }
         }
     }
 
-    // MARK: Progress
+    // MARK: Focus
 
     @ViewBuilder
-    private var progress: some View {
-        if shown.isEmpty { MainNotice(symbol: "square.grid.2x2", title: "No matching projects.", message: "Try another search.") }
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 320), spacing: 14, alignment: .top)], alignment: .leading, spacing: 14) {
-            ForEach(shown) { entry in
-                ProjectProgressCard(entry: entry, status: model.statusLabel(of: entry)) { openID = entry.id }
+    private var focus: some View {
+        let now = shown.filter { model.isNow($0) }
+        let next = shown.filter { model.isNext($0) }
+        let parked = shown.count - now.count - next.count
+
+        WLEyebrow("Now · \(now.count)", color: p.accent)
+        if now.isEmpty {
+            MainNotice(symbol: "scope", title: "Nothing in focus.",
+                       message: "Open a project and add a goal for now, or move a project to In progress on the board.")
+        }
+        if now.count > 5 {
+            WLStatusPill(text: "\(now.count) projects in play at once. Fewer is easier: park some on the board, or move goals to Next.", kind: .warn)
+        }
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: 14, alignment: .top)], alignment: .leading, spacing: 14) {
+            ForEach(now) { entry in
+                FocusCard(entry: entry, model: model) { openID = entry.id }
             }
         }
+
+        if !next.isEmpty {
+            WLEyebrow("Next · \(next.count)").padding(.top, 6)
+            Card(padding: 6) {
+                VStack(spacing: 0) {
+                    ForEach(next) { entry in
+                        if entry.id != next.first?.id { WLDivider() }
+                        Button { openID = entry.id } label: {
+                            HStack(alignment: .top, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(entry.name).font(DS.Font.bodySmall.weight(.semibold)).foregroundStyle(p.text)
+                                    Text(entry.progress?.nextStep.map { "Next: \($0.text)" } ?? entry.whereItStands)
+                                        .font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(1)
+                                }
+                                Spacer(minLength: 8)
+                                ProjectCounts(entry: entry)
+                                Text(HubDate.format(entry.lastWorked)).font(DS.Font.micro.monospacedDigit()).foregroundStyle(p.textFaint)
+                            }
+                            .padding(.horizontal, 12).padding(.vertical, 9).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+
+        HStack(spacing: 10) {
+            if parked > 0 {
+                Button("\(parked) other project\(parked == 1 ? "" : "s") parked or done") { stageFilter = "all"; tab.wrappedValue = .all }
+                    .buttonStyle(OutlineButtonStyle())
+            }
+            if !model.unfiled.isEmpty {
+                Button("\(model.unfiled.count) loose session\(model.unfiled.count == 1 ? "" : "s")") { showLoose = true }
+                    .buttonStyle(OutlineButtonStyle())
+                    .help("One-off chats that belong to no project. Nothing you have to do.")
+            }
+            Spacer()
+        }
+        .padding(.top, 6)
     }
 
     // MARK: List
 
+    private var listed: [ProjectEntry] {
+        switch stageFilter {
+        case "open": return shown.filter { model.status(of: $0) != "done" }
+        case "all": return shown
+        default: return shown.filter { model.status(of: $0) == stageFilter }
+        }
+    }
+
     @ViewBuilder
     private var list: some View {
-        if shown.isEmpty { MainNotice(symbol: "list.bullet", title: "No matching projects.", message: "Try another search.") }
+        HStack(spacing: 8) {
+            Picker("", selection: $stageFilter) {
+                Text("Open").tag("open")
+                ForEach(model.columns) { Text($0.label).tag($0.status) }
+                Text("Everything").tag("all")
+            }
+            .pickerStyle(.segmented).labelsHidden().fixedSize()
+            Text("\(listed.count) of \(model.entries.count)").font(DS.Font.micro).foregroundStyle(p.textMuted)
+            Spacer()
+            if !model.unfiled.isEmpty {
+                Button("\(model.unfiled.count) loose sessions") { showLoose = true }.buttonStyle(OutlineButtonStyle())
+            }
+        }
+        let shown = listed
+        if shown.isEmpty { MainNotice(symbol: "list.bullet", title: "No matching projects.", message: "Try another search or stage.") }
         Card(padding: 6) {
             VStack(spacing: 0) {
                 ForEach(shown) { entry in
@@ -122,7 +194,7 @@ struct ProjectsView: View {
                                 HStack(spacing: 8) {
                                     Text(entry.name).font(DS.Font.bodySmall.weight(.semibold)).foregroundStyle(p.text)
                                     MainTag(text: model.statusLabel(of: entry), color: p.textMuted)
-                                    if let owner = entry.project.owner, !owner.isEmpty { MainTag(text: owner) }
+                                    OwnerTag(entry: entry, model: model)
                                 }
                                 if let next = entry.progress?.nextStep {
                                     Text("Next: \(next.text)").font(DS.Font.micro).foregroundStyle(p.text).lineLimit(1)
@@ -140,76 +212,6 @@ struct ProjectsView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
-    // MARK: To do
-
-    @ViewBuilder
-    private var todo: some View {
-        let open = shown.flatMap { entry in entry.openGoals.map { (entry, $0) } }
-        if open.isEmpty {
-            MainNotice(symbol: "checklist", title: "No goals yet.",
-                       message: "Open a project and turn its next step into a goal. Goals start as proposals you can edit.")
-        }
-        ForEach(["now", "next", "later"], id: \.self) { phase in
-            let items = open.filter { $0.1.phase == phase }
-            if !items.isEmpty {
-                WLGroup(title: phase.capitalized, subtitle: phase == "now" ? "One lane at a time." : nil, icon: "flag") {
-                    ForEach(items, id: \.1.id) { entry, goal in
-                        if goal.id != items.first?.1.id { WLDivider() }
-                        Button { openID = entry.id } label: {
-                            HStack(alignment: .top) {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(goal.title).font(DS.Font.bodySmall.weight(.semibold)).foregroundStyle(p.text)
-                                    if !goal.doneWhen.isEmpty {
-                                        Text("Done when: \(goal.doneWhen)").font(DS.Font.micro).foregroundStyle(p.textMuted)
-                                    }
-                                    Text("\(entry.name) · \(model.statusLabel(of: entry))").font(DS.Font.micro).foregroundStyle(p.textFaint)
-                                }
-                                Spacer()
-                                GoalStatusTag(status: goal.status)
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: Unfiled
-
-    @ViewBuilder
-    private var unfiledList: some View {
-        if model.unfiled.isEmpty {
-            MainNotice(symbol: "tray", title: "Nothing unfiled.", message: "Every saved session belongs to a project.")
-        } else {
-            WLGroup(title: "Sessions without a project", subtitle: "Saved, but not part of any project's story yet. File each one where it belongs.", icon: "tray") {
-                ForEach(model.unfiled) { session in
-                    if session.id != model.unfiled.first?.id { WLDivider() }
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(session.title).font(DS.Font.bodySmall.weight(.semibold)).lineLimit(2)
-                            if !session.summary.isEmpty {
-                                Text(session.summary).font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(3)
-                            }
-                            Text("\(HubDate.format(session.happenedAt)) · \(session.messages) messages")
-                                .font(DS.Font.micro).foregroundStyle(p.textFaint)
-                        }
-                        Spacer()
-                        Menu("File under…") {
-                            ForEach(model.entries.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) { entry in
-                                Button(entry.name) {
-                                    model.perform("Filed under \(entry.name).") { try await $0.fileSession(id: session.id, projectID: entry.id) }
-                                }
-                            }
-                        }
-                        .fixedSize()
-                    }
                 }
             }
         }
@@ -244,10 +246,45 @@ struct GoalStatusTag: View {
     }
 }
 
-private struct ProjectProgressCard: View {
+/// The owner, as a menu: click it to hand the project to someone else.
+struct OwnerTag: View {
     @Environment(\.palette) private var p
     let entry: ProjectEntry
-    let status: String
+    @ObservedObject var model: ProjectsModel
+
+    var body: some View {
+        let owner = entry.project.owner ?? ""
+        if model.owners.isEmpty {
+            if !owner.isEmpty { MainTag(text: owner) }
+        } else {
+            Menu {
+                ForEach(model.owners, id: \.self) { name in
+                    Button(name) { model.setOwner(entry, name) }.disabled(name == owner)
+                }
+                if !owner.isEmpty {
+                    Divider()
+                    Button("No owner") { model.setOwner(entry, "") }
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Text(owner.isEmpty ? "No owner" : owner)
+                    Image(systemName: "chevron.down").font(.system(size: 7, weight: .bold))
+                }
+                .font(.system(size: 11, weight: .semibold))
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .foregroundStyle(p.accent).background(p.accent.opacity(0.14), in: Capsule())
+            }
+            .menuStyle(.borderlessButton).fixedSize()
+            .help("Change who owns this project")
+        }
+    }
+}
+
+/// A project in play: the one next step, the goals for now, and nothing else.
+private struct FocusCard: View {
+    @Environment(\.palette) private var p
+    let entry: ProjectEntry
+    @ObservedObject var model: ProjectsModel
     let open: () -> Void
     @State private var hovering = false
 
@@ -256,22 +293,30 @@ private struct ProjectProgressCard: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(entry.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(p.text).lineLimit(1)
-                    MainTag(text: status, color: p.textMuted)
                     Spacer(minLength: 6)
                     Text(HubDate.format(entry.lastWorked)).font(DS.Font.micro.monospacedDigit()).foregroundStyle(p.textFaint)
                 }
-                VStack(alignment: .leading, spacing: 3) {
-                    WLEyebrow("Where it stands")
-                    Text(entry.whereItStands.isEmpty ? "Nothing saved yet." : entry.whereItStands)
-                        .font(DS.Font.bodySmall).foregroundStyle(p.textMuted).lineLimit(4).multilineTextAlignment(.leading)
-                }
                 if let next = entry.progress?.nextStep {
                     VStack(alignment: .leading, spacing: 3) {
-                        WLEyebrow("Next useful step", color: p.accent)
+                        WLEyebrow("Next step", color: p.accent)
                         Text(next.text).font(DS.Font.bodySmall.weight(.medium)).foregroundStyle(p.text).lineLimit(3)
                             .multilineTextAlignment(.leading)
                         if !next.doneWhen.isEmpty {
                             Text("Done when: \(next.doneWhen)").font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(2)
+                        }
+                    }
+                } else {
+                    Text(entry.whereItStands.isEmpty ? "No next step yet. Open it and add a goal." : entry.whereItStands)
+                        .font(DS.Font.bodySmall).foregroundStyle(p.textMuted).lineLimit(3).multilineTextAlignment(.leading)
+                }
+                let goals = entry.openGoals.filter { $0.phase == "now" }.prefix(3)
+                if goals.count > 1 {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(goals.dropFirst())) { goal in
+                            HStack(spacing: 6) {
+                                Image(systemName: "circle").font(.system(size: 8)).foregroundStyle(p.textFaint)
+                                Text(goal.title).font(DS.Font.micro).foregroundStyle(p.text).lineLimit(1)
+                            }
                         }
                     }
                 }
@@ -285,6 +330,86 @@ private struct ProjectProgressCard: View {
         }
         .buttonStyle(.plain)
         .onHover { h in withAnimation(DS.Anim.hover) { hovering = h } }
+    }
+}
+
+/// One-off chats that belong to no project. Read one, file it, or delete it. None of it is required.
+private struct LooseSessionsSheet: View {
+    @Environment(\.palette) private var p
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var model: ProjectsModel
+    @State private var reading: HubUnfiledSession?
+    @State private var confirmAll = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    WLEyebrow("Loose sessions")
+                    Text("Chats that belong to no project").font(DS.Font.section).foregroundStyle(p.text)
+                    Text("One-off questions end up here. The hub files a session by itself when it clearly matches a project. You can leave the rest.")
+                        .font(DS.Font.micro).foregroundStyle(p.textMuted).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                if model.unfiled.count > 1 {
+                    Button("Delete all") { confirmAll = true }.buttonStyle(OutlineButtonStyle())
+                }
+                Button("Done") { dismiss() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
+            }
+            .padding(20)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if model.unfiled.isEmpty {
+                        Text("Nothing loose.").font(DS.Font.bodySmall).foregroundStyle(p.textMuted).padding(20)
+                    }
+                    ForEach(model.unfiled) { session in
+                        HStack(alignment: .top, spacing: 10) {
+                            Button { reading = session } label: {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(session.title).font(DS.Font.bodySmall.weight(.semibold)).foregroundStyle(p.text).lineLimit(2)
+                                        .multilineTextAlignment(.leading)
+                                    if !session.summary.isEmpty {
+                                        Text(session.summary).font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(2)
+                                            .multilineTextAlignment(.leading)
+                                    }
+                                    Text("\(HubDate.format(session.happenedAt)) · \(session.messages) messages · click to read")
+                                        .font(DS.Font.micro).foregroundStyle(p.textFaint)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            Menu("File under…") {
+                                ForEach(model.entries.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) { entry in
+                                    Button(entry.name) {
+                                        model.perform("Filed under \(entry.name).") { try await $0.fileSession(id: session.id, projectID: entry.id) }
+                                    }
+                                }
+                            }
+                            .fixedSize()
+                            Button { model.perform { try await $0.deleteSession(id: session.id) } } label: {
+                                Image(systemName: "trash").font(.system(size: 12))
+                            }
+                            .buttonStyle(.plain).foregroundStyle(p.textMuted).help("Delete this session")
+                        }
+                        .padding(.horizontal, 20).padding(.vertical, 12)
+                        Divider()
+                    }
+                }
+            }
+        }
+        .frame(width: 720, height: 560)
+        .background(p.background)
+        .sheet(item: $reading) { SessionReader(chatID: $0.id, title: $0.title, when: $0.happenedAt) }
+        .confirmationDialog("Delete all \(model.unfiled.count) loose sessions?", isPresented: $confirmAll) {
+            Button("Delete all", role: .destructive) {
+                let ids = model.unfiled.map(\.id)
+                model.perform("Deleted \(ids.count) loose sessions.") { hub in
+                    for id in ids { try await hub.deleteSession(id: id) }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("Their transcripts are removed from the hub. Projects are not touched.") }
     }
 }
 
@@ -358,7 +483,7 @@ struct ProjectBoard: View {
             HStack {
                 Text(entry.name).font(DS.Font.bodySmall.weight(.semibold)).lineLimit(2)
                 Spacer()
-                if let owner = entry.project.owner, !owner.isEmpty { MainTag(text: owner) }
+                OwnerTag(entry: entry, model: model)
             }
             if let next = entry.progress?.nextStep {
                 Text("Next: \(next.text)").font(DS.Font.micro).foregroundStyle(p.text).lineLimit(3)

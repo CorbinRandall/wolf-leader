@@ -29,11 +29,13 @@ final class ProjectsModel: ObservableObject {
     @Published var entries: [ProjectEntry] = []
     @Published var columns: [HubKanbanColumn] = []
     @Published var unfiled: [HubUnfiledSession] = []
+    @Published var owners: [String] = []
     @Published var loading = true
     @Published var error: String?
     @Published var notice: String?
 
     private var hub: HubClient?
+    private var triedAutoFiling = false
 
     func load(_ hub: HubClient) async {
         self.hub = hub
@@ -49,6 +51,15 @@ final class ProjectsModel: ObservableObject {
             self.columns = loadedColumns
             entries = loadedProjects.map { ProjectEntry(project: $0, progress: byID[$0.id]) }
             unfiled = (try? await hub.unfiledSessions()) ?? []
+            owners = (try? await hub.owners()) ?? owners
+            // Let the hub file what clearly belongs somewhere, once per launch, so nobody sorts by hand.
+            if !unfiled.isEmpty && !triedAutoFiling {
+                triedAutoFiling = true
+                if let filed = try? await hub.autoFileSessions(), filed > 0 {
+                    notice = "Filed \(filed) loose session\(filed == 1 ? "" : "s") into the project \(filed == 1 ? "it belongs" : "they belong") to."
+                    unfiled = (try? await hub.unfiledSessions()) ?? []
+                }
+            }
             error = nil
         } catch { self.error = error.localizedDescription }
     }
@@ -77,6 +88,23 @@ final class ProjectsModel: ObservableObject {
                 await load(hub)
             } catch { self.error = error.localizedDescription }
         }
+    }
+
+    func setOwner(_ entry: ProjectEntry, _ owner: String) {
+        perform { try await $0.setOwner(projectID: entry.id, owner: owner) }
+    }
+
+    /// What deserves attention now: a goal marked "now", or an in-progress project touched recently.
+    func isNow(_ entry: ProjectEntry) -> Bool {
+        if entry.openGoals.contains(where: { $0.phase == "now" }) { return true }
+        guard status(of: entry) == "in_progress", let last = HubDate.parse(entry.lastWorked) else { return false }
+        return last > Date().addingTimeInterval(-14 * 86_400)
+    }
+
+    /// Lined up but not being worked: later goals, or in progress but gone quiet.
+    func isNext(_ entry: ProjectEntry) -> Bool {
+        guard !isNow(entry), status(of: entry) != "done" else { return false }
+        return !entry.openGoals.isEmpty || status(of: entry) == "in_progress"
     }
 
     func move(_ entry: ProjectEntry, to status: String) {

@@ -214,6 +214,38 @@ def unfiled_sessions(limit: int = 100) -> list[dict[str, Any]]:
     return out
 
 
+def auto_file_sessions() -> dict[str, Any]:
+    """File loose sessions that clearly belong to an existing project. The rest stay loose.
+
+    A session with no project is not an error: one-off questions belong to none. This only
+    moves the ones a confident match exists for, so nobody has to sort them by hand.
+    """
+    from ide_storage.project_match import best_project_match
+
+    filed: list[dict[str, Any]] = []
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, title, workspace_path FROM chats WHERE project_id IS NULL ORDER BY id")
+        loose = [dict(r) for r in cur.fetchall()]
+        texts: dict[int, str] = {}
+        for chat in loose:
+            cur.execute("SELECT content FROM messages WHERE chat_id = ? ORDER BY id LIMIT 60", (chat["id"],))
+            body = "\n".join((r["content"] or "")[:4000] for r in cur.fetchall())
+            texts[chat["id"]] = f"{chat.get('title') or ''}\n{body}"[:80_000]
+    for chat in loose:
+        try:
+            match = best_project_match(texts[chat["id"]], workspace_path=chat.get("workspace_path"))
+        except Exception:  # noqa: BLE001
+            match = None
+        if match and match.get("confidence") == "high" and match.get("project_id"):
+            try:
+                result = file_session(int(chat["id"]), int(match["project_id"]))
+                filed.append({"chat_id": chat["id"], "title": _clip(chat.get("title"), 80), "project": result["project_name"]})
+            except LookupError:
+                continue
+    return {"filed": filed, "left_loose": len(loose) - len(filed)}
+
+
 def file_session(chat_id: int, project_id: int) -> dict[str, Any]:
     with db_conn() as conn:
         cur = conn.cursor()

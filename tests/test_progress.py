@@ -150,3 +150,24 @@ def test_progress_routes():
 
     assert client.delete(f"/api/goals/{goal['id']}").json()["ok"] is True
     assert client.get("/api/sessions/unfiled").json() == {"sessions": []}
+
+
+def test_auto_file_moves_only_confident_matches(monkeypatch):
+    from ide_storage import project_match
+    from ide_storage.progress import auto_file_sessions, unfiled_sessions
+
+    pid = _project("fans")
+    clear, vague = _chat(None, "Fan curve for the drive cage"), _chat(None, "Unzip these files")
+
+    def fake_match(text, **_):
+        if "Fan curve" in text:
+            return {"project_id": pid, "confidence": "high"}
+        return {"project_id": pid, "confidence": "medium"}
+
+    monkeypatch.setattr(project_match, "best_project_match", fake_match)
+
+    result = auto_file_sessions()
+
+    assert [f["chat_id"] for f in result["filed"]] == [clear]
+    assert result["left_loose"] == 1
+    assert [s["id"] for s in unfiled_sessions()] == [vague]

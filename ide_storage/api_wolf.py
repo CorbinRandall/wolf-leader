@@ -369,6 +369,14 @@ async def get_unfiled_sessions(limit: int = 100):
     return {"sessions": unfiled_sessions(limit)}
 
 
+@router.post("/sessions/auto-file")
+async def post_auto_file_sessions():
+    """File the loose sessions that clearly belong to a project; leave the rest alone."""
+    from ide_storage.progress import auto_file_sessions
+
+    return auto_file_sessions()
+
+
 @router.post("/sessions/{chat_id}/file")
 async def post_file_session(chat_id: int, body: FileSessionBody):
     from ide_storage.progress import file_session

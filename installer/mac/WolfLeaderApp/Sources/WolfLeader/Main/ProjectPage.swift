@@ -10,7 +10,9 @@ struct ProjectPage: View {
     @ObservedObject var model: ProjectsModel
     let back: () -> Void
     let prompt: (ProjectEntry) -> Void
+    var open: (Int) -> Void = { _ in }
 
+    @State private var related: [HubRelatedProject] = []
     @State private var memories: [HubMemory] = []
     @State private var logbook: [HubLogEntry] = []
     @State private var sessions: [HubChat] = []
@@ -50,6 +52,7 @@ struct ProjectPage: View {
             if let error = model.error { WLStatusPill(text: error, kind: .bad) }
 
             stands
+            if !related.isEmpty { connected }
             goals
             if let suggestions = progress?.suggestions, !suggestions.isEmpty { fromNotes(suggestions) }
             if let problems = progress?.openProblems, !problems.isEmpty {
@@ -66,7 +69,7 @@ struct ProjectPage: View {
             whereItLives
         }
         .task(id: entry.id) { await load() }
-        .sheet(item: $reading) { SessionReader(chat: $0) }
+        .sheet(item: $reading) { SessionReader(chatID: $0.id, title: $0.title, when: $0.occurredAt ?? $0.updatedAt) }
         .sheet(item: $verifying) { verifySheet($0) }
         .sheet(isPresented: $editing) {
             ProjectEditor(name: entry.name, description: entry.project.description ?? "") { name, description in
@@ -117,7 +120,7 @@ struct ProjectPage: View {
                 }
                 .menuStyle(.borderlessButton).fixedSize()
                 .help("Stage on the board")
-                if let owner = entry.project.owner, !owner.isEmpty { MainTag(text: owner) }
+                OwnerTag(entry: entry, model: model)
                 ProjectCounts(entry: entry)
                 Text("\(entry.project.chatCount) sessions · \(entry.project.memoryCount) memories · last worked on \(HubDate.format(entry.lastWorked))")
                     .font(DS.Font.micro).foregroundStyle(p.textMuted)
@@ -146,6 +149,17 @@ struct ProjectPage: View {
                         Text("Done when: \(next.doneWhen)").font(DS.Font.micro).foregroundStyle(p.textMuted)
                     }
                 }
+            }
+        }
+    }
+
+    private var connected: some View {
+        WLGroup(title: "Connected to", subtitle: "Projects whose journals overlap with this one.", icon: "point.3.connected.trianglepath.dotted") {
+            HStack(spacing: 8) {
+                ForEach(related.prefix(6)) { other in
+                    Button(other.name) { open(other.id) }.buttonStyle(OutlineButtonStyle())
+                }
+                Spacer(minLength: 0)
             }
         }
     }
@@ -412,6 +426,10 @@ struct ProjectPage: View {
         folders = f ?? folders
         prompts = b ?? prompts
         brief = r ?? brief
+        if let slug = entry.project.slug {
+            let found = (try? await hub.relatedProjects(slug: slug)) ?? []
+            related = found.filter { $0.id != entry.id && model.entry($0.id) != nil }
+        }
     }
 }
 
@@ -441,11 +459,13 @@ private struct MemoryKindGroup: View {
 }
 
 /// Read a saved session without leaving the app.
-private struct SessionReader: View {
+struct SessionReader: View {
     @EnvironmentObject private var store: ConfigStore
     @Environment(\.palette) private var p
     @Environment(\.dismiss) private var dismiss
-    let chat: HubChat
+    let chatID: Int
+    let title: String
+    let when: String?
     @State private var messages: [HubMessage] = []
     @State private var loading = true
     @State private var error: String?
@@ -454,8 +474,8 @@ private struct SessionReader: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 4) {
-                    WLEyebrow("Session · \(HubDate.format(chat.when))")
-                    Text(chat.title).font(DS.Font.section).foregroundStyle(p.text).lineLimit(2)
+                    WLEyebrow("Session · \(HubDate.format(when))")
+                    Text(title).font(DS.Font.section).foregroundStyle(p.text).lineLimit(2)
                 }
                 Spacer()
                 Button("Done") { dismiss() }.buttonStyle(OutlineButtonStyle()).keyboardShortcut(.cancelAction)
@@ -486,7 +506,7 @@ private struct SessionReader: View {
         .frame(width: 760, height: 680)
         .background(p.background)
         .task {
-            do { messages = try await store.hub.messages(chatID: chat.id) } catch { self.error = error.localizedDescription }
+            do { messages = try await store.hub.messages(chatID: chatID) } catch { self.error = error.localizedDescription }
             loading = false
         }
     }

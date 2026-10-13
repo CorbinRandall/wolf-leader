@@ -2,11 +2,11 @@ import AppKit
 import SwiftUI
 
 enum MainSection: String, CaseIterable, Identifiable, Hashable {
-    case home, projects, library, ask, shares, settings
+    case home, projects, library, ask, wiki, shares, settings
 
     var id: String { rawValue }
 
-    static let primary: [MainSection] = [.home, .projects, .library, .ask]
+    static let primary: [MainSection] = [.home, .projects, .library, .ask, .wiki]
 
     var label: String {
         switch self {
@@ -14,6 +14,7 @@ enum MainSection: String, CaseIterable, Identifiable, Hashable {
         case .projects: return "Projects"
         case .library: return "Library"
         case .ask: return "Ask"
+        case .wiki: return "Wiki"
         case .shares: return "Shares"
         case .settings: return "Settings"
         }
@@ -25,6 +26,7 @@ enum MainSection: String, CaseIterable, Identifiable, Hashable {
         case .projects: return "folder"
         case .library: return "rectangle.3.group"
         case .ask: return "sparkle.magnifyingglass"
+        case .wiki: return "book.closed"
         case .shares: return "externaldrive.connected.to.line.below"
         case .settings: return "gearshape"
         }
@@ -98,13 +100,15 @@ struct MainView: View {
     private var detail: some View {
         switch section ?? .home {
         case .home:
-            HomeView(openSettings: { section = .settings }, openProjects: { section = .projects })
+            HomeView(openSettings: { section = .settings }, openProjects: { section = .projects }, openWiki: { section = .wiki })
         case .projects:
             ProjectsView()
         case .library:
             LibraryView()
         case .ask:
             AskView()
+        case .wiki:
+            WikiView()
         case .shares:
             SharesView()
         case .settings:

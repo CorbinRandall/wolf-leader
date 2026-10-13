@@ -6,6 +6,7 @@ struct HomeView: View {
     @Environment(\.palette) private var p
     var openSettings: () -> Void
     var openProjects: () -> Void
+    var openWiki: () -> Void
 
     private enum LoadState: Equatable {
         case loading, ready, offline(String)
@@ -124,15 +125,15 @@ struct HomeView: View {
 
     @ViewBuilder
     private var actionTiles: some View {
-        if let wiki = store.config.wikiURL {
+        if store.config.wikiURL != nil {
             HomeActionTile(
                 symbol: "book.closed",
                 tint: p.accent,
                 title: "Open the wiki",
                 detail: "Every project's brief, decisions and history as readable pages.",
                 buttonTitle: "Open wiki",
-                buttonSymbol: "arrow.up.right"
-            ) { MainLinks.open(wiki) }
+                buttonSymbol: "arrow.right"
+            ) { openWiki() }
         }
         if let vault = store.config.vaultPath, obsidianInstalled {
             HomeActionTile(

@@ -267,10 +267,60 @@ def run_howl(
     offers.append({"kind": "start_job", "why": "connectors can watch a deploy or pull a model for you",
                    "how": f"POST {_public_base()}/api/jobs {{project_id: {project_id}, kind: ..., connector: ...}}"})
 
+    report["checklist"] = _checklist(report, project_id, git_info, offers)
     report["ok"] = True
     report["howl_url"] = f"{_public_base()}/?project={project_id}"
     report["summary"] = _paragraph(report)
     return report
+
+
+def _checklist(report: dict[str, Any], project_id: int, git_info: dict[str, Any], offers: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """The same questions every howl answers, in order, so nothing depends on the agent remembering.
+
+    state: done | ask (needs the user) | skip (does not apply).
+    """
+    from ide_storage.repo_health import offsite_status, project_repo_status
+
+    steps: list[dict[str, str]] = []
+
+    def add(step: str, state: str, detail: str) -> None:
+        steps.append({"step": step, "state": state, "detail": detail})
+
+    created = report.get("created_project")
+    add("project", "done", f"new project {created['slug']}" if created else f"saved to {report.get('project_slug')}")
+    add("saved", "done", "conversation, memories and brief")
+
+    status = next((p for p in project_repo_status() if p["project_id"] == project_id), None) or {}
+    dirty = int(git_info.get("dirty_files") or 0)
+    if status.get("state") == "needs_repo":
+        folder = status.get("folder") or report.get("path_alias", {}).get("hub_path") or ""
+        why = status.get("why") or "This project has files but no version history"
+        add("repo", "ask", f"{why}. Offer to create one.")
+        offers.insert(0, {
+            "kind": "create_repo",
+            "why": f"{why} ({folder})",
+            "how": f"from the project folder: wolfhowl.sh {report.get('project_slug')} --create-repo "
+                   "(add --plan first to show what would be committed; secrets, data and large files are left out)",
+        })
+        # One clear offer instead of two that mean the same thing.
+        offers[:] = [o for o in offers if o["kind"] != "git_init"]
+    elif status.get("state") == "versioned":
+        add("repo", "done", status.get("remote") or "under version control")
+    else:
+        add("repo", "skip", "no project folder of its own, so there is nothing to version")
+    if git_info.get("is_repo"):
+        add("commit", "ask" if dirty else "done", f"{dirty} uncommitted file(s)" if dirty else "nothing uncommitted")
+    else:
+        add("commit", "skip", "not a git repo")
+    if status.get("state") == "versioned":
+        unpushed = any(o["kind"] == "git_push" for o in offers)
+        add("push", "ask" if unpushed else "done", "the hub's repo is behind" if unpushed else "remote recorded")
+    else:
+        add("push", "skip", "no repo yet")
+    off = offsite_status()
+    add("offsite", "ask" if off["stale"] else "done",
+        "no recent off-site copy of the hub's repos and database" if off["stale"] else "off-site copy is current")
+    return steps
 
 
 def share_git_dir() -> str:
@@ -293,6 +343,7 @@ def ensure_share_remote(slug: str) -> dict[str, Any]:
     a = describe_aliases()
     rel = f"wolf-leader/git/{safe}.git"
     out: dict[str, Any] = {
+        "name": f"{safe}.git",
         "hub": hub_dir,
         "windows": (a["windows"].rstrip("\\") + "\\" + rel.replace("/", "\\")) if a.get("windows") else None,
         "unc": (a["unc"].rstrip("\\") + "\\" + rel.replace("/", "\\")) if a.get("unc") else None,

@@ -88,12 +88,13 @@ def _setup_prompt(project: dict[str, Any], folder: str) -> str:
     return (
         f"Put the Wolf Leader project \"{name}\" (slug `{slug}`) under version control.\n\n"
         f"1. Go to its folder: {folder}\n"
-        "2. If it is not a git repo, run `git init`. Add a .gitignore that keeps secrets (.env, keys, tokens), "
-        "databases, media, caches, and anything over 25 MB out of git. Add a `.env.example` in place of any real `.env`.\n"
-        "3. Show me what will be committed and wait for my OK. Then commit with a short message.\n"
-        f"4. Run /wolfhowl for `{slug}` from that folder. Wolf Leader then creates the project's private repo on "
-        "its share and sets it as `origin`. Push once I agree.\n\n"
-        "Do not push to GitHub or any other host unless I ask. Do not commit secrets or data files."
+        f"2. Run the wolfhowl skill's runner with `{slug} --create-repo --plan` and show me what it would commit "
+        "and what it would leave out. Secrets (.env, keys), databases, dependencies and files over 25 MB are left out "
+        "automatically; tell me if anything else looks like a secret or data.\n"
+        f"3. After I say OK, run it again with `{slug} --create-repo`. It runs git init, commits, and pushes to "
+        "this project's private repo on the Wolf Leader hub.\n"
+        "4. If the wolfhowl skill is not installed on this machine, connect it to Wolf Leader first (/wolfeat --setup).\n\n"
+        "Do not push to GitHub or any other host unless I ask."
     )
 
 
@@ -163,7 +164,14 @@ def project_repo_status() -> list[dict[str, Any]]:
         if howl.get("git_commit") or repo.get("commits"):
             item["state"] = "versioned"
         elif any(_holds_notes_repo(p["path"], notes) for p in own):
-            item.update({"state": "versioned", "why": "Notes vault under git"})
+            vault = next(r for r in notes if any(_holds_notes_repo(p["path"], [r]) for p in own))
+            last = (_git(vault, "log", "-1", "--format=%H%x1f%cI%x1f%s") or "").split("\x1f")
+            item.update({
+                "state": "versioned", "why": "Notes vault under git", "remote": _git(vault, "remote", "get-url", "origin"),
+                "last_commit": last[0] or None if last else None,
+                "last_commit_at": last[1] if len(last) > 1 else None,
+                "last_subject": last[2] if len(last) > 2 else None,
+            })
         elif own:
             # Prefer the deployed stack's folder: that is the thing with files to lose.
             compose = next((p["path"] for p in own if p["kind"] == "compose"), None)

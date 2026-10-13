@@ -39,6 +39,30 @@ Pass this chat’s real session id. Never guess or use “the newest transcript.
 
 4. Reply with the hub’s `summary` paragraph, then present the relevant `offers[]` as a short question. Do nothing from the offers until the user agrees.
 
+## The checklist
+
+Every save returns `checklist`: the same questions answered in the same order, so nothing depends on you remembering.
+
+1. **project** — which project this is, or that it was just created.
+2. **saved** — conversation, memories, brief.
+3. **repo** — does this project have files that should be under version control but are not?
+4. **commit** — are there uncommitted changes?
+5. **push** — has the hub's copy of the repo got them?
+6. **offsite** — is there a recent copy of everything off the hub server?
+
+Read the steps whose `state` is `ask` back to the user as short questions, in that order. Skip the `done` and `skip` ones. For a new project, step 3 is where a repo gets decided: if the folder holds code, Compose files, scripts or documents, offer one; if the project is only notes and decisions, it does not need one.
+
+## Create a repo
+
+When the user agrees to the `create_repo` offer, or asks to put a project under version control:
+
+```bash
+scripts/wolfhowl.sh SLUG --create-repo --plan   # show what would be committed and left out
+scripts/wolfhowl.sh SLUG --create-repo          # git init, commit, push to the project's repo on the hub
+```
+
+Show the plan first. Secrets (`.env`, keys), databases, dependencies, nested repos and files over 25 MB are left out automatically; say so, and flag anything else that looks like a secret or data. Add `--no-push` to commit without pushing.
+
 ## Git, when the user agrees
 
 The howl records commit, branch, remote, and uncommitted-change count on its own. If the repo has no `origin`, the hub provides one on the share and the runner sets it (config only; nothing is pushed). To act on a `git_init`, `git_commit`, or `git_push` offer, run the git steps through the runner so the new commit is pinned to the howl without saving twice:

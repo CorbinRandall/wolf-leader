@@ -65,7 +65,8 @@ def test_projects_are_sorted_into_versioned_needs_repo_shared_and_knowledge_only
     assert by["nextcloud"]["state"] == "needs_repo"
     assert by["nextcloud"]["folder"] == "/stacks/nextcloud"
     assert "Compose stack" in by["nextcloud"]["why"]
-    assert "/stacks/nextcloud" in by["nextcloud"]["setup_prompt"] and "/wolfhowl" in by["nextcloud"]["setup_prompt"]
+    assert "/stacks/nextcloud" in by["nextcloud"]["setup_prompt"]
+    assert "nextcloud --create-repo --plan" in by["nextcloud"]["setup_prompt"]
     assert by["fans"]["state"] == by["video"]["state"] == "shared_folder"
     assert by["ideas"]["state"] == "knowledge_only"
     assert by["immich"]["state"] == "versioned"
@@ -234,3 +235,47 @@ def test_home_folders_and_empty_remotes_are_not_mistaken_for_project_folders(sha
     assert by["cooling"]["state"] == "needs_repo"
     assert by["cooling"]["dirty_files"] == 44
     assert (by["sam-notes"]["state"], by["sam-notes"]["why"]) == ("versioned", "Notes vault under git")
+
+
+def test_howl_checklist_offers_a_repo_only_when_the_project_has_its_own_folder(share):
+    from ide_storage.howl import run_howl
+
+    stack = _project("nextcloud")
+    register_project_path(stack, "/stacks/nextcloud", kind="compose")
+    _project("ideas")
+    messages = [{"role": "user", "content": "x"}, {"role": "assistant", "content": "decision: y"}]
+
+    report = run_howl(slug="nextcloud", workspace_path="/stacks/nextcloud", messages=messages, session_id="c1",
+                      git={"is_repo": False})
+    steps = {s["step"]: s for s in report["checklist"]}
+    assert [s["step"] for s in report["checklist"]] == ["project", "saved", "repo", "commit", "push", "offsite"]
+    assert steps["repo"]["state"] == "ask"
+    assert steps["offsite"]["state"] == "ask"
+    kinds = [o["kind"] for o in report["offers"]]
+    assert kinds[0] == "create_repo" and "git_init" not in kinds
+    assert "nextcloud --create-repo" in report["offers"][0]["how"]
+
+    # Notes-only project: no folder of its own, so no repo is suggested.
+    notes_only = run_howl(slug="ideas", messages=messages, session_id="c2")
+    steps = {s["step"]: s for s in notes_only["checklist"]}
+    assert steps["repo"]["state"] == "skip"
+    assert "create_repo" not in [o["kind"] for o in notes_only["offers"]]
+
+    # Once it has commits, the repo step is done and uncommitted work is what gets asked about.
+    done = run_howl(slug="nextcloud", workspace_path="/stacks/nextcloud", messages=messages, session_id="c1",
+                    git={"is_repo": True, "commit": "abc", "branch": "main", "remote": "/r/nextcloud.git", "dirty_files": 2})
+    steps = {s["step"]: s for s in done["checklist"]}
+    assert (steps["repo"]["state"], steps["commit"]["state"]) == ("done", "ask")
+
+
+def test_project_repo_endpoint_creates_the_share_repo(share):
+    from ide_storage.main import app
+
+    client = TestClient(app)
+    _project("recipes")
+
+    remote = client.post("/api/projects/by-slug/recipes/repo", json={"client_os": "mac"}).json()
+
+    assert remote["name"] == "recipes.git"
+    assert (share / "wolf-leader" / "git" / "recipes.git" / "objects").is_dir()
+    assert client.post("/api/projects/by-slug/nope/repo", json={}).status_code == 404

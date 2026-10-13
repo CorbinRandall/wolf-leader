@@ -297,6 +297,30 @@ class OffsiteReport(BaseModel):
     detail: Optional[str] = None
 
 
+class RepoBody(BaseModel):
+    client_os: Optional[str] = None
+
+
+@router.post("/projects/by-slug/{slug}/repo")
+async def post_project_repo(slug: str, body: RepoBody = RepoBody()):
+    """The project's git repo on the hub's share (created if missing), in every spelling a client may need.
+
+    Call this when there is a commit to push; --create-repo in the runner does.
+    """
+    from ide_storage.howl import ensure_share_remote
+    from ide_storage.hub import resolve_project
+
+    project = resolve_project(slug=slug)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    remote = ensure_share_remote(project["slug"])
+    if remote.get("error"):
+        raise HTTPException(status_code=500, detail=remote["error"])
+    key = {"windows": "windows", "win32": "windows", "mac": "mac", "darwin": "mac"}.get((body.client_os or "").lower())
+    remote["client"] = (remote.get(key) if key else None) or remote["hub"]
+    return remote
+
+
 @router.get("/repos")
 async def get_repos():
     """Version-control state of every project, shared folders, notes vaults, and the off-site copy."""

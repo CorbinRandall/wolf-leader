@@ -14,7 +14,14 @@ struct ReposLibraryView: View {
 
     var body: some View {
         WLPageHeader(title: "Repos", subtitle: "Where each project's files are versioned, and what is not protected yet.") {
-            Button("Refresh") { Task { await load() } }.buttonStyle(OutlineButtonStyle())
+            HStack(spacing: 8) {
+                let here = (response?.projects ?? []).filter { $0.state == "needs_repo" && isOnThisMac($0) }
+                if here.count > 1 {
+                    Button("Create all on this Mac (\(here.count))") { createAll(here) }
+                        .buttonStyle(SecondaryButtonStyle()).disabled(busy)
+                }
+                Button("Refresh") { Task { await load() } }.buttonStyle(OutlineButtonStyle())
+            }
         }
         if let notice { WLStatusPill(text: notice, kind: .good) }
         if loading && response == nil {
@@ -49,7 +56,7 @@ struct ReposLibraryView: View {
     @ViewBuilder
     private func needsRepo(_ items: [HubRepoProject]) -> some View {
         if !items.isEmpty {
-            WLGroup(title: "Needs a repo", subtitle: "These projects have files but no version history. Copy a prompt and give it to an agent on the machine that holds the folder.", icon: "exclamationmark.triangle") {
+            WLGroup(title: "Needs a repo", subtitle: "These projects have files but no version history. Folders on this Mac can be set up here in one click. For a folder on another machine, copy the prompt and give it to an agent there.", icon: "exclamationmark.triangle") {
                 ForEach(items) { item in
                     if item.id != items.first?.id { WLDivider() }
                     HStack(alignment: .top) {
@@ -62,8 +69,16 @@ struct ReposLibraryView: View {
                             }
                         }
                         Spacer()
-                        Button("Copy setup prompt") { copy(item.setupPrompt ?? "", "Setup prompt for \(item.name) copied.") }
-                            .buttonStyle(SecondaryButtonStyle())
+                        if isOnThisMac(item) {
+                            Button("Create repo") { create(item) }
+                                .buttonStyle(PrimaryButtonStyle()).disabled(busy)
+                        } else {
+                            VStack(alignment: .trailing, spacing: 4) {
+                                Button("Copy setup prompt") { copy(item.setupPrompt ?? "", "Setup prompt for \(item.name) copied.") }
+                                    .buttonStyle(SecondaryButtonStyle())
+                                Text("Folder is on another machine").font(DS.Font.micro).foregroundStyle(p.textMuted)
+                            }
+                        }
                     }
                 }
             }
@@ -182,6 +197,7 @@ struct ReposLibraryView: View {
 
     private func commitLine(_ item: HubRepoProject) -> String {
         var parts: [String] = []
+        if let why = item.why { parts.append(why) }
         if let sha = item.lastCommit { parts.append(String(sha.prefix(8))) }
         if let branch = item.branch { parts.append(branch) }
         if let subject = item.lastSubject { parts.append(subject) }
@@ -189,6 +205,69 @@ struct ReposLibraryView: View {
         let when = HubDate.format(item.howledAt ?? item.lastCommitAt)
         if !when.isEmpty { parts.append(when) }
         return parts.isEmpty ? "No commit recorded yet" : parts.joined(separator: " · ")
+    }
+
+    // MARK: Create a repo for a folder on this Mac
+
+    private func isOnThisMac(_ item: HubRepoProject) -> Bool {
+        guard let folder = item.folder, folder.hasPrefix("/") else { return false }
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: folder, isDirectory: &isDirectory) && isDirectory.boolValue
+    }
+
+    private func create(_ item: HubRepoProject) {
+        guard let folder = item.folder else { return }
+        busy = true; error = nil; notice = nil
+        Task {
+            defer { busy = false }
+            do {
+                let plan = try await RepoCreator.plan(folder: folder, hubURL: store.config.hubURL)
+                guard confirm(item, plan) else { return }
+                notice = try await RepoCreator.create(slug: item.slug, folder: folder, hubURL: store.config.hubURL).summary(item.name)
+                await load()
+            } catch { self.error = "\(item.name): \(error.localizedDescription)" }
+        }
+    }
+
+    private func createAll(_ items: [HubRepoProject]) {
+        let alert = NSAlert()
+        alert.messageText = "Create repos for \(items.count) projects on this Mac?"
+        alert.informativeText = items.map { "• \($0.name)" }.joined(separator: "\n")
+            + "\n\nEach folder is committed and pushed to its project's private repo on the hub. Secrets, databases, dependencies and files over 25 MB are left out."
+        alert.addButton(withTitle: "Create \(items.count) repos")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        busy = true; error = nil; notice = nil
+        Task {
+            defer { busy = false }
+            var made = 0
+            var problems: [String] = []
+            for item in items {
+                guard let folder = item.folder else { continue }
+                do {
+                    _ = try await RepoCreator.create(slug: item.slug, folder: folder, hubURL: store.config.hubURL)
+                    made += 1
+                } catch { problems.append("\(item.name): \(error.localizedDescription)") }
+            }
+            notice = "Created \(made) of \(items.count) repos."
+            if !problems.isEmpty { self.error = problems.joined(separator: " · ") }
+            await load()
+        }
+    }
+
+    private func confirm(_ item: HubRepoProject, _ plan: RepoCreator.Plan) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Create a repo for \(item.name)?"
+        var lines = ["\(plan.toCommit.count) file(s) in \(plan.folder) will be committed and pushed to this project's private repo on the hub."]
+        if !plan.leftOut.isEmpty {
+            let shown = plan.leftOut.prefix(8).joined(separator: ", ")
+            lines.append("Left out of git: \(shown)\(plan.leftOut.count > 8 ? " and \(plan.leftOut.count - 8) more" : "").")
+        }
+        lines.append(contentsOf: plan.warnings)
+        alert.informativeText = lines.joined(separator: "\n\n")
+        alert.addButton(withTitle: "Create repo")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     private func copy(_ value: String, _ message: String) {
@@ -233,4 +312,92 @@ struct AnyButtonStyle: ButtonStyle {
     private let make: (Configuration) -> AnyView
     init<S: ButtonStyle>(_ style: S) { make = { AnyView(style.makeBody(configuration: $0)) } }
     func makeBody(configuration: Configuration) -> some View { make(configuration) }
+}
+
+
+/// Runs the bundled /wolfhowl runner's `--create-repo` mode for a folder on this Mac.
+enum RepoCreator {
+    struct Plan {
+        var folder: String
+        var toCommit: [String]
+        var leftOut: [String]
+        var warnings: [String]
+    }
+
+    struct Outcome {
+        var pushed: Bool
+        var why: String?
+        func summary(_ name: String) -> String {
+            pushed ? "Created a repo for \(name) and pushed it to the hub."
+                   : "Committed \(name) on this Mac, but did not push: \(why ?? "the hub's git folder is not reachable from here")."
+        }
+    }
+
+    enum Failure: LocalizedError {
+        case noRunner, noPython, failed(String)
+        var errorDescription: String? {
+            switch self {
+            case .noRunner: return "The Wolf Leader save script is missing from this app. Reinstall the app."
+            case .noPython: return "python3 is not installed on this Mac. Install the Xcode Command Line Tools."
+            case .failed(let why): return why
+            }
+        }
+    }
+
+    static func plan(folder: String, hubURL: String) async throws -> Plan {
+        let json = try await run(["--create-repo", "--plan"], folder: folder, hubURL: hubURL)
+        if let blocked = json["blocked"] as? String { throw Failure.failed(blocked) }
+        let strings = { (key: String) in (json[key] as? [String]) ?? [] }
+        return Plan(folder: folder, toCommit: strings("to_commit"),
+                    leftOut: strings("ignored") + strings("nested_repos") + strings("too_big"), warnings: strings("warnings"))
+    }
+
+    static func create(slug: String, folder: String, hubURL: String) async throws -> Outcome {
+        let json = try await run([slug, "--create-repo"], folder: folder, hubURL: hubURL)
+        guard json["ok"] as? Bool == true else { throw Failure.failed((json["error"] as? String) ?? "The repo could not be created.") }
+        let push = json["push"] as? [String: Any]
+        return Outcome(pushed: push?["pushed"] as? Bool == true, why: push?["why"] as? String)
+    }
+
+    private static var runner: URL? {
+        let relative = "wolfhowl/scripts/wolfhowl.py"
+        var candidates: [URL] = []
+        if let resources = Bundle.main.resourceURL {
+            candidates.append(resources.appendingPathComponent("payload/examples/shared/skills/" + relative))
+        }
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        for dir in [".claude/skills", ".agents/skills", ".cursor/skills"] {
+            candidates.append(home.appendingPathComponent(dir + "/" + relative))
+        }
+        return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    private static func run(_ arguments: [String], folder: String, hubURL: String) async throws -> [String: Any] {
+        guard let runner else { throw Failure.noRunner }
+        let python = ["/usr/bin/python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3"]
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
+        guard let python else { throw Failure.noPython }
+        return try await Task.detached(priority: .userInitiated) {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: python)
+            process.arguments = [runner.path] + arguments
+            process.currentDirectoryURL = URL(fileURLWithPath: folder)
+            var environment = ProcessInfo.processInfo.environment
+            environment["WOLF_LEADER_WORKSPACE"] = folder
+            environment["WOLF_LEADER_API"] = hubURL.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
+            environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (environment["PATH"] ?? "")
+            environment["GIT_TERMINAL_PROMPT"] = "0"
+            process.environment = environment
+            let out = Pipe(), err = Pipe()
+            process.standardOutput = out
+            process.standardError = err
+            try process.run()
+            let data = out.fileHandleForReading.readDataToEndOfFile()
+            let errors = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            process.waitUntilExit()
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { return json }
+            let message = errors.trimmingCharacters(in: .whitespacesAndNewlines)
+            throw Failure.failed(message.isEmpty ? "The save script returned nothing." : message)
+        }.value
+    }
 }

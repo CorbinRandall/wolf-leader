@@ -3,7 +3,7 @@ import { HomeLayout } from 'fumadocs-ui/layouts/home';
 import { baseOptions } from '@/lib/layout.shared';
 
 const cards = [
-  { href: '/docs', title: 'Home', body: 'Map of every project the pack knows about, newest howls first.' },
+  { href: '/docs', title: 'Overview', body: 'Map of every project the pack knows about, newest howls first.' },
   { href: '/docs/projects', title: 'Projects', body: 'Living brief per project: where we left off, decisions, constraints, paths.' },
   { href: '/docs/howls', title: 'Howls', body: 'One page per broadcast — what landed, which machine, which commit.' },
   { href: '/docs/topics', title: 'Topics', body: 'Hubs built from tags and embedding neighbourhoods.' },

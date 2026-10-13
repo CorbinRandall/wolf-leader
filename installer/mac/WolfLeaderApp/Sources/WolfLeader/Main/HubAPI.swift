@@ -1011,3 +1011,26 @@ extension HubClient {
         }
     }
 }
+
+extension HubClient {
+    func ownerSummary() async throws -> (owners: [String], counts: [String: Int]) {
+        let json = (try JSONSerialization.jsonObject(with: try await data("/api/owners")) as? [String: Any]) ?? [:]
+        return ((json["owners"] as? [String]) ?? [], (json["counts"] as? [String: Int]) ?? [:])
+    }
+
+    private func ownerPath(_ name: String) -> String {
+        "/api/owners/" + (name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name)
+    }
+
+    func addOwner(_ name: String) async throws {
+        _ = try await data("/api/owners", method: "POST", body: try JSONSerialization.data(withJSONObject: ["name": name]))
+    }
+
+    func renameOwner(_ old: String, to new: String) async throws {
+        _ = try await data(ownerPath(old), method: "PUT", body: try JSONSerialization.data(withJSONObject: ["name": new]), timeout: 60)
+    }
+
+    func removeOwner(_ name: String, moveTo: String?) async throws {
+        _ = try await data(ownerPath(name), query: moveTo.map { ["move_to": $0] } ?? [:], method: "DELETE", timeout: 60)
+    }
+}

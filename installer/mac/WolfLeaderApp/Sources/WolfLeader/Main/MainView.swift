@@ -2,15 +2,14 @@ import AppKit
 import SwiftUI
 
 enum MainSection: String, CaseIterable, Identifiable, Hashable {
-    case home, projects, library, ask, wiki, shares, settings
+    case projects, library, ask, wiki, shares, settings
 
     var id: String { rawValue }
 
-    static let primary: [MainSection] = [.home, .projects, .library, .ask, .wiki]
+    static let primary: [MainSection] = [.projects, .library, .ask, .wiki]
 
     var label: String {
         switch self {
-        case .home: return "Home"
         case .projects: return "Projects"
         case .library: return "Library"
         case .ask: return "Ask"
@@ -22,7 +21,6 @@ enum MainSection: String, CaseIterable, Identifiable, Hashable {
 
     var symbol: String {
         switch self {
-        case .home: return "house"
         case .projects: return "folder"
         case .library: return "rectangle.3.group"
         case .ask: return "sparkle.magnifyingglass"
@@ -38,7 +36,7 @@ struct MainView: View {
     @EnvironmentObject private var store: ConfigStore
     @Environment(\.palette) private var p
     @StateObject private var updates = UpdateChecker()
-    @State private var section: MainSection? = .home
+    @State private var section: MainSection? = .projects
     @StateObject private var wiki = WikiBrowser()
     // Back / forward across sidebar tabs, like a browser.
     @State private var backStack: [MainSection] = []
@@ -151,11 +149,9 @@ struct MainView: View {
 
     @ViewBuilder
     private var detail: some View {
-        switch section ?? .home {
-        case .home:
-            HomeView(openSettings: { section = .settings }, openProjects: { section = .projects })
+        switch section ?? .projects {
         case .projects:
-            ProjectsView()
+            ProjectsView(openSettings: { section = .settings })
         case .library:
             LibraryView()
         case .ask:

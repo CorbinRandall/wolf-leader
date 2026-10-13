@@ -11,6 +11,7 @@ enum ProjectsTab: String, Hashable {
 struct ProjectsView: View {
     @EnvironmentObject private var store: ConfigStore
     @Environment(\.palette) private var p
+    var openSettings: () -> Void = {}
     @StateObject private var model = ProjectsModel()
     @AppStorage("wl.projects.tab") private var tabRaw = ProjectsTab.focus.rawValue
     @State private var query = ""
@@ -84,6 +85,12 @@ struct ProjectsView: View {
             if let error = model.error { WLStatusPill(text: error, kind: .bad) }
             if model.loading && model.entries.isEmpty {
                 ProgressView("Reading the journal…")
+            } else if model.entries.isEmpty, model.error != nil {
+                MainNotice(symbol: "wifi.exclamationmark", title: "Can't reach your hub at \(store.config.hubURL)",
+                           message: "Check the hub address in Settings.") {
+                    Button("Check Settings", action: openSettings).buttonStyle(OutlineButtonStyle())
+                    Button("Try again") { Task { await model.reload() } }.buttonStyle(SecondaryButtonStyle())
+                }
             } else {
                 switch tab.wrappedValue {
                 case .focus: focus
@@ -167,8 +174,22 @@ struct ProjectsView: View {
         }
     }
 
+    private var stats: some View {
+        let memories = model.entries.reduce(0) { $0 + $1.project.memoryCount }
+        let sessions = model.entries.reduce(0) { $0 + $1.project.chatCount } + model.unfiled.count
+        let last = model.entries.compactMap { HubDate.parse($0.lastWorked) }.max()
+        return HStack(spacing: DS.Spacing.md) {
+            WLStatTile(title: "Projects", value: "\(model.entries.count)", icon: "folder")
+            WLStatTile(title: "Memories", value: "\(memories)", icon: "brain")
+            WLStatTile(title: "Chats", value: "\(sessions)", icon: "bubble.left.and.bubble.right")
+            WLStatTile(title: "Last save", value: last.map { String(HubDate.format($0).prefix(5)) } ?? "None yet",
+                       icon: "clock", footnote: last.map { String(HubDate.format($0).dropFirst(6)) })
+        }
+    }
+
     @ViewBuilder
     private var list: some View {
+        stats
         HStack(spacing: 8) {
             Picker("", selection: $stageFilter) {
                 Text("Open").tag("open")

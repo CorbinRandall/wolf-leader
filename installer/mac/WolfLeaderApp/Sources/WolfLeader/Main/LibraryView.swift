@@ -3,7 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 private enum LibraryTab: String, Hashable {
-    case skills, repos, cleanup, snippets
+    case skills, people, repos, cleanup, snippets
 }
 
 /// Client-first management tools. The hub keeps a compact fallback UI; day-to-day organization
@@ -14,6 +14,7 @@ struct LibraryView: View {
     private var tabs: [WLTab<LibraryTab>] {
         [
             WLTab(id: .skills, title: "Skills", icon: "shippingbox"),
+            WLTab(id: .people, title: "People", icon: "person.2"),
             WLTab(id: .repos, title: "Backups", icon: "externaldrive.badge.checkmark"),
             WLTab(id: .cleanup, title: "Cleanup", icon: "arrow.triangle.merge"),
             WLTab(id: .snippets, title: "Snippets", icon: "chevron.left.forwardslash.chevron.right"),
@@ -28,6 +29,7 @@ struct LibraryView: View {
             }
             switch tab {
             case .skills: SkillsLibraryView()
+            case .people: PeopleLibraryView()
             case .repos: ReposLibraryView()
             case .cleanup: DuplicateCleanupView()
             case .snippets: SnippetsLibraryView()
@@ -361,5 +363,102 @@ private struct SnippetsLibraryView: View {
     private func remove(_ snippet: HubSnippet) async {
         do { try await store.hub.deleteSnippet(id: snippet.id); await load() }
         catch { self.error = error.localizedDescription }
+    }
+}
+
+
+/// Library → People: who projects can belong to. Add, rename or remove an owner.
+private struct PeopleLibraryView: View {
+    @EnvironmentObject private var store: ConfigStore
+    @Environment(\.palette) private var p
+    @State private var owners: [String] = []
+    @State private var counts: [String: Int] = [:]
+    @State private var newName = ""
+    @State private var renaming: String?
+    @State private var renameText = ""
+    @State private var removing: String?
+    @State private var error: String?
+    @State private var notice: String?
+
+    var body: some View {
+        WLPageHeader(title: "People", subtitle: "Who a project can belong to. Change a project's owner from its tag in Projects.")
+        if let notice { WLStatusPill(text: notice, kind: .good) }
+        if let error { WLStatusPill(text: error, kind: .bad) }
+        WLGroup(title: "Owners", subtitle: "\(counts[""] ?? 0) project\((counts[""] ?? 0) == 1 ? " has" : "s have") no owner.", icon: "person.2") {
+            if owners.isEmpty { Text("No owners yet.").font(DS.Font.bodySmall).foregroundStyle(p.textMuted) }
+            ForEach(owners, id: \.self) { name in
+                if name != owners.first { WLDivider() }
+                HStack {
+                    if renaming == name {
+                        TextField("Name", text: $renameText).mainField().frame(maxWidth: 240)
+                            .onSubmit { rename(name) }
+                        Button("Save") { rename(name) }.buttonStyle(SecondaryButtonStyle())
+                            .disabled(renameText.trimmingCharacters(in: .whitespaces).isEmpty)
+                        Button("Cancel") { renaming = nil }.buttonStyle(OutlineButtonStyle())
+                    } else {
+                        Text(name).font(DS.Font.bodySmall.weight(.semibold))
+                        Text("\(counts[name] ?? 0) project\((counts[name] ?? 0) == 1 ? "" : "s")").font(DS.Font.micro).foregroundStyle(p.textMuted)
+                    }
+                    Spacer()
+                    if renaming != name {
+                        Button("Rename") { renameText = name; renaming = name }.buttonStyle(OutlineButtonStyle())
+                        Button("Remove") { removing = name }.buttonStyle(OutlineButtonStyle())
+                    }
+                }
+            }
+            WLDivider()
+            HStack {
+                TextField("Add a person", text: $newName).mainField().frame(maxWidth: 240).onSubmit { add() }
+                Button("Add") { add() }.buttonStyle(SecondaryButtonStyle())
+                    .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+                Spacer()
+            }
+        }
+        Color.clear.frame(height: 0).task(id: store.config.hubURL) { await load() }
+            .confirmationDialog(
+                "Remove \(removing ?? "")?",
+                isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
+                presenting: removing
+            ) { name in
+                ForEach(owners.filter { $0 != name }, id: \.self) { other in
+                    Button("Remove and give their projects to \(other)") { remove(name, moveTo: other) }
+                }
+                Button("Remove and leave their projects with no owner", role: .destructive) { remove(name, moveTo: nil) }
+                Button("Cancel", role: .cancel) { removing = nil }
+            } message: { name in
+                Text("\(counts[name] ?? 0) project\((counts[name] ?? 0) == 1 ? "" : "s") belong to \(name). The projects themselves are kept.")
+            }
+    }
+
+    private func add() {
+        let name = newName.trimmingCharacters(in: .whitespaces)
+        newName = ""
+        run("Added \(name).") { try await $0.addOwner(name) }
+    }
+
+    private func rename(_ old: String) {
+        let name = renameText.trimmingCharacters(in: .whitespaces)
+        renaming = nil
+        run("Renamed \(old) to \(name).") { try await $0.renameOwner(old, to: name) }
+    }
+
+    private func remove(_ name: String, moveTo: String?) {
+        removing = nil
+        run("Removed \(name).") { try await $0.removeOwner(name, moveTo: moveTo) }
+    }
+
+    private func run(_ done: String, _ work: @escaping (HubClient) async throws -> Void) {
+        Task {
+            do { try await work(store.hub); notice = done; error = nil; await load() }
+            catch { self.error = "That did not work. The name may already be taken."; notice = nil }
+        }
+    }
+
+    private func load() async {
+        do {
+            let summary = try await store.hub.ownerSummary()
+            owners = summary.owners
+            counts = summary.counts
+        } catch { self.error = error.localizedDescription }
     }
 }

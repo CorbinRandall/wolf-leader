@@ -190,3 +190,34 @@ def test_repos_endpoint_and_unlink_route(share):
     assert client.post("/api/backups/offsite", json={"repos": 3, "device_name": "nas"}).json()["last_good"]["repos"] == 3
     assert client.get("/api/offsite-mirror.sh").text.startswith("#!/usr/bin/env bash")
     assert client.post("/api/notes/commit").json() == {"results": [], "notes": []}
+
+
+def test_home_folders_and_empty_remotes_are_not_mistaken_for_project_folders(share):
+    from ide_storage.howl import run_howl
+    from ide_storage.repo_health import project_repo_status
+
+    migration = _project("migration")
+    register_project_path(migration, "/Users/corbin")
+    windows = _project("win-notes")
+    register_project_path(windows, "C:\\Users\\corbin")
+
+    # A remote was recorded once, but nothing was ever committed.
+    cooling = _project("cooling")
+    register_project_path(cooling, "/work/cooling")
+    messages = [{"role": "user", "content": "fans"}, {"role": "assistant", "content": "decision: ok"}]
+    run_howl(slug="cooling", workspace_path="/work/cooling", messages=messages, session_id="s9",
+             git={"is_repo": True, "commit": None, "remote": "/share/git/cooling.git", "dirty_files": 44})
+
+    # A person's Wolf Leader folder whose notes vault is already a repo.
+    vault = share / "Corbin" / "wolfleader" / "vault"
+    vault.mkdir(parents=True)
+    _git(vault, "init", "-q", "-b", "main")
+    person = _project("corbin-notes")
+    register_project_path(person, "/srv/content/Corbin/wolfleader")
+
+    by = _by_slug(project_repo_status())
+
+    assert by["migration"]["state"] == by["win-notes"]["state"] == "knowledge_only"
+    assert by["cooling"]["state"] == "needs_repo"
+    assert by["cooling"]["dirty_files"] == 44
+    assert (by["corbin-notes"]["state"], by["corbin-notes"]["why"]) == ("versioned", "Notes vault under git")

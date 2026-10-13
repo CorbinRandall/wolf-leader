@@ -3,11 +3,12 @@ import SwiftUI
 import WebKit
 
 /// The hub's wiki (`/wiki/`) inside the app: same pages, search and links as in a browser.
-/// No chrome of its own: the wiki's own header navigates, and two-finger swipes go back and forward.
+/// No chrome of its own: the wiki's header navigates, and the window's back and forward buttons
+/// (or two-finger swipes) move through its pages.
 struct WikiView: View {
     @EnvironmentObject private var store: ConfigStore
     @Environment(\.palette) private var p
-    @StateObject private var browser = WikiBrowser()
+    @ObservedObject var browser: WikiBrowser
 
     var body: some View {
         ZStack {
@@ -32,8 +33,11 @@ struct WikiView: View {
 final class WikiBrowser: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate {
     let web: WKWebView
     @Published var failure: String?
+    @Published var canGoBack = false
+    @Published var canGoForward = false
 
     private var home: URL?
+    private var watchers: [NSKeyValueObservation] = []
 
     override init() {
         web = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
@@ -42,6 +46,10 @@ final class WikiBrowser: NSObject, ObservableObject, WKNavigationDelegate, WKUID
         web.uiDelegate = self
         web.allowsBackForwardNavigationGestures = true
         web.allowsMagnification = true
+        watchers = [
+            web.observe(\.canGoBack) { [weak self] view, _ in Task { @MainActor in self?.canGoBack = view.canGoBack } },
+            web.observe(\.canGoForward) { [weak self] view, _ in Task { @MainActor in self?.canGoForward = view.canGoForward } },
+        ]
     }
 
     /// Load the wiki's front page, unless this hub's wiki is already showing.

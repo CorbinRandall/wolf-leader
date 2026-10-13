@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import { HomeLayout } from 'fumadocs-ui/layouts/home';
 import { baseOptions } from '@/lib/layout.shared';
-import { hubUrl } from '@/lib/shared';
 
 const cards = [
   { href: '/docs', title: 'Home', body: 'Map of every project the pack knows about, newest howls first.' },
@@ -36,12 +35,6 @@ export default function HomePage() {
             </Link>
           ))}
         </div>
-        <a
-          href={`${hubUrl}/`}
-          className="mt-10 text-sm font-semibold text-fd-primary underline-offset-4 hover:underline"
-        >
-          Open the hub UI →
-        </a>
       </main>
     </HomeLayout>
   );

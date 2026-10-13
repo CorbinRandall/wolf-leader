@@ -1,5 +1,5 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
-import { appName, hubUrl } from './shared';
+import { appName } from './shared';
 
 export function baseOptions(): BaseLayoutProps {
   return {
@@ -21,7 +21,6 @@ export function baseOptions(): BaseLayoutProps {
       { text: 'Projects', url: '/docs/projects', active: 'nested-url' },
       { text: 'Howls', url: '/docs/howls', active: 'nested-url' },
       { text: 'Topics', url: '/docs/topics', active: 'nested-url' },
-      { text: 'Hub', url: `${hubUrl || ''}/`, external: true },
     ],
   };
 }

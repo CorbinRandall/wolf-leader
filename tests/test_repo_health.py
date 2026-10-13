@@ -197,9 +197,9 @@ def test_home_folders_and_empty_remotes_are_not_mistaken_for_project_folders(sha
     from ide_storage.repo_health import project_repo_status
 
     migration = _project("migration")
-    register_project_path(migration, "/Users/corbin")
+    register_project_path(migration, "/" + "Users/example")  # a bare home folder
     windows = _project("win-notes")
-    register_project_path(windows, "C:\\Users\\corbin")
+    register_project_path(windows, "C:\\Users\\example")
 
     # A remote was recorded once, but nothing was ever committed.
     cooling = _project("cooling")
@@ -209,15 +209,15 @@ def test_home_folders_and_empty_remotes_are_not_mistaken_for_project_folders(sha
              git={"is_repo": True, "commit": None, "remote": "/share/git/cooling.git", "dirty_files": 44})
 
     # A person's Wolf Leader folder whose notes vault is already a repo.
-    vault = share / "Corbin" / "wolfleader" / "vault"
+    vault = share / "Sam" / "wolfleader" / "vault"
     vault.mkdir(parents=True)
     _git(vault, "init", "-q", "-b", "main")
-    person = _project("corbin-notes")
-    register_project_path(person, "/srv/content/Corbin/wolfleader")
+    person = _project("sam-notes")
+    register_project_path(person, "/srv/content/Sam/wolfleader")
 
     by = _by_slug(project_repo_status())
 
     assert by["migration"]["state"] == by["win-notes"]["state"] == "knowledge_only"
     assert by["cooling"]["state"] == "needs_repo"
     assert by["cooling"]["dirty_files"] == 44
-    assert (by["corbin-notes"]["state"], by["corbin-notes"]["why"]) == ("versioned", "Notes vault under git")
+    assert (by["sam-notes"]["state"], by["sam-notes"]["why"]) == ("versioned", "Notes vault under git")

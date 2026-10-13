@@ -124,16 +124,6 @@ struct HomeView: View {
 
     @ViewBuilder
     private var actionTiles: some View {
-        if let wiki = store.config.wikiURL {
-            HomeActionTile(
-                symbol: "book.closed",
-                tint: p.accent,
-                title: "Open the wiki",
-                detail: "Every project's brief, decisions and history as readable pages.",
-                buttonTitle: "Open wiki",
-                buttonSymbol: "arrow.up.right"
-            ) { MainLinks.open(wiki) }
-        }
         if let vault = store.config.vaultPath, obsidianInstalled {
             HomeActionTile(
                 symbol: "diamond.fill",

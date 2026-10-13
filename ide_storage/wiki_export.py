@@ -45,7 +45,7 @@ def _rewrite_links(md: str) -> str:
     def repl(m: re.Match[str]) -> str:
         target, label = m.group(1).strip(), (m.group(2) or "").strip()
         if target.lower() == "home":
-            return f"[{label or 'Home'}](/docs)"
+            return f"[{label or 'Overview'}](/docs)"
         return f"[{label or target.rsplit('/', 1)[-1]}](/docs/{target.strip('/')})"
 
     return _WIKILINK.sub(repl, md)
@@ -131,14 +131,14 @@ def export_content() -> dict[str, Any]:
         )
         howls = [dict(r) for r in cur.fetchall()]
 
-    # Home
+    # Overview: the project map. "Home" is the wiki's four-tile front page.
     home_md = _from_vault_note("Home.md")
     if home_md is None:
         V.write_home()
         home_md = _from_vault_note("Home.md") or "# Wolf Leader\n\nNo content yet."
     _, body = _strip_frontmatter(home_md)
     body = re.sub(r"^# .*\n", "", body, count=1)
-    put("index.md", body, "Wolf Leader — Home", "Map of every project, newest howls first.")
+    put("index.md", body, "Wolf Leader — Overview", "Map of every project, newest howls first.")
 
     # Projects
     for p in projects:

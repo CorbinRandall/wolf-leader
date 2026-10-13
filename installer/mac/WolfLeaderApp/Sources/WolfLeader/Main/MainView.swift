@@ -2,11 +2,11 @@ import AppKit
 import SwiftUI
 
 enum MainSection: String, CaseIterable, Identifiable, Hashable {
-    case home, projects, library, ask, shares, settings
+    case home, projects, library, ask, wiki, shares, settings
 
     var id: String { rawValue }
 
-    static let primary: [MainSection] = [.home, .projects, .library, .ask]
+    static let primary: [MainSection] = [.home, .projects, .library, .ask, .wiki]
 
     var label: String {
         switch self {
@@ -14,6 +14,7 @@ enum MainSection: String, CaseIterable, Identifiable, Hashable {
         case .projects: return "Projects"
         case .library: return "Library"
         case .ask: return "Ask"
+        case .wiki: return "Wiki"
         case .shares: return "Shares"
         case .settings: return "Settings"
         }
@@ -25,6 +26,7 @@ enum MainSection: String, CaseIterable, Identifiable, Hashable {
         case .projects: return "folder"
         case .library: return "rectangle.3.group"
         case .ask: return "sparkle.magnifyingglass"
+        case .wiki: return "book.closed"
         case .shares: return "externaldrive.connected.to.line.below"
         case .settings: return "gearshape"
         }
@@ -37,6 +39,11 @@ struct MainView: View {
     @Environment(\.palette) private var p
     @StateObject private var updates = UpdateChecker()
     @State private var section: MainSection? = .home
+    @StateObject private var wiki = WikiBrowser()
+    // Back / forward across sidebar tabs, like a browser.
+    @State private var backStack: [MainSection] = []
+    @State private var forwardStack: [MainSection] = []
+    @State private var steppingThroughHistory = false
     @State private var hubOK: Bool? = nil
 
     var body: some View {
@@ -81,6 +88,24 @@ struct MainView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(p.background)
         }
+        .toolbar {
+            ToolbarItemGroup(placement: .navigation) {
+                Button(action: goBack) { Image(systemName: "chevron.left") }
+                    .disabled(!canGoBack)
+                    .help("Back")
+                    .keyboardShortcut("[", modifiers: .command)
+                Button(action: goForward) { Image(systemName: "chevron.right") }
+                    .disabled(!canGoForward)
+                    .help("Forward")
+                    .keyboardShortcut("]", modifiers: .command)
+            }
+        }
+        .onChange(of: section) { old, new in
+            if steppingThroughHistory { steppingThroughHistory = false; return }
+            guard let old, old != new else { return }
+            backStack.append(old)
+            forwardStack.removeAll()
+        }
         .environmentObject(updates)
         .task {
             updates.start(store: store)
@@ -94,6 +119,27 @@ struct MainView: View {
         }
     }
 
+    // Inside the wiki, back and forward step through its pages first, then through the tabs.
+    private var inWiki: Bool { section == .wiki }
+    private var canGoBack: Bool { (inWiki && wiki.canGoBack) || !backStack.isEmpty }
+    private var canGoForward: Bool { (inWiki && wiki.canGoForward) || !forwardStack.isEmpty }
+
+    private func goBack() {
+        if inWiki, wiki.canGoBack { wiki.web.goBack(); return }
+        guard let previous = backStack.popLast() else { return }
+        if let section { forwardStack.append(section) }
+        steppingThroughHistory = true
+        section = previous
+    }
+
+    private func goForward() {
+        if inWiki, wiki.canGoForward { wiki.web.goForward(); return }
+        guard let next = forwardStack.popLast() else { return }
+        if let section { backStack.append(section) }
+        steppingThroughHistory = true
+        section = next
+    }
+
     @ViewBuilder
     private var detail: some View {
         switch section ?? .home {
@@ -105,6 +151,8 @@ struct MainView: View {
             LibraryView()
         case .ask:
             AskView()
+        case .wiki:
+            WikiView(browser: wiki)
         case .shares:
             SharesView()
         case .settings:

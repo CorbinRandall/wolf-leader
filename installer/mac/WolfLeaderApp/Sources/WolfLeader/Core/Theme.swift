@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum ThemeID: String, CaseIterable, Identifiable, Codable {
-    case pack, system, wolf, parakeet, halo
+    case system, wolf, parakeet, halo, pack
 
     var id: String { rawValue }
 
@@ -25,7 +25,7 @@ enum ThemeID: String, CaseIterable, Identifiable, Codable {
         }
     }
 
-    static let `default`: ThemeID = .pack
+    static let `default`: ThemeID = .system
 }
 
 /// Color roles. Parakeet values are MacParakeet's DesignSystem tokens verbatim.

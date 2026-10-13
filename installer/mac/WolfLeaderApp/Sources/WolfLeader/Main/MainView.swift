@@ -53,6 +53,7 @@ struct MainView: View {
             List(selection: $section) {
                 Section {
                     HStack(spacing: 8) {
+                        WolfMark(size: 18)
                         WLEyebrow("Wolf Leader", color: p.text)
                         if BuildInfo.isDev { MainTag(text: "DEV", color: p.accent2) }
                     }

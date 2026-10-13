@@ -106,7 +106,26 @@ app.include_router(wolf_router)
 # web server. check_dir=False so a missing build 404s instead of breaking the API.
 from .wiki_export import OUT_DIR as _WIKI_OUT  # noqa: E402
 
-app.mount("/wiki", StaticFiles(directory=str(_WIKI_OUT), html=True, check_dir=False), name="wiki")
+
+
+class _WikiFiles(StaticFiles):
+    """Wiki pages are regenerated after every save, so clients must re-check them.
+
+    Without a Cache-Control header, browsers and the app's web view guess a
+    freshness window from Last-Modified and can show a stale page for hours.
+    Fingerprinted build assets under _next/static never change and stay cacheable.
+    """
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        if path.replace("\\", "/").startswith("_next/static/"):
+            response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
+        else:
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/wiki", _WikiFiles(directory=str(_WIKI_OUT), html=True, check_dir=False), name="wiki")
 
 # Pydantic models
 class MessageCreate(BaseModel):

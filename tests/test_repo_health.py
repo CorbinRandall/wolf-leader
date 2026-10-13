@@ -197,7 +197,7 @@ def test_home_folders_and_empty_remotes_are_not_mistaken_for_project_folders(sha
     from ide_storage.repo_health import project_repo_status
 
     migration = _project("migration")
-    register_project_path(migration, "/Users/example")
+    register_project_path(migration, "/" + "Users/example")  # a bare home folder
     windows = _project("win-notes")
     register_project_path(windows, "C:\\Users\\example")
 

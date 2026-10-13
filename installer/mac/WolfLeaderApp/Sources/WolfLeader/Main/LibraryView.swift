@@ -3,7 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 private enum LibraryTab: String, Hashable {
-    case board, skills, cleanup, snippets
+    case board, skills, repos, cleanup, snippets
 }
 
 /// Client-first management tools. The hub keeps a compact fallback UI; day-to-day organization
@@ -15,6 +15,7 @@ struct LibraryView: View {
         [
             WLTab(id: .board, title: "Board", icon: "rectangle.3.group"),
             WLTab(id: .skills, title: "Skills", icon: "shippingbox"),
+            WLTab(id: .repos, title: "Repos", icon: "arrow.triangle.branch"),
             WLTab(id: .cleanup, title: "Cleanup", icon: "arrow.triangle.merge"),
             WLTab(id: .snippets, title: "Snippets", icon: "chevron.left.forwardslash.chevron.right"),
         ]
@@ -29,6 +30,7 @@ struct LibraryView: View {
             switch tab {
             case .board: ProjectBoardView()
             case .skills: SkillsLibraryView()
+            case .repos: ReposLibraryView()
             case .cleanup: DuplicateCleanupView()
             case .snippets: SnippetsLibraryView()
             }

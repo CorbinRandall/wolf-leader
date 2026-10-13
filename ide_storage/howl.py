@@ -200,13 +200,14 @@ def run_howl(
         cur.execute(
             """
             INSERT INTO howls (project_id, chat_id, device_name, workspace_path, summary, actions, offers,
-                               git_commit, git_branch, git_remote, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               git_commit, git_branch, git_remote, git_dirty_files, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 project_id, chat_id, device_name, workspace_path, summary_text,
                 json.dumps(actions), json.dumps([o["kind"] + ": " + o["why"] for o in offers]),
-                git_info.get("commit"), git_info.get("branch"), git_info.get("remote"), _now(),
+                git_info.get("commit"), git_info.get("branch"), git_info.get("remote"),
+                git_info.get("dirty_files") if git_info.get("is_repo") else None, _now(),
             ),
         )
         howl_id = int(cur.lastrowid)

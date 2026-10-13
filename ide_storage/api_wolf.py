@@ -273,6 +273,66 @@ async def add_project_path(project_id: int, body: PathBody):
 
 
 # ---------------------------------------------------------- catalog / RAG
+@router.delete("/projects/{project_id}/paths")
+async def delete_path(project_id: int, path: str):
+    """Unlink a folder from a project (used to untangle folders several projects share)."""
+    from ide_storage.repo_health import unlink_folder
+
+    try:
+        return unlink_folder(project_id, path)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# ------------------------------------------------------------- repo health
+class OffsiteReport(BaseModel):
+    device_name: Optional[str] = None
+    destination: Optional[str] = None
+    repos: int = 0
+    dump_name: Optional[str] = None
+    bytes: int = 0
+    ok: bool = True
+    detail: Optional[str] = None
+
+
+@router.get("/repos")
+async def get_repos():
+    """Version-control state of every project, shared folders, notes vaults, and the off-site copy."""
+    from ide_storage.howl import _public_base
+    from ide_storage.repo_health import overview
+
+    return overview(_public_base())
+
+
+@router.post("/notes/commit")
+async def post_notes_commit():
+    """Commit the notes vaults now (the hub also does this on a schedule)."""
+    from ide_storage.repo_health import commit_notes, notes_status
+
+    return {"results": commit_notes(), "notes": notes_status()}
+
+
+@router.post("/backups/offsite")
+async def post_offsite(body: OffsiteReport):
+    """An off-site mirror job reports that it copied the repos and the latest database dump."""
+    from ide_storage.repo_health import record_offsite
+
+    return record_offsite(body.model_dump())
+
+
+@router.get("/offsite-mirror.sh")
+async def get_offsite_script():
+    from fastapi.responses import PlainTextResponse
+    from pathlib import Path
+
+    script = Path(__file__).resolve().parent.parent / "scripts" / "offsite-mirror.sh"
+    if not script.is_file():
+        raise HTTPException(status_code=404, detail="offsite-mirror.sh is not bundled with this hub")
+    return PlainTextResponse(script.read_text(encoding="utf-8"), media_type="text/x-shellscript")
+
+
 @router.post("/projects/{project_id}/catalog/refresh")
 async def refresh_project_catalog(project_id: int):
     from ide_storage.catalog import refresh_catalog

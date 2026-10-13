@@ -126,6 +126,7 @@ _HAS_ID_TABLES = {
     "memories",
     "embeddings",
     "howls",
+    "offsite_copies",
     "jobs",
     "fs_catalog",
     "file_chunks",
@@ -422,6 +423,21 @@ SCHEMA_STATEMENTS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_howls_project ON howls(project_id)",
+    # Uncommitted files in the project repo at howl time (NULL: not a repo / unknown).
+    "ALTER TABLE howls ADD COLUMN IF NOT EXISTS git_dirty_files INTEGER",
+    """
+    CREATE TABLE IF NOT EXISTS offsite_copies (
+        id BIGSERIAL PRIMARY KEY,
+        device_name TEXT,
+        destination TEXT,
+        repos INTEGER DEFAULT 0,
+        dump_name TEXT,
+        bytes BIGINT DEFAULT 0,
+        ok INTEGER DEFAULT 1,
+        detail TEXT,
+        created_at TEXT NOT NULL
+    )
+    """,
     """
     CREATE TABLE IF NOT EXISTS jobs (
         id BIGSERIAL PRIMARY KEY,

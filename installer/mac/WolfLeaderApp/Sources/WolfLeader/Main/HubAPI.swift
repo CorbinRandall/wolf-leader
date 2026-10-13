@@ -530,3 +530,156 @@ extension HubClient {
         _ = try await data("/api/snippets/\(id)", method: "DELETE")
     }
 }
+
+// MARK: - Repo health (GET /api/repos)
+
+struct HubRepoProject: Decodable, Identifiable, Hashable {
+    var id: Int
+    var slug: String
+    var name: String
+    var state: String
+    var why: String?
+    var folder: String?
+    var folders: [String]
+    var sharedFolders: [String]
+    var remote: String?
+    var branch: String?
+    var lastCommit: String?
+    var lastCommitAt: String?
+    var lastSubject: String?
+    var dirtyFiles: Int?
+    var deviceName: String?
+    var howledAt: String?
+    var setupPrompt: String?
+    var remoteIsPublicHost: Bool
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        id = c.int("project_id", "id") ?? 0
+        slug = c.str("slug") ?? ""
+        name = c.str("name") ?? slug
+        state = c.str("state") ?? "knowledge_only"
+        why = c.str("why")
+        folder = c.str("folder")
+        folders = (try? c.decode([String].self, forKey: HubJSONKey("folders"))) ?? []
+        sharedFolders = (try? c.decode([String].self, forKey: HubJSONKey("shared_folders"))) ?? []
+        remote = c.str("remote")
+        branch = c.str("branch")
+        lastCommit = c.str("last_commit")
+        lastCommitAt = c.str("last_commit_at")
+        lastSubject = c.str("last_subject")
+        dirtyFiles = c.int("dirty_files")
+        deviceName = c.str("device_name")
+        howledAt = c.str("howled_at")
+        setupPrompt = c.str("setup_prompt")
+        remoteIsPublicHost = c.str("remote_is_public_host") == "true"
+    }
+}
+
+struct HubSharedFolder: Decodable, Identifiable, Hashable {
+    struct Member: Decodable, Identifiable, Hashable {
+        var id: Int
+        var slug: String
+        var name: String
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: HubJSONKey.self)
+            id = c.int("id") ?? 0
+            slug = c.str("slug") ?? ""
+            name = c.str("name") ?? slug
+        }
+    }
+
+    var path: String
+    var projects: [Member]
+    var id: String { path }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        path = c.str("path") ?? ""
+        projects = (try? c.decode([Member].self, forKey: HubJSONKey("projects"))) ?? []
+    }
+}
+
+struct HubNotesRepo: Decodable, Identifiable, Hashable {
+    var owner: String
+    var path: String
+    var uncommitted: Int
+    var lastCommitAt: String?
+    var lastSubject: String?
+    var id: String { path }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        owner = c.str("owner") ?? "Notes"
+        path = c.str("path") ?? ""
+        uncommitted = c.int("uncommitted") ?? 0
+        lastCommitAt = c.str("last_commit_at")
+        lastSubject = c.str("last_subject")
+    }
+}
+
+struct HubOffsiteStatus: Decodable, Hashable {
+    struct Copy: Decodable, Hashable {
+        var deviceName: String?
+        var destination: String?
+        var repos: Int
+        var dumpName: String?
+        var detail: String?
+        var createdAt: String?
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: HubJSONKey.self)
+            deviceName = c.str("device_name")
+            destination = c.str("destination")
+            repos = c.int("repos") ?? 0
+            dumpName = c.str("dump_name")
+            detail = c.str("detail")
+            createdAt = c.str("created_at")
+        }
+    }
+
+    var lastGood: Copy?
+    var latest: Copy?
+    var stale: Bool
+    var lastFailed: Bool
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        lastGood = try? c.decode(Copy.self, forKey: HubJSONKey("last_good"))
+        latest = try? c.decode(Copy.self, forKey: HubJSONKey("latest"))
+        stale = c.str("stale") != "false"
+        lastFailed = c.str("last_failed") == "true"
+    }
+}
+
+struct HubReposResponse: Decodable {
+    var projects: [HubRepoProject]
+    var sharedFolders: [HubSharedFolder]
+    var notes: [HubNotesRepo]
+    var notesScheduleMinutes: Double
+    var offsite: HubOffsiteStatus?
+    var offsiteInstall: String
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        projects = (try? c.decode([HubRepoProject].self, forKey: HubJSONKey("projects"))) ?? []
+        sharedFolders = (try? c.decode([HubSharedFolder].self, forKey: HubJSONKey("shared_folders"))) ?? []
+        notes = (try? c.decode([HubNotesRepo].self, forKey: HubJSONKey("notes"))) ?? []
+        notesScheduleMinutes = c.double("notes_schedule_minutes") ?? 0
+        offsite = try? c.decode(HubOffsiteStatus.self, forKey: HubJSONKey("offsite"))
+        offsiteInstall = c.str("offsite_install") ?? ""
+    }
+}
+
+extension HubClient {
+    func repos() async throws -> HubReposResponse {
+        try JSONDecoder().decode(HubReposResponse.self, from: try await data("/api/repos", timeout: 30))
+    }
+
+    func unlinkFolder(projectID: Int, path: String) async throws {
+        _ = try await data("/api/projects/\(projectID)/paths", query: ["path": path], method: "DELETE")
+    }
+
+    func commitNotes() async throws {
+        _ = try await data("/api/notes/commit", method: "POST", body: Data("{}".utf8), timeout: 120)
+    }
+}

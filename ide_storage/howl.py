@@ -151,47 +151,9 @@ def run_howl(
             if head.get("commit"):
                 git_info = {**head, **{k: v for k, v in git_info.items() if v}}
                 break
-    # 3b) No remote -> make one on the share. A bare repo under wolf-leader/git/
-    #     is created (idempotent); the client adds it as `origin` and pushes on offer.
-    #     Only once there is a commit to put in it: a repo is made for work that
-    #     exists, never as an empty placeholder for every folder that howls.
-    if not git_info.get("remote") and git_info.get("is_repo") and git_info.get("commit"):
-        remote = ensure_share_remote(save.get("project_slug") or f"project-{project_id}")
-        key = {"windows": "windows", "win32": "windows", "mac": "mac", "darwin": "mac"}.get((client_os or "").lower())
-        remote["client"] = (remote.get(key) if key else None) or remote["hub"]
-        report["git_remote"] = remote
-        if remote.get("created"):
-            actions.append(f"created git remote on share: {remote['hub']}")
-        elif not remote.get("error"):
-            actions.append(f"git remote on share ready: {remote['hub']}")
-        git_info["remote"] = remote["client"]
-        git_info["remote_is_new"] = True
+    # Git is recorded, never managed: the hub notes the commit a save came from and leaves
+    # repos, commits and pushes to the person. Wolf Leader is a journal, not a file manager.
     report["git"] = git_info or None
-    if workspace_path and not is_on_share(workspace_path):
-        offers.append({
-            "kind": "move_to_share",
-            "why": f"{workspace_path} is not on the shared drive; only the share is versioned centrally",
-            "how": f"clone/move the repo under {describe_aliases()['windows']} (= {describe_aliases()['hub']}) and re-run /wolfhowl",
-        })
-    new_remote = report.get("git_remote") or {}
-    add_origin = f"git remote add origin \"{new_remote.get('client') or new_remote.get('hub')}\" && " if new_remote else ""
-    if git_info.get("is_repo") is False or (workspace_path and not git_info):
-        offers.append({"kind": "git_init", "why": "project folder is not a git repo; nothing is versioned",
-                       "how": f"git init && {add_origin}git add -A && git commit -m 'wolf: initial'"
-                              + (" && git push -u origin HEAD" if new_remote else "")})
-    elif git_info.get("dirty_files"):
-        offers.append({
-            "kind": "git_commit",
-            "why": f"{git_info['dirty_files']} uncommitted change(s) in the project repo",
-            "how": "git add -A && git commit -m '<what changed>'"
-                   + (" && git push -u origin HEAD" if new_remote else (" && git push" if git_info.get("remote") else "")),
-        })
-    elif new_remote and git_info.get("commit"):
-        offers.append({
-            "kind": "git_push",
-            "why": "the repo had no remote; one now exists on the share but has nothing in it",
-            "how": "git push -u origin HEAD",
-        })
 
     # 4) Howl row.
     summary_text = _howl_summary(save)
@@ -279,7 +241,7 @@ def _checklist(report: dict[str, Any], project_id: int, git_info: dict[str, Any]
 
     state: done | ask (needs the user) | skip (does not apply).
     """
-    from ide_storage.repo_health import offsite_status, project_repo_status
+    from ide_storage.repo_health import offsite_status
 
     steps: list[dict[str, str]] = []
 
@@ -289,37 +251,14 @@ def _checklist(report: dict[str, Any], project_id: int, git_info: dict[str, Any]
     created = report.get("created_project")
     add("project", "done", f"new project {created['slug']}" if created else f"saved to {report.get('project_slug')}")
     add("saved", "done", "conversation, memories and brief")
-
-    status = next((p for p in project_repo_status() if p["project_id"] == project_id), None) or {}
-    dirty = int(git_info.get("dirty_files") or 0)
-    if status.get("state") == "needs_repo":
-        folder = status.get("folder") or report.get("path_alias", {}).get("hub_path") or ""
-        why = status.get("why") or "This project has files but no version history"
-        add("repo", "ask", f"{why}. Offer to create one.")
-        offers.insert(0, {
-            "kind": "create_repo",
-            "why": f"{why} ({folder})",
-            "how": f"from the project folder: wolfhowl.sh {report.get('project_slug')} --create-repo "
-                   "(add --plan first to show what would be committed; secrets, data and large files are left out)",
-        })
-        # One clear offer instead of two that mean the same thing.
-        offers[:] = [o for o in offers if o["kind"] != "git_init"]
-    elif status.get("state") == "versioned":
-        add("repo", "done", status.get("remote") or "under version control")
+    if git_info.get("commit"):
+        dirty = int(git_info.get("dirty_files") or 0)
+        add("git", "done", f"noted commit {str(git_info['commit'])[:8]}" + (f" ({dirty} uncommitted)" if dirty else ""))
     else:
-        add("repo", "skip", "no project folder of its own, so there is nothing to version")
-    if git_info.get("is_repo"):
-        add("commit", "ask" if dirty else "done", f"{dirty} uncommitted file(s)" if dirty else "nothing uncommitted")
-    else:
-        add("commit", "skip", "not a git repo")
-    if status.get("state") == "versioned":
-        unpushed = any(o["kind"] == "git_push" for o in offers)
-        add("push", "ask" if unpushed else "done", "the hub's repo is behind" if unpushed else "remote recorded")
-    else:
-        add("push", "skip", "no repo yet")
+        add("git", "skip", "no git commit to note")
     off = offsite_status()
     add("offsite", "ask" if off["stale"] else "done",
-        "no recent off-site copy of the hub's repos and database" if off["stale"] else "off-site copy is current")
+        "no recent off-site copy of the hub's notes and database" if off["stale"] else "off-site copy is current")
     return steps
 
 
@@ -650,14 +589,12 @@ You are the agent. This is a suggested plate, not a script. Skip a step if it cl
    - `git: {{commit, branch, remote, dirty_files, is_repo}}`,
    - optionally `cited_paths` (files this chat attached/changed) and `ingest_cited: true` **only if the user already said yes**.
 4. The hub saves the conversation, extracts memories, embeds everything into pgvector, records the howl, refreshes the file catalog for the project's folder on the share, and writes the Obsidian notes to `{a['windows']}wolf-leader\\vault`.
-5. If the repo has commits but no `origin`, the hub creates a bare repo at `{a['windows']}wolf-leader\\git\\<slug>.git` (= `{a['hub']}/wolf-leader/git/<slug>.git`) and returns it as `git_remote`. The bundled runner sets `origin` to it for you (config only; nothing is pushed). Never point a project at GitHub or any other host unless the user asks.
+5. Git is only recorded: if the folder is a git repo, the hub notes its commit on the howl. It never creates a repo, commits, or pushes. Do not offer to.
 6. Reply with the hub's `summary` paragraph, verbatim, then the offers.
 
 ## Offers (ask, never assume)
 The response has `offers[]`. Present the relevant ones as a short question:
-- `git_commit` / `git_init` / `git_push` — commit and push the project repo to its `origin` (the share) so the howl points at a real SHA. If yes, run the bundled runner with `--git-only --howl-id <id>` plus `--git-init`, `--commit "<what changed>"`, and/or `--push`; it pins the new SHA to the howl. Without the runner: run the git commands yourself, then PUT `{base}/api/howls/<id>/git` with the new commit/branch.
 - `ingest_files` — chunk + embed the bodies of cited/changed files so /wolfeat and search can quote them. If yes: POST `{base}/api/ingest-files` with `{{project_id, paths, howl_id}}`.
-- `move_to_share` — the folder is not on `{a['windows']}`; suggest cloning there.
 - `start_job` — connectors: watch a deploy, pull a model. POST `{base}/api/jobs`.
 
 ## Never

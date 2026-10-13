@@ -80,6 +80,12 @@ async def lifespan(app: FastAPI):
         logger.info("Mirrors refreshed at boot: %s", {k: (v if isinstance(v, dict) and v.get("error") else "ok") for k, v in boot.items()})
     except Exception:  # noqa: BLE001
         logger.exception("mirror refresh at boot failed")
+    try:
+        from .repo_health import start_notes_schedule
+
+        start_notes_schedule()
+    except Exception:  # noqa: BLE001
+        logger.exception("notes schedule failed to start")
     yield
 
 

@@ -1,6 +1,6 @@
 ---
 name: wolfhowl
-description: Save or broadcast work to Wolf Leader — match it to an existing project or create one with confirmation, upload the transcript, and capture git and file context.
+description: Save or broadcast work to Wolf Leader — match it to an existing project or create one with confirmation, upload the transcript, and note the git commit it came from.
 disable-model-invocation: true
 ---
 
@@ -37,42 +37,24 @@ Pass this chat’s real session id. Never guess or use “the newest transcript.
 
    Never create a project without the user choosing new.
 
-4. Reply with the hub’s `summary` paragraph, then present the relevant `offers[]` as a short question. Do nothing from the offers until the user agrees.
+4. Reply with the hub’s `summary` paragraph. If `offers[]` has anything relevant, present it as a short question and do nothing until the user agrees.
 
 ## The checklist
 
-Every save returns `checklist`: the same questions answered in the same order, so nothing depends on you remembering.
+Every save returns `checklist`: the same steps in the same order.
 
 1. **project** — which project this is, or that it was just created.
 2. **saved** — conversation, memories, brief.
-3. **repo** — does this project have files that should be under version control but are not?
-4. **commit** — are there uncommitted changes?
-5. **push** — has the hub's copy of the repo got them?
-6. **offsite** — is there a recent copy of everything off the hub server?
+3. **git** — if the folder is a git repo, the commit this save came from is noted.
+4. **offsite** — whether there is a recent copy of the hub's notes and database off the server.
 
-Read the steps whose `state` is `ask` back to the user as short questions, in that order. Skip the `done` and `skip` ones. For a new project, step 3 is where a repo gets decided: if the folder holds code, Compose files, scripts or documents, offer one; if the project is only notes and decisions, it does not need one.
+Only read a step back to the user when its `state` is `ask`.
 
-## Create a repo
+## Git is recorded, not managed
 
-When the user agrees to the `create_repo` offer, or asks to put a project under version control:
+Wolf Leader is a journal of how the work was done. It notes the commit a save came from and nothing more. Do not offer to create a repo, commit, or push as part of a save. If the user asks for those, do them the normal way with git.
 
-```bash
-scripts/wolfhowl.sh SLUG --create-repo --plan   # show what would be committed and left out
-scripts/wolfhowl.sh SLUG --create-repo          # git init, commit, push to the project's repo on the hub
-```
-
-Show the plan first. Secrets (`.env`, keys), databases, dependencies, nested repos and files over 25 MB are left out automatically; say so, and flag anything else that looks like a secret or data. Add `--no-push` to commit without pushing.
-
-## Git, when the user agrees
-
-The howl records commit, branch, remote, and uncommitted-change count on its own. If the repo has no `origin`, the hub provides one on the share and the runner sets it (config only; nothing is pushed). To act on a `git_init`, `git_commit`, or `git_push` offer, run the git steps through the runner so the new commit is pinned to the howl without saving twice:
-
-```bash
-scripts/wolfhowl.sh --git-only --howl-id HOWL_ID --commit "what changed"
-scripts/wolfhowl.sh --git-only --howl-id HOWL_ID --git-init --commit "wolf: initial" --push
-```
-
-If the user already asked to commit as part of the save, add `--commit "message"` (and `--push`) to the normal run instead. Never point a project at GitHub or another host unless the user asks.
+One optional helper exists for someone who wants a project's folder versioned on the hub: `scripts/wolfhowl.sh SLUG --create-repo --plan` shows what would be committed and left out, and the same command without `--plan` runs `git init`, commits, and pushes to a repo on the hub. Use it only when the user asks for exactly that.
 
 ## Other options
 
@@ -82,4 +64,4 @@ If the user already asked to commit as part of the save, add `--commit "message"
 
 On Windows, run the shell script through Git Bash. Without Python, the curl fallback can only save to a known existing slug; it cannot upload the transcript, match, or create a project. For more detail, fetch the live guide at `${API}/api/howl-guide`.
 
-Never silently create a project. Never commit, push, ingest files, start jobs, delete, reset, or force-push without the user’s approval.
+Never silently create a project. Never commit, push, ingest files, start jobs, delete, reset, or force-push unless the user asks.

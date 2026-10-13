@@ -306,29 +306,6 @@ def test_howl_does_not_link_a_folder_another_project_owns(tmp_path, monkeypatch)
     assert project_paths(immich) == []
 
 
-def test_howl_only_creates_a_share_repo_when_there_is_a_commit(tmp_path, monkeypatch):
-    from ide_storage.howl import run_howl
-
-    monkeypatch.setenv("WOLF_WIKI_ENABLED", "0")
-    monkeypatch.setenv("WOLF_SHARE_ROOT", str(tmp_path / "share"))
-    _project("recipes")
-    messages = [{"role": "user", "content": "recipes"}, {"role": "assistant", "content": "decision: done"}]
-    repos = tmp_path / "share" / "wolf-leader" / "git"
-
-    for git in ({"is_repo": False}, {"is_repo": True, "commit": None, "dirty_files": 3}):
-        report = run_howl(slug="recipes", workspace_path=str(tmp_path / "r"), messages=messages, session_id="s-r", git=git)
-        assert report["ok"] is True
-        assert "git_remote" not in report
-        assert not repos.exists()
-
-    report = run_howl(
-        slug="recipes", workspace_path=str(tmp_path / "r"), messages=messages, session_id="s-r",
-        git={"is_repo": True, "commit": "abc123", "branch": "main", "dirty_files": 0},
-    )
-    assert report["git_remote"]["created"] is True
-    assert (repos / "recipes.git" / "objects").is_dir()
-
-
 def _runner(tmp_path, folder, *args, api="http://127.0.0.1:9"):
     import os
 

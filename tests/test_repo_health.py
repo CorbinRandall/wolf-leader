@@ -43,66 +43,6 @@ def _by_slug(items):
     return {item["slug"]: item for item in items}
 
 
-def test_projects_are_sorted_into_versioned_needs_repo_shared_and_knowledge_only(tmp_path, share):
-    from ide_storage.howl import run_howl
-    from ide_storage.repo_health import project_repo_status
-
-    stack = _project("nextcloud")
-    register_project_path(stack, "/stacks/nextcloud", kind="compose")
-    a, b = _project("fans"), _project("video")
-    register_project_path(a, "/lab")
-    register_project_path(b, "/lab", force=True)
-    _project("ideas")
-    tracked = _project("immich")
-    register_project_path(tracked, "/stacks/immich")
-    messages = [{"role": "user", "content": "immich"}, {"role": "assistant", "content": "decision: ok"}]
-    run_howl(slug="immich", workspace_path="/stacks/immich", messages=messages, session_id="s1", device_name="mac",
-             git={"is_repo": True, "commit": "abc123", "branch": "main", "remote": "/share/git/immich.git", "dirty_files": 4})
-
-    status = project_repo_status()
-    by = _by_slug(status)
-
-    assert by["nextcloud"]["state"] == "needs_repo"
-    assert by["nextcloud"]["folder"] == "/stacks/nextcloud"
-    assert "Compose stack" in by["nextcloud"]["why"]
-    assert "/stacks/nextcloud" in by["nextcloud"]["setup_prompt"]
-    assert "nextcloud --create-repo --plan" in by["nextcloud"]["setup_prompt"]
-    assert by["fans"]["state"] == by["video"]["state"] == "shared_folder"
-    assert by["ideas"]["state"] == "knowledge_only"
-    assert by["immich"]["state"] == "versioned"
-    assert (by["immich"]["last_commit"], by["immich"]["dirty_files"], by["immich"]["device_name"]) == ("abc123", 4, "mac")
-    # What needs attention comes first.
-    assert status[0]["slug"] == "nextcloud"
-
-
-def test_a_share_repo_with_commits_counts_as_versioned(tmp_path, share):
-    from ide_storage.repo_health import project_repo_status
-
-    pid = _project("recipes")
-    register_project_path(pid, "/work/recipes")
-    work = tmp_path / "work"
-    work.mkdir()
-    _git(work, "init", "-q", "-b", "main")
-    (work / "README.md").write_text("hi")
-    _git(work, "add", "-A")
-    _git(work, "commit", "-q", "-m", "Add recipes")
-    bare = share / "wolf-leader" / "git" / "recipes.git"
-    bare.parent.mkdir(parents=True)
-    _git(tmp_path, "clone", "-q", "--bare", str(work), str(bare))
-
-    item = _by_slug(project_repo_status())["recipes"]
-
-    assert item["state"] == "versioned"
-    assert item["share_repo"]["commits"] == 1
-    assert item["last_subject"] == "Add recipes"
-
-    # An empty placeholder repo does not count.
-    other = _project("empty")
-    register_project_path(other, "/work/empty")
-    _git(tmp_path, "init", "-q", "--bare", str(share / "wolf-leader" / "git" / "empty.git"))
-    assert _by_slug(project_repo_status())["empty"]["state"] == "needs_repo"
-
-
 def test_shared_folders_can_be_untangled():
     from ide_storage.hub import resolve_project
     from ide_storage.repo_health import shared_folders, unlink_folder
@@ -192,7 +132,7 @@ def test_repos_endpoint_and_unlink_route(share):
     register_project_path(video, "/lab", force=True)
 
     body = client.get("/api/repos").json()
-    assert body["counts"] == {"shared_folder": 2}
+    assert body["counts"] == {"journal_only": 2}
     assert body["shared_folders"][0]["path"] == "/lab"
     assert body["offsite"]["stale"] is True
     assert "offsite-mirror.sh" in body["offsite_install"]
@@ -206,68 +146,6 @@ def test_repos_endpoint_and_unlink_route(share):
     assert client.post("/api/notes/commit").json() == {"results": [], "notes": []}
 
 
-def test_home_folders_and_empty_remotes_are_not_mistaken_for_project_folders(share):
-    from ide_storage.howl import run_howl
-    from ide_storage.repo_health import project_repo_status
-
-    migration = _project("migration")
-    register_project_path(migration, "/" + "Users/example")  # a bare home folder
-    windows = _project("win-notes")
-    register_project_path(windows, "C:\\Users\\example")
-
-    # A remote was recorded once, but nothing was ever committed.
-    cooling = _project("cooling")
-    register_project_path(cooling, "/work/cooling")
-    messages = [{"role": "user", "content": "fans"}, {"role": "assistant", "content": "decision: ok"}]
-    run_howl(slug="cooling", workspace_path="/work/cooling", messages=messages, session_id="s9",
-             git={"is_repo": True, "commit": None, "remote": "/share/git/cooling.git", "dirty_files": 44})
-
-    # A person's Wolf Leader folder whose notes vault is already a repo.
-    vault = share / "Sam" / "wolfleader" / "vault"
-    vault.mkdir(parents=True)
-    _git(vault, "init", "-q", "-b", "main")
-    person = _project("sam-notes")
-    register_project_path(person, "/srv/content/Sam/wolfleader")
-
-    by = _by_slug(project_repo_status())
-
-    assert by["migration"]["state"] == by["win-notes"]["state"] == "knowledge_only"
-    assert by["cooling"]["state"] == "needs_repo"
-    assert by["cooling"]["dirty_files"] == 44
-    assert (by["sam-notes"]["state"], by["sam-notes"]["why"]) == ("versioned", "Notes vault under git")
-
-
-def test_howl_checklist_offers_a_repo_only_when_the_project_has_its_own_folder(share):
-    from ide_storage.howl import run_howl
-
-    stack = _project("nextcloud")
-    register_project_path(stack, "/stacks/nextcloud", kind="compose")
-    _project("ideas")
-    messages = [{"role": "user", "content": "x"}, {"role": "assistant", "content": "decision: y"}]
-
-    report = run_howl(slug="nextcloud", workspace_path="/stacks/nextcloud", messages=messages, session_id="c1",
-                      git={"is_repo": False})
-    steps = {s["step"]: s for s in report["checklist"]}
-    assert [s["step"] for s in report["checklist"]] == ["project", "saved", "repo", "commit", "push", "offsite"]
-    assert steps["repo"]["state"] == "ask"
-    assert steps["offsite"]["state"] == "ask"
-    kinds = [o["kind"] for o in report["offers"]]
-    assert kinds[0] == "create_repo" and "git_init" not in kinds
-    assert "nextcloud --create-repo" in report["offers"][0]["how"]
-
-    # Notes-only project: no folder of its own, so no repo is suggested.
-    notes_only = run_howl(slug="ideas", messages=messages, session_id="c2")
-    steps = {s["step"]: s for s in notes_only["checklist"]}
-    assert steps["repo"]["state"] == "skip"
-    assert "create_repo" not in [o["kind"] for o in notes_only["offers"]]
-
-    # Once it has commits, the repo step is done and uncommitted work is what gets asked about.
-    done = run_howl(slug="nextcloud", workspace_path="/stacks/nextcloud", messages=messages, session_id="c1",
-                    git={"is_repo": True, "commit": "abc", "branch": "main", "remote": "/r/nextcloud.git", "dirty_files": 2})
-    steps = {s["step"]: s for s in done["checklist"]}
-    assert (steps["repo"]["state"], steps["commit"]["state"]) == ("done", "ask")
-
-
 def test_project_repo_endpoint_creates_the_share_repo(share):
     from ide_storage.main import app
 
@@ -279,3 +157,64 @@ def test_project_repo_endpoint_creates_the_share_repo(share):
     assert remote["name"] == "recipes.git"
     assert (share / "wolf-leader" / "git" / "recipes.git" / "objects").is_dir()
     assert client.post("/api/projects/by-slug/nope/repo", json={}).status_code == 404
+
+
+def test_projects_with_a_commit_are_listed_and_the_rest_are_just_the_journal(tmp_path, share):
+    from ide_storage.howl import run_howl
+    from ide_storage.repo_health import project_repo_status
+
+    stack = _project("nextcloud")
+    register_project_path(stack, "/stacks/nextcloud", kind="compose")
+    _project("ideas")
+    tracked = _project("immich")
+    register_project_path(tracked, "/stacks/immich")
+    messages = [{"role": "user", "content": "immich"}, {"role": "assistant", "content": "decision: ok"}]
+    run_howl(slug="immich", workspace_path="/stacks/immich", messages=messages, session_id="s1", device_name="mac",
+             git={"is_repo": True, "commit": "abc123", "branch": "main", "remote": "git@example.com:me/immich.git", "dirty_files": 4})
+
+    status = project_repo_status()
+    by = _by_slug(status)
+
+    assert by["immich"]["state"] == "versioned"
+    assert (by["immich"]["last_commit"], by["immich"]["dirty_files"], by["immich"]["device_name"]) == ("abc123", 4, "mac")
+    # A Compose stack or folder with no git history is not a problem to fix: it is just the journal.
+    assert by["nextcloud"]["state"] == by["ideas"]["state"] == "journal_only"
+    assert "setup_prompt" not in by["nextcloud"]
+    assert status[0]["slug"] == "immich"
+
+
+def test_notes_vault_projects_show_their_vault_history(share):
+    from ide_storage.repo_health import project_repo_status
+
+    vault = share / "Sam" / "wolfleader" / "vault"
+    vault.mkdir(parents=True)
+    _git(vault, "init", "-q", "-b", "main")
+    (vault / "Home.md").write_text("# Home\n")
+    _git(vault, "add", "-A")
+    _git(vault, "commit", "-q", "-m", "Start notes")
+    person = _project("sam-notes")
+    register_project_path(person, "/srv/content/Sam/wolfleader")
+
+    item = _by_slug(project_repo_status())["sam-notes"]
+
+    assert (item["state"], item["why"], item["last_subject"]) == ("versioned", "Notes vault under git", "Start notes")
+
+
+def test_a_save_never_creates_a_repo_or_offers_git_work(share):
+    from ide_storage.howl import run_howl
+
+    _project("recipes")
+    messages = [{"role": "user", "content": "x"}, {"role": "assistant", "content": "decision: y"}]
+
+    for git in ({"is_repo": False}, {"is_repo": True, "commit": "abc123", "branch": "main", "dirty_files": 3}):
+        report = run_howl(slug="recipes", workspace_path="/work/recipes", messages=messages, session_id="g1", git=git)
+        assert report["ok"] is True
+        assert "git_remote" not in report
+        assert not (share / "wolf-leader" / "git").exists()
+        kinds = {o["kind"] for o in report["offers"]}
+        assert not kinds & {"git_init", "git_commit", "git_push", "create_repo", "move_to_share"}
+
+    steps = {s["step"]: s for s in report["checklist"]}
+    assert [s["step"] for s in report["checklist"]] == ["project", "saved", "git", "offsite"]
+    assert steps["git"]["detail"] == "noted commit abc123 (3 uncommitted)"
+    assert steps["offsite"]["state"] == "ask"

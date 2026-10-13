@@ -15,7 +15,7 @@ struct LibraryView: View {
         [
             WLTab(id: .board, title: "Board", icon: "rectangle.3.group"),
             WLTab(id: .skills, title: "Skills", icon: "shippingbox"),
-            WLTab(id: .repos, title: "Repos", icon: "arrow.triangle.branch"),
+            WLTab(id: .repos, title: "Backups", icon: "externaldrive.badge.checkmark"),
             WLTab(id: .cleanup, title: "Cleanup", icon: "arrow.triangle.merge"),
             WLTab(id: .snippets, title: "Snippets", icon: "chevron.left.forwardslash.chevron.right"),
         ]

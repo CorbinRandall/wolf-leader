@@ -2,8 +2,7 @@
 
 One read model for the app's Repos page:
 
-* per project: has a git repo or not, last commit, uncommitted changes, which machine
-* which projects have files but no repo yet
+* per project: the git commit its saves came from, if its folder happens to be a repo
 * folders that several projects share (a save from there cannot pick a project)
 * the notes vaults: uncommitted changes, and a scheduled commit so they keep a history
 * the last off-site copy of the repos and the database
@@ -83,23 +82,11 @@ def _holds_notes_repo(folder: str, notes: list[str]) -> bool:
     return bool(tail) and any(_norm(repo).endswith(f"/{tail}/vault") or _norm(repo).endswith(f"/{tail}") for repo in notes)
 
 
-def _setup_prompt(project: dict[str, Any], folder: str) -> str:
-    name, slug = project.get("name") or project.get("slug"), project.get("slug")
-    return (
-        f"Put the Wolf Leader project \"{name}\" (slug `{slug}`) under version control.\n\n"
-        f"1. Go to its folder: {folder}\n"
-        f"2. Run the wolfhowl skill's runner with `{slug} --create-repo --plan` and show me what it would commit "
-        "and what it would leave out. Secrets (.env, keys), databases, dependencies and files over 25 MB are left out "
-        "automatically; tell me if anything else looks like a secret or data.\n"
-        f"3. After I say OK, run it again with `{slug} --create-repo`. It runs git init, commits, and pushes to "
-        "this project's private repo on the Wolf Leader hub.\n"
-        "4. If the wolfhowl skill is not installed on this machine, connect it to Wolf Leader first (/wolfeat --setup).\n\n"
-        "Do not push to GitHub or any other host unless I ask."
-    )
-
-
 def project_repo_status() -> list[dict[str, Any]]:
-    """Every active project with its version-control state, most in need of attention first."""
+    """Every active project, with the git commit its saves came from when its folder is a repo.
+
+    Recorded, never managed: Wolf Leader does not create repos or ask for them.
+    """
     with db_conn() as conn:
         cur = conn.cursor()
         cur.execute(
@@ -172,23 +159,12 @@ def project_repo_status() -> list[dict[str, Any]]:
                 "last_commit_at": last[1] if len(last) > 1 else None,
                 "last_subject": last[2] if len(last) > 2 else None,
             })
-        elif own:
-            # Prefer the deployed stack's folder: that is the thing with files to lose.
-            compose = next((p["path"] for p in own if p["kind"] == "compose"), None)
-            folder = compose or own[0]["path"]
-            item.update({
-                "state": "needs_repo",
-                "folder": folder,
-                "why": "Compose stack with no version history" if compose else "Has a folder but no git repo",
-                "setup_prompt": _setup_prompt(project, folder),
-            })
-        elif shared:
-            item.update({"state": "shared_folder", "why": "Only lives in a folder shared with other projects"})
         else:
-            item["state"] = "knowledge_only"
+            # Most projects are just the journal. That is the normal case, not a gap.
+            item["state"] = "journal_only"
         out.append(item)
 
-    order = {"needs_repo": 0, "shared_folder": 1, "versioned": 2, "knowledge_only": 3}
+    order = {"versioned": 0, "journal_only": 1}
     out.sort(key=lambda i: (order[i["state"]], -i["memories"], i["name"].lower()))
     return out
 

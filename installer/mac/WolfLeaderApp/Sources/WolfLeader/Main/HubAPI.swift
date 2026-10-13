@@ -847,3 +847,124 @@ extension HubClient {
         _ = try await send("/api/sessions/\(id)/file", method: "POST", ["project_id": projectID])
     }
 }
+
+// MARK: - Everything about one project (the app's project page)
+
+struct HubLogEntry: Decodable, Identifiable, Hashable {
+    var chatID: Int
+    var title: String
+    var summary: String
+    var occurredAt: String?
+    var id: Int { chatID }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        chatID = c.int("chat_id", "id") ?? 0
+        title = c.str("title") ?? "Session"
+        summary = c.str("summary", "agent_summary") ?? ""
+        occurredAt = c.str("occurred_at", "updated_at", "saved_at")
+    }
+}
+
+struct HubProjectBrief: Decodable {
+    var purpose: String
+    var briefMarkdown: String
+    var agentPrompt: String
+    var briefUpdatedAt: String?
+    var continueMode: String?
+    var deployState: String?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        purpose = c.str("purpose_summary", "description") ?? ""
+        briefMarkdown = c.str("brief_md") ?? ""
+        agentPrompt = c.str("agent_prompt", "pickup_prompt") ?? ""
+        briefUpdatedAt = c.str("brief_updated_at")
+        continueMode = c.str("continue_mode")
+        deployState = c.str("deploy_state")
+    }
+}
+
+struct HubProjectFolder: Decodable, Identifiable, Hashable {
+    var id: Int
+    var path: String
+    var kind: String
+    var deviceName: String?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        id = c.int("id") ?? 0
+        path = c.str("path") ?? ""
+        kind = c.str("kind") ?? "workspace"
+        deviceName = c.str("device_name")
+    }
+}
+
+struct HubMessage: Decodable, Identifiable, Hashable {
+    var id: Int
+    var role: String
+    var content: String
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        id = c.int("id") ?? 0
+        role = c.str("role") ?? "assistant"
+        content = c.str("content") ?? ""
+    }
+}
+
+extension HubClient {
+    /// Session summaries for one project, newest first.
+    func logbook(projectID: Int) async throws -> [HubLogEntry] {
+        struct Wrapper: Decodable { var entries: [HubLogEntry]? }
+        let raw = try await data("/api/projects/\(projectID)/where-left-off", timeout: 30)
+        return (try JSONDecoder().decode(Wrapper.self, from: raw)).entries ?? []
+    }
+
+    func brief(projectKey: String) async throws -> HubProjectBrief {
+        try JSONDecoder().decode(HubProjectBrief.self, from: try await data("/api/projects/\(projectKey)/agent-brief", timeout: 30))
+    }
+
+    func folders(projectID: Int) async throws -> [HubProjectFolder] {
+        try await get("/api/projects/\(projectID)/paths", as: HubList<HubProjectFolder>.self).items
+    }
+
+    /// Every saved session of a project: active ones, then archived.
+    func allSessions(projectID: Int) async throws -> [HubChat] {
+        struct Wrapper: Decodable { var archived: [HubChat]?; var chats: [HubChat]? }
+        let raw = try await data("/api/projects/\(projectID)/chats", query: ["archived": "true", "limit": "200"], timeout: 30)
+        let active = (try? await chats(projectID: projectID, limit: 50)) ?? []
+        let archived = (try? JSONDecoder().decode(Wrapper.self, from: raw))?.archived ?? []
+        var seen = Set<Int>()
+        return (active + archived).filter { seen.insert($0.id).inserted }
+    }
+
+    func messages(chatID: Int) async throws -> [HubMessage] {
+        struct Wrapper: Decodable { var messages: [HubMessage] }
+        return try JSONDecoder().decode(Wrapper.self, from: try await data("/api/chats/\(chatID)/messages", timeout: 60)).messages
+    }
+
+    func buildPrompts(projectID: Int) async throws -> [HubBuildPrompt] {
+        struct Wrapper: Decodable { var prompts: [HubBuildPrompt] }
+        return try JSONDecoder().decode(Wrapper.self, from: try await data("/api/projects/\(projectID)/build-prompts")).prompts
+    }
+
+    func addMemory(projectID: Int, type: String, content: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["project_id": projectID, "type": type, "content": content])
+        _ = try await data("/api/memories", method: "POST", body: body, timeout: 60)
+    }
+
+    func deleteMemory(id: Int) async throws {
+        _ = try await data("/api/memories/\(id)", method: "DELETE", timeout: 60)
+    }
+
+    func updateProject(id: Int, name: String, description: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["name": name, "description": description])
+        _ = try await data("/api/projects/\(id)", method: "PUT", body: body, timeout: 60)
+    }
+
+    /// Regenerate the project's brief from its memories and sessions.
+    func refreshBrief(projectID: Int) async throws {
+        _ = try await data("/api/projects/\(projectID)/distill", method: "POST", body: Data("{}".utf8), timeout: 180)
+    }
+}

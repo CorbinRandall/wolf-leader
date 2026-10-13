@@ -2,16 +2,15 @@ import AppKit
 import SwiftUI
 
 enum MainSection: String, CaseIterable, Identifiable, Hashable {
-    case home, progress, projects, library, ask, wiki, shares, settings
+    case home, projects, library, ask, wiki, shares, settings
 
     var id: String { rawValue }
 
-    static let primary: [MainSection] = [.home, .progress, .projects, .library, .ask, .wiki]
+    static let primary: [MainSection] = [.home, .projects, .library, .ask, .wiki]
 
     var label: String {
         switch self {
         case .home: return "Home"
-        case .progress: return "Progress"
         case .projects: return "Projects"
         case .library: return "Library"
         case .ask: return "Ask"
@@ -24,7 +23,6 @@ enum MainSection: String, CaseIterable, Identifiable, Hashable {
     var symbol: String {
         switch self {
         case .home: return "house"
-        case .progress: return "chart.bar.doc.horizontal"
         case .projects: return "folder"
         case .library: return "rectangle.3.group"
         case .ask: return "sparkle.magnifyingglass"
@@ -156,8 +154,6 @@ struct MainView: View {
         switch section ?? .home {
         case .home:
             HomeView(openSettings: { section = .settings }, openProjects: { section = .projects })
-        case .progress:
-            ProgressSectionView()
         case .projects:
             ProjectsView()
         case .library:

@@ -3,17 +3,16 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 private enum LibraryTab: String, Hashable {
-    case board, skills, repos, cleanup, snippets
+    case skills, repos, cleanup, snippets
 }
 
 /// Client-first management tools. The hub keeps a compact fallback UI; day-to-day organization
 /// lives here in the native app.
 struct LibraryView: View {
-    @State private var tab: LibraryTab = .board
+    @State private var tab: LibraryTab = .skills
 
     private var tabs: [WLTab<LibraryTab>] {
         [
-            WLTab(id: .board, title: "Board", icon: "rectangle.3.group"),
             WLTab(id: .skills, title: "Skills", icon: "shippingbox"),
             WLTab(id: .repos, title: "Backups", icon: "externaldrive.badge.checkmark"),
             WLTab(id: .cleanup, title: "Cleanup", icon: "arrow.triangle.merge"),
@@ -28,252 +27,12 @@ struct LibraryView: View {
                 Spacer(minLength: 0)
             }
             switch tab {
-            case .board: ProjectBoardView()
             case .skills: SkillsLibraryView()
             case .repos: ReposLibraryView()
             case .cleanup: DuplicateCleanupView()
             case .snippets: SnippetsLibraryView()
             }
         }
-    }
-}
-
-private struct ProjectBoardView: View {
-    @EnvironmentObject private var store: ConfigStore
-    @Environment(\.palette) private var p
-    @State private var columns: [HubKanbanColumn] = []
-    @State private var projects: [HubProject] = []
-    @State private var loading = true
-    @State private var error: String?
-    @State private var search = ""
-    @State private var columnEditor: ColumnEditorContext?
-    @State private var deletingColumn: HubKanbanColumn?
-
-    private var visibleProjects: [HubProject] {
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !query.isEmpty else { return projects }
-        return projects.filter { project in
-            [project.name, project.description, project.slug, project.owner]
-                .compactMap { $0?.lowercased() }
-                .contains { $0.contains(query) }
-        }
-    }
-
-    var body: some View {
-        WLPageHeader(title: "Project board", subtitle: "Move work through the stages defined on your hub.") {
-            HStack(spacing: 8) {
-                TextField("Search projects", text: $search).mainField().frame(width: 220)
-                Button("Add column") { columnEditor = ColumnEditorContext() }.buttonStyle(PrimaryButtonStyle())
-                Button("Refresh") { Task { await load() } }.buttonStyle(SecondaryButtonStyle())
-            }
-        }
-        if loading && columns.isEmpty {
-            ProgressView("Loading board…")
-        } else if let error {
-            MainNotice(symbol: "exclamationmark.triangle", title: "Board unavailable", message: error)
-        } else {
-            ScrollView(.horizontal) {
-                HStack(alignment: .top, spacing: 12) {
-                    ForEach(columns) { column in
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                Text(column.label).font(DS.Font.body.weight(.semibold))
-                                Spacer()
-                                MainTag(text: String(visibleProjects.filter { $0.kanbanStatus(in: columns) == column.status }.count))
-                                Menu {
-                                    Button("Rename") { columnEditor = ColumnEditorContext(column: column) }
-                                    let index = columns.firstIndex(of: column) ?? 0
-                                    Button("Move left") { Task { await moveColumn(column, offset: -1) } }
-                                        .disabled(index == 0)
-                                    Button("Move right") { Task { await moveColumn(column, offset: 1) } }
-                                        .disabled(index >= columns.count - 1)
-                                    Divider()
-                                    Button("Delete", role: .destructive) { deletingColumn = column }
-                                        .disabled(columns.count <= 1)
-                                } label: { Image(systemName: "ellipsis.circle") }
-                                .menuStyle(.borderlessButton)
-                            }
-                            if let description = column.description, !description.isEmpty {
-                                Text(description).font(DS.Font.micro).foregroundStyle(p.textMuted)
-                            }
-                            ForEach(visibleProjects.filter { $0.kanbanStatus(in: columns) == column.status }) { project in
-                                projectCard(project)
-                            }
-                            Spacer(minLength: 0)
-                        }
-                        .padding(12)
-                        .frame(width: 270, alignment: .top)
-                        .background(p.surface, in: RoundedRectangle(cornerRadius: DS.Radius.card))
-                        .dropDestination(for: String.self) { projectIDs, _ in
-                            dropProjects(projectIDs, on: column.status)
-                        }
-                    }
-                }
-            }
-        }
-        Color.clear.frame(height: 0)
-            .task(id: store.config.hubURL) { await load() }
-            .sheet(item: $columnEditor) { editor in
-                KanbanColumnEditor(context: editor) { label, description in
-                    await saveColumn(editor, label: label, description: description)
-                }
-                .environment(\.palette, p)
-            }
-            .confirmationDialog(
-                "Delete \(deletingColumn?.label ?? "column")?",
-                isPresented: Binding(get: { deletingColumn != nil }, set: { if !$0 { deletingColumn = nil } }),
-                presenting: deletingColumn
-            ) { column in
-                ForEach(columns.filter { $0.status != column.status }) { destination in
-                    Button("Delete and move projects to \(destination.label)", role: .destructive) {
-                        Task { await deleteColumn(column, moveTo: destination.status) }
-                    }
-                }
-                Button("Cancel", role: .cancel) { deletingColumn = nil }
-            } message: { _ in
-                Text("Projects are kept. Choose the column that should receive them.")
-            }
-    }
-
-    private func load() async {
-        loading = true
-        defer { loading = false }
-        do {
-            async let loadedColumns = store.hub.kanbanColumns()
-            async let loadedProjects = store.hub.projects()
-            (columns, projects) = try await (loadedColumns, loadedProjects)
-            error = nil
-        } catch { self.error = error.localizedDescription }
-    }
-
-    private func move(_ project: HubProject, to status: String) async {
-        do {
-            try await store.hub.updateProjectStatus(id: project.id, status: status)
-            await load()
-        } catch { self.error = error.localizedDescription }
-    }
-
-    private func projectCard(_ project: HubProject) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(project.name).font(DS.Font.bodySmall.weight(.semibold))
-                Spacer()
-                if let owner = project.owner, !owner.isEmpty {
-                    MainTag(text: owner)
-                        .help(project.ownerSource == "folder" ? "Assigned from the \(owner) folder" : "Project owner")
-                }
-            }
-            if let description = project.description {
-                Text(description)
-                    .font(DS.Font.micro)
-                    .foregroundStyle(p.textMuted)
-                    .lineLimit(3)
-            }
-            HStack {
-                Text("\(project.memoryCount) memories").font(DS.Font.micro)
-                Spacer()
-                Menu("Move") { moveDestinations(for: project) }
-                    .menuStyle(.borderlessButton)
-            }
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(p.surfaceRaised, in: RoundedRectangle(cornerRadius: DS.Radius.row))
-        .draggable(String(project.id))
-    }
-
-    @ViewBuilder
-    private func moveDestinations(for project: HubProject) -> some View {
-        let currentStatus = project.kanbanStatus(in: columns)
-        ForEach(columns.filter { $0.status != currentStatus }) { destination in
-            Button(destination.label) { moveRequested(project, to: destination.status) }
-        }
-    }
-
-    private func moveRequested(_ project: HubProject, to status: String) {
-        Task { await move(project, to: status) }
-    }
-
-    private func dropProjects(_ projectIDs: [String], on status: String) -> Bool {
-        guard let rawProjectID = projectIDs.first, let projectID = Int(rawProjectID),
-              let project = projects.first(where: { $0.id == projectID }) else { return false }
-        moveRequested(project, to: status)
-        return true
-    }
-
-    private func saveColumn(_ editor: ColumnEditorContext, label: String, description: String) async {
-        do {
-            if let status = editor.status {
-                columns = try await store.hub.updateKanbanColumn(status: status, label: label, description: description)
-            } else {
-                columns = try await store.hub.createKanbanColumn(label: label, description: description)
-            }
-            columnEditor = nil
-            error = nil
-        } catch { self.error = error.localizedDescription }
-    }
-
-    private func moveColumn(_ column: HubKanbanColumn, offset: Int) async {
-        guard let source = columns.firstIndex(of: column) else { return }
-        let target = source + offset
-        guard columns.indices.contains(target) else { return }
-        var statuses = columns.map(\.status)
-        statuses.swapAt(source, target)
-        do { columns = try await store.hub.reorderKanbanColumns(statuses); error = nil }
-        catch { self.error = error.localizedDescription }
-    }
-
-    private func deleteColumn(_ column: HubKanbanColumn, moveTo: String) async {
-        do {
-            columns = try await store.hub.deleteKanbanColumn(status: column.status, moveTo: moveTo)
-            deletingColumn = nil
-            await load()
-        } catch { self.error = error.localizedDescription }
-    }
-}
-
-private struct ColumnEditorContext: Identifiable {
-    let id = UUID()
-    var status: String?
-    var label = ""
-    var description = ""
-
-    init(column: HubKanbanColumn? = nil) {
-        status = column?.status
-        label = column?.label ?? ""
-        description = column?.description ?? ""
-    }
-}
-
-private struct KanbanColumnEditor: View {
-    @Environment(\.dismiss) private var dismiss
-    @State private var label: String
-    @State private var description: String
-    let context: ColumnEditorContext
-    let save: (String, String) async -> Void
-
-    init(context: ColumnEditorContext, save: @escaping (String, String) async -> Void) {
-        self.context = context
-        self.save = save
-        _label = State(initialValue: context.label)
-        _description = State(initialValue: context.description)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(context.status == nil ? "Add column" : "Edit column").font(DS.Font.section)
-            TextField("Column name", text: $label).mainField()
-            TextField("Description", text: $description).mainField()
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }.buttonStyle(SecondaryButtonStyle())
-                Button("Save") { Task { await save(label.trimmingCharacters(in: .whitespacesAndNewlines), description); dismiss() } }
-                    .buttonStyle(PrimaryButtonStyle())
-                    .disabled(label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }
-        .padding(24)
-        .frame(width: 440)
     }
 }
 

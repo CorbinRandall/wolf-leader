@@ -67,6 +67,22 @@ def share_repo(slug: str | None) -> dict[str, Any]:
     return info
 
 
+def _is_home_folder(path: str) -> bool:
+    """A home directory or filesystem root: where someone happened to be, not a project's folder."""
+    import re
+
+    n = _norm(path)
+    return n in ("", "/", "/root", "/home") or bool(
+        re.fullmatch(r"/(users|home)/[^/]+", n) or re.fullmatch(r"[a-z]:(/users/[^/]+)?", n)
+    )
+
+
+def _holds_notes_repo(folder: str, notes: list[str]) -> bool:
+    """True when a notes vault under git lives inside this folder (same person, any mount spelling)."""
+    tail = "/".join(_norm(folder).split("/")[-2:])
+    return bool(tail) and any(_norm(repo).endswith(f"/{tail}/vault") or _norm(repo).endswith(f"/{tail}") for repo in notes)
+
+
 def _setup_prompt(project: dict[str, Any], folder: str) -> str:
     name, slug = project.get("name") or project.get("slug"), project.get("slug")
     return (
@@ -113,14 +129,16 @@ def project_repo_status() -> list[dict[str, Any]]:
         )
         howls = {int(r["project_id"]): dict(r) for r in cur.fetchall()}
     active_ids = {int(p["id"]) for p in projects}
+    notes = notes_repos()
 
     out: list[dict[str, Any]] = []
     for project in projects:
         pid = int(project["id"])
         howl = howls.get(pid) or {}
         repo = share_repo(project["slug"])
-        own = [p for p in paths.get(pid, []) if len(owners.get(_norm(p["path"]), set()) & active_ids) <= 1]
-        shared = [p for p in paths.get(pid, []) if p not in own]
+        real = [p for p in paths.get(pid, []) if not _is_home_folder(p["path"])]
+        own = [p for p in real if len(owners.get(_norm(p["path"]), set()) & active_ids) <= 1]
+        shared = [p for p in real if p not in own]
         remote = howl.get("git_remote")
         item: dict[str, Any] = {
             "project_id": pid,
@@ -141,8 +159,11 @@ def project_repo_status() -> list[dict[str, Any]]:
             "share_repo": repo,
             "remote_is_public_host": bool(remote and any(h in remote for h in _PUBLIC_HOSTS)),
         }
-        if remote or repo.get("commits"):
+        # A remote with nothing ever committed to it is not version history.
+        if howl.get("git_commit") or repo.get("commits"):
             item["state"] = "versioned"
+        elif any(_holds_notes_repo(p["path"], notes) for p in own):
+            item.update({"state": "versioned", "why": "Notes vault under git"})
         elif own:
             # Prefer the deployed stack's folder: that is the thing with files to lose.
             compose = next((p["path"] for p in own if p["kind"] == "compose"), None)

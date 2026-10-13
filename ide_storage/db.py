@@ -126,6 +126,8 @@ _HAS_ID_TABLES = {
     "memories",
     "embeddings",
     "howls",
+    "goals",
+    "build_prompts",
     "offsite_copies",
     "jobs",
     "fs_catalog",
@@ -423,6 +425,31 @@ SCHEMA_STATEMENTS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_howls_project ON howls(project_id)",
+    """
+    CREATE TABLE IF NOT EXISTS goals (
+        id BIGSERIAL PRIMARY KEY,
+        project_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        done_when TEXT,
+        phase TEXT NOT NULL DEFAULT 'now',
+        status TEXT NOT NULL DEFAULT 'proposed',
+        proof TEXT,
+        source_memory_id BIGINT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_goals_project ON goals(project_id)",
+    """
+    CREATE TABLE IF NOT EXISTS build_prompts (
+        id BIGSERIAL PRIMARY KEY,
+        project_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        goal_ids TEXT,
+        title TEXT,
+        body TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )
+    """,
     # Uncommitted files in the project repo at howl time (NULL: not a repo / unknown).
     "ALTER TABLE howls ADD COLUMN IF NOT EXISTS git_dirty_files INTEGER",
     """

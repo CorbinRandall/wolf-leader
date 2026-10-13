@@ -683,3 +683,167 @@ extension HubClient {
         _ = try await data("/api/notes/commit", method: "POST", body: Data("{}".utf8), timeout: 120)
     }
 }
+
+// MARK: - Progress, goals, build prompts (GET /api/progress)
+
+struct HubGoal: Decodable, Identifiable, Hashable {
+    var id: Int
+    var projectID: Int
+    var title: String
+    var doneWhen: String
+    var phase: String
+    var status: String
+    var proof: String
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        id = c.int("id") ?? 0
+        projectID = c.int("project_id") ?? 0
+        title = c.str("title") ?? "Untitled goal"
+        doneWhen = c.str("done_when") ?? ""
+        phase = c.str("phase") ?? "now"
+        status = c.str("status") ?? "proposed"
+        proof = c.str("proof") ?? ""
+    }
+}
+
+struct HubProgressProject: Decodable, Identifiable, Hashable {
+    struct NextStep: Decodable, Hashable {
+        var text: String
+        var doneWhen: String
+        var from: String
+        var memoryID: Int?
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: HubJSONKey.self)
+            text = c.str("text") ?? ""
+            doneWhen = c.str("done_when") ?? ""
+            from = c.str("from") ?? "notes"
+            memoryID = c.int("memory_id")
+        }
+    }
+
+    struct Note: Decodable, Identifiable, Hashable {
+        var id: Int
+        var text: String
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: HubJSONKey.self)
+            id = c.int("memory_id", "id") ?? 0
+            text = c.str("text") ?? ""
+        }
+    }
+
+    var id: Int
+    var slug: String
+    var name: String
+    var status: String
+    var whereItStands: String
+    var lastSession: String?
+    var sessions: Int
+    var memories: Int
+    var nextStep: NextStep?
+    var openProblems: [Note]
+    var suggestions: [Note]
+    var goals: [HubGoal]
+
+    var openGoals: [HubGoal] { goals.filter { $0.status != "verified" } }
+    var verifiedCount: Int { goals.count - openGoals.count }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        id = c.int("project_id", "id") ?? 0
+        slug = c.str("slug") ?? ""
+        name = c.str("name") ?? slug
+        status = c.str("status") ?? "active"
+        whereItStands = c.str("where_it_stands") ?? ""
+        lastSession = c.str("last_session")
+        sessions = c.int("sessions") ?? 0
+        memories = c.int("memories") ?? 0
+        nextStep = try? c.decode(NextStep.self, forKey: HubJSONKey("next_step"))
+        openProblems = (try? c.decode([Note].self, forKey: HubJSONKey("open_problems"))) ?? []
+        suggestions = (try? c.decode([Note].self, forKey: HubJSONKey("suggestions"))) ?? []
+        goals = (try? c.decode([HubGoal].self, forKey: HubJSONKey("goals"))) ?? []
+    }
+}
+
+struct HubProgressResponse: Decodable {
+    var projects: [HubProgressProject]
+    var unfiledSessions: Int
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        projects = (try? c.decode([HubProgressProject].self, forKey: HubJSONKey("projects"))) ?? []
+        unfiledSessions = c.int("unfiled_sessions") ?? 0
+    }
+}
+
+struct HubUnfiledSession: Decodable, Identifiable, Hashable {
+    var id: Int
+    var title: String
+    var summary: String
+    var happenedAt: String?
+    var workspacePath: String?
+    var messages: Int
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        id = c.int("id") ?? 0
+        title = c.str("title") ?? "Untitled session"
+        summary = c.str("summary") ?? ""
+        happenedAt = c.str("happened_at")
+        workspacePath = c.str("workspace_path")
+        messages = c.int("messages") ?? 0
+    }
+}
+
+struct HubBuildPrompt: Decodable, Identifiable, Hashable {
+    var id: Int
+    var title: String
+    var body: String
+    var createdAt: String?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        id = c.int("id") ?? 0
+        title = c.str("title") ?? "Build brief"
+        body = c.str("body") ?? ""
+        createdAt = c.str("created_at")
+    }
+}
+
+extension HubClient {
+    func progress() async throws -> HubProgressResponse {
+        try JSONDecoder().decode(HubProgressResponse.self, from: try await data("/api/progress", timeout: 30))
+    }
+
+    private func send(_ path: String, method: String, _ payload: [String: Any]) async throws -> Data {
+        try await data(path, method: method, body: try JSONSerialization.data(withJSONObject: payload), timeout: 30)
+    }
+
+    func createGoal(projectID: Int, title: String, doneWhen: String, phase: String, memoryID: Int? = nil) async throws {
+        var payload: [String: Any] = ["title": title, "done_when": doneWhen, "phase": phase]
+        if let memoryID { payload["source_memory_id"] = memoryID }
+        _ = try await send("/api/projects/\(projectID)/goals", method: "POST", payload)
+    }
+
+    func updateGoal(id: Int, _ changes: [String: Any]) async throws {
+        _ = try await send("/api/goals/\(id)", method: "PUT", changes)
+    }
+
+    func deleteGoal(id: Int) async throws {
+        _ = try await data("/api/goals/\(id)", method: "DELETE")
+    }
+
+    func buildPrompt(projectID: Int, goalIDs: [Int], note: String) async throws -> HubBuildPrompt {
+        let reply = try await send("/api/projects/\(projectID)/build-prompts", method: "POST", ["goal_ids": goalIDs, "note": note])
+        return try JSONDecoder().decode(HubBuildPrompt.self, from: reply)
+    }
+
+    func unfiledSessions() async throws -> [HubUnfiledSession] {
+        struct Wrapper: Decodable { var sessions: [HubUnfiledSession] }
+        return try JSONDecoder().decode(Wrapper.self, from: try await data("/api/sessions/unfiled", timeout: 30)).sessions
+    }
+
+    func fileSession(id: Int, projectID: Int) async throws {
+        _ = try await send("/api/sessions/\(id)/file", method: "POST", ["project_id": projectID])
+    }
+}

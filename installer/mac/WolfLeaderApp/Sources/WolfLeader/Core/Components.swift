@@ -72,8 +72,28 @@ private struct AccentSwitch: ViewModifier {
 }
 
 /// Page title + one-line explanation at the top of a screen.
+/// Small uppercase, letter-spaced label that sits above a title or names a section.
+struct WLEyebrow: View {
+    @Environment(\.palette) private var p
+    let text: String
+    var color: Color? = nil
+
+    init(_ text: String, color: Color? = nil) {
+        self.text = text
+        self.color = color
+    }
+
+    var body: some View {
+        Text(text.uppercased())
+            .font(.system(size: 10.5, weight: .semibold))
+            .tracking(1.6)
+            .foregroundStyle(color ?? p.textMuted)
+    }
+}
+
 struct WLPageHeader<Trailing: View>: View {
     @Environment(\.palette) private var p
+    var eyebrow: String? = nil
     let title: String
     var subtitle: String? = nil
     @ViewBuilder var trailing: () -> Trailing
@@ -81,6 +101,7 @@ struct WLPageHeader<Trailing: View>: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: DS.Spacing.md) {
             VStack(alignment: .leading, spacing: 4) {
+                if let eyebrow { WLEyebrow(eyebrow) }
                 Text(title).font(DS.Font.page).foregroundStyle(p.text)
                 if let subtitle {
                     Text(subtitle).font(DS.Font.bodySmall).foregroundStyle(p.textMuted)
@@ -93,8 +114,8 @@ struct WLPageHeader<Trailing: View>: View {
 }
 
 extension WLPageHeader where Trailing == EmptyView {
-    init(title: String, subtitle: String? = nil) {
-        self.init(title: title, subtitle: subtitle, trailing: { EmptyView() })
+    init(eyebrow: String? = nil, title: String, subtitle: String? = nil) {
+        self.init(eyebrow: eyebrow, title: title, subtitle: subtitle, trailing: { EmptyView() })
     }
 }
 

@@ -27,9 +27,11 @@ fi
 
 VERSION=""
 APP_ONLY=0
+DEV=0
 for arg in "$@"; do
   case "$arg" in
     --app-only) APP_ONLY=1 ;;
+    --dev) DEV=1 ;;
     -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "Unknown option: $arg" >&2; exit 2 ;;
     *) VERSION=$arg ;;
@@ -92,7 +94,16 @@ fi
 PKG="$ROOT/installer/mac/WolfLeaderApp"
 ASSETS="$ROOT/installer/assets"
 DIST="$ROOT/dist"
-APP="$DIST/Wolf Leader.app"
+# --dev builds "Wolf Leader Dev": its own bundle id and settings, pointed at the dev hub, so it
+# can sit next to the real app.
+if [ "$DEV" = 1 ]; then
+  APP_NAME="Wolf Leader Dev"
+  BUNDLE_ID="app.wolfleader.mac.dev"
+else
+  APP_NAME="Wolf Leader"
+  BUNDLE_ID="app.wolfleader.mac"
+fi
+APP="$DIST/$APP_NAME.app"
 CONTENTS="$APP/Contents"
 RES="$CONTENTS/Resources"
 PAY="$RES/payload"
@@ -138,11 +149,15 @@ cat >"$CONTENTS/Info.plist" <<PLIST
 	<key>CFBundleExecutable</key>
 	<string>WolfLeader</string>
 	<key>CFBundleIdentifier</key>
-	<string>app.wolfleader.mac</string>
+	<string>$BUNDLE_ID</string>
 	<key>CFBundleName</key>
-	<string>Wolf Leader</string>
+	<string>$APP_NAME</string>
 	<key>CFBundleDisplayName</key>
-	<string>Wolf Leader</string>
+	<string>$APP_NAME</string>
+	<key>WLDevBuild</key>
+	<string>$DEV</string>
+	<key>WLDevHubURL</key>
+	<string>${WL_DEV_HUB_URL:-http://127.0.0.1:6981}</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleInfoDictionaryVersion</key>

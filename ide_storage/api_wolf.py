@@ -340,6 +340,80 @@ async def get_progress():
     return progress_overview()
 
 
+class ProfileItemBody(BaseModel):
+    text: Optional[str] = None
+    kind: Optional[str] = None
+    source: Optional[str] = None
+
+
+class ProfileImportBody(BaseModel):
+    items: List[Dict[str, Any]]
+
+
+class KnownSessionsBody(BaseModel):
+    ids: List[str]
+
+
+@router.get("/people/{name}/profile")
+async def get_profile(name: str):
+    """Who this person is and how they like to work, by section."""
+    from ide_storage.profiles import profile
+
+    return _progress_call(profile, name)
+
+
+@router.get("/people/{name}/profile.md")
+async def get_profile_markdown(name: str):
+    """The profile as an AI tool should read it."""
+    from fastapi.responses import PlainTextResponse
+
+    from ide_storage.profiles import as_markdown
+
+    return PlainTextResponse(_progress_call(as_markdown, name), media_type="text/markdown")
+
+
+@router.post("/people/{name}/profile")
+async def post_profile_item(name: str, body: ProfileItemBody):
+    from ide_storage.profiles import add_item
+
+    return _progress_call(add_item, name, body.text or "", body.kind or "about", body.source or "manual")
+
+
+@router.post("/people/{name}/profile/import")
+async def post_profile_import(name: str, body: ProfileImportBody):
+    from ide_storage.profiles import import_items
+
+    return _progress_call(import_items, name, body.items)
+
+
+@router.put("/profile-items/{item_id}")
+async def put_profile_item(item_id: int, body: ProfileItemBody):
+    from ide_storage.profiles import update_item
+
+    return _progress_call(update_item, item_id, body.text, body.kind)
+
+
+@router.delete("/profile-items/{item_id}")
+async def remove_profile_item(item_id: int):
+    from ide_storage.profiles import delete_item
+
+    return _progress_call(delete_item, item_id)
+
+
+@router.post("/sessions/known")
+async def post_known_sessions(body: KnownSessionsBody):
+    """Which of these session ids Wolf Leader already has, so an import can skip them."""
+    from ide_storage.db import db_conn
+
+    ids = [i for i in body.ids if i][:5000]
+    if not ids:
+        return {"known": []}
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(f"SELECT session_id FROM chats WHERE session_id IN ({','.join('?' * len(ids))})", ids)
+        return {"known": sorted({r["session_id"] for r in cur.fetchall()})}
+
+
 class StartProjectBody(BaseModel):
     name: str
     description: Optional[str] = None

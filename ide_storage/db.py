@@ -127,6 +127,7 @@ _HAS_ID_TABLES = {
     "embeddings",
     "howls",
     "north_stars",
+    "profile_items",
     "milestones",
     "goals",
     "build_prompts",
@@ -427,6 +428,19 @@ SCHEMA_STATEMENTS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_howls_project ON howls(project_id)",
+    # A person's profile: short statements about who they are and how they like to work.
+    """
+    CREATE TABLE IF NOT EXISTS profile_items (
+        id BIGSERIAL PRIMARY KEY,
+        person TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'about',
+        body TEXT NOT NULL,
+        source TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_profile_items_person ON profile_items(lower(person))",
     # A project's North Star, one row per version: it is expected to change, and the
     # earlier ones (with why they changed) are part of the story.
     """

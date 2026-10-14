@@ -561,6 +561,13 @@ def build_prompt(project_id: int, goal_ids: list[int], *, note: str = "", public
     lines += ["", "Build only what is listed. If something else looks necessary, say so and stop instead of widening the scope.", ""]
     if note.strip():
         lines += ["## Notes from the owner", "", note.strip(), ""]
+    owner = _owner_of(project)
+    if owner:
+        from ide_storage.profiles import as_markdown, profile
+
+        if profile(owner)["count"]:
+            body = as_markdown(owner).split("\n", 3)[-1].strip()
+            lines += [f"## Working with {owner}", "", body, ""]
     if left.get("summary"):
         lines += ["## Where the project stands", "", _clip(left["summary"], 700), ""]
     if constraints:
@@ -597,6 +604,15 @@ def build_prompt(project_id: int, goal_ids: list[int], *, note: str = "", public
         conn.commit()
     return {"id": prompt_id, "project_id": project_id, "goal_ids": [g["id"] for g in goals], "title": _clip(goals[0]["title"], 120),
             "body": text, "created_at": now}
+
+
+def _owner_of(project: dict[str, Any]) -> str | None:
+    try:
+        from ide_storage.owners import attach_owners
+
+        return attach_owners([dict(project)])[0].get("owner")
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def list_build_prompts(project_id: int, limit: int = 20) -> list[dict[str, Any]]:

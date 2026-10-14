@@ -438,7 +438,7 @@ def run_import(api: str, plan: dict) -> int:
         elif choice["action"] == "new":
             # Worked on in the last month: in progress. Older: brought in as done, to keep Focus clear.
             recent = max((s.get("ended") or "" for s in group.get("sessions", [])), default="")
-            cutoff = datetime.fromtimestamp(datetime.utcnow().timestamp() - 30 * 86400).isoformat()
+            cutoff = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - 30 * 86400).isoformat()
             stale = not recent or recent < cutoff
             made = call(api, "POST", "/api/projects/start", {
                 "name": choice.get("name") or group["label"], "folder": group.get("folder") or "",

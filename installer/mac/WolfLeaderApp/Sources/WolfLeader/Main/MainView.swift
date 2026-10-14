@@ -34,16 +34,12 @@ struct MainView: View {
     @EnvironmentObject private var store: ConfigStore
     @Environment(\.palette) private var p
     @StateObject private var updates = UpdateChecker()
-    @State private var section: MainSection? = .projects
-    // Back / forward across sidebar tabs, like a browser.
-    @State private var backStack: [MainSection] = []
-    @State private var forwardStack: [MainSection] = []
-    @State private var steppingThroughHistory = false
+    @StateObject private var nav = Navigator()
     @State private var hubOK: Bool? = nil
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $section) {
+            List(selection: Binding<MainSection?>(get: { nav.route.section }, set: { if let s = $0 { nav.open(section: s) } })) {
                 Section {
                     HStack(spacing: 8) {
                         WolfMark(size: 18)
@@ -83,7 +79,7 @@ struct MainView: View {
             .tint(p.accent)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 HubStatusCard(hubOK: hubOK, hubURL: store.config.hubURL) {
-                    section = .settings
+                    nav.open(section: .settings)
                 }
             }
             .navigationSplitViewColumnWidth(min: 170, ideal: 200, max: 240)
@@ -94,22 +90,18 @@ struct MainView: View {
         }
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
-                Button(action: goBack) { Image(systemName: "chevron.left") }
-                    .disabled(!canGoBack)
+                Button { nav.goBack() } label: { Image(systemName: "chevron.left") }
+                    .disabled(!nav.canGoBack)
                     .help("Back")
                     .keyboardShortcut("[", modifiers: .command)
-                Button(action: goForward) { Image(systemName: "chevron.right") }
-                    .disabled(!canGoForward)
+                Button { nav.goForward() } label: { Image(systemName: "chevron.right") }
+                    .disabled(!nav.canGoForward)
                     .help("Forward")
                     .keyboardShortcut("]", modifiers: .command)
             }
         }
-        .onChange(of: section) { old, new in
-            if steppingThroughHistory { steppingThroughHistory = false; return }
-            guard let old, old != new else { return }
-            backStack.append(old)
-            forwardStack.removeAll()
-        }
+        .environmentObject(nav)
+        .onAppear { nav.watchSwipes() }
         .environmentObject(updates)
         .task {
             updates.start(store: store)
@@ -123,28 +115,11 @@ struct MainView: View {
         }
     }
 
-    private var canGoBack: Bool { !backStack.isEmpty }
-    private var canGoForward: Bool { !forwardStack.isEmpty }
-
-    private func goBack() {
-        guard let previous = backStack.popLast() else { return }
-        if let section { forwardStack.append(section) }
-        steppingThroughHistory = true
-        section = previous
-    }
-
-    private func goForward() {
-        guard let next = forwardStack.popLast() else { return }
-        if let section { backStack.append(section) }
-        steppingThroughHistory = true
-        section = next
-    }
-
     @ViewBuilder
     private var detail: some View {
-        switch section ?? .projects {
+        switch nav.route.section {
         case .projects:
-            ProjectsView(openSettings: { section = .settings })
+            ProjectsView(openSettings: { nav.open(section: .settings) })
         case .library:
             LibraryView()
         case .ask:

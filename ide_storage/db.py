@@ -127,6 +127,7 @@ _HAS_ID_TABLES = {
     "embeddings",
     "howls",
     "north_stars",
+    "milestones",
     "goals",
     "build_prompts",
     "offsite_copies",
@@ -454,6 +455,20 @@ SCHEMA_STATEMENTS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_goals_project ON goals(project_id)",
+    # Milestones: the few big chunks between where a project is and its North Star, in order.
+    """
+    CREATE TABLE IF NOT EXISTS milestones (
+        id BIGSERIAL PRIMARY KEY,
+        project_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        position INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'not_started',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_milestones_project ON milestones(project_id)",
+    "ALTER TABLE goals ADD COLUMN IF NOT EXISTS milestone_id BIGINT REFERENCES milestones(id) ON DELETE SET NULL",
     """
     CREATE TABLE IF NOT EXISTS build_prompts (
         id BIGSERIAL PRIMARY KEY,

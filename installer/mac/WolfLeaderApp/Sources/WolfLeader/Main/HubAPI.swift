@@ -704,11 +704,13 @@ struct HubGoal: Decodable, Identifiable, Hashable {
     var phase: String
     var status: String
     var proof: String
+    var milestoneID: Int?
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: HubJSONKey.self)
         id = c.int("id") ?? 0
         projectID = c.int("project_id") ?? 0
+        milestoneID = c.int("milestone_id")
         title = c.str("title") ?? "Untitled goal"
         doneWhen = c.str("done_when") ?? ""
         phase = c.str("phase") ?? "now"
@@ -755,8 +757,13 @@ struct HubProgressProject: Decodable, Identifiable, Hashable {
     var openProblems: [Note]
     var suggestions: [Note]
     var goals: [HubGoal]
+    var milestones: [HubMilestone]
 
     var openGoals: [HubGoal] { goals.filter { $0.status != "verified" } }
+    /// The milestone being worked: the one marked in play, else the first that is not done.
+    var currentMilestone: HubMilestone? {
+        milestones.first { $0.status == "in_play" } ?? milestones.first { $0.status != "done" }
+    }
     var verifiedCount: Int { goals.count - openGoals.count }
 
     init(from decoder: Decoder) throws {
@@ -774,6 +781,21 @@ struct HubProgressProject: Decodable, Identifiable, Hashable {
         openProblems = (try? c.decode([Note].self, forKey: HubJSONKey("open_problems"))) ?? []
         suggestions = (try? c.decode([Note].self, forKey: HubJSONKey("suggestions"))) ?? []
         goals = (try? c.decode([HubGoal].self, forKey: HubJSONKey("goals"))) ?? []
+        milestones = (try? c.decode([HubMilestone].self, forKey: HubJSONKey("milestones"))) ?? []
+    }
+}
+
+/// One of the few big chunks between where a project is and its North Star.
+struct HubMilestone: Decodable, Identifiable, Hashable {
+    var id: Int
+    var title: String
+    var status: String
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        id = c.int("id") ?? 0
+        title = c.str("title") ?? "Milestone"
+        status = c.str("status") ?? "not_started"
     }
 }
 
@@ -831,9 +853,11 @@ extension HubClient {
         try await data(path, method: method, body: try JSONSerialization.data(withJSONObject: payload), timeout: 30)
     }
 
-    func createGoal(projectID: Int, title: String, doneWhen: String, phase: String, memoryID: Int? = nil) async throws {
+    func createGoal(projectID: Int, title: String, doneWhen: String, phase: String, memoryID: Int? = nil,
+                    milestoneID: Int? = nil) async throws {
         var payload: [String: Any] = ["title": title, "done_when": doneWhen, "phase": phase]
         if let memoryID { payload["source_memory_id"] = memoryID }
+        if let milestoneID { payload["milestone_id"] = milestoneID }
         _ = try await send("/api/projects/\(projectID)/goals", method: "POST", payload)
     }
 
@@ -1105,5 +1129,25 @@ extension HubClient {
 
     func howls(projectID: Int) async throws -> [HubHowl] {
         try await get("/api/howls", query: ["project_id": String(projectID), "limit": "100"], as: HubList<HubHowl>.self).items
+    }
+}
+
+extension HubClient {
+    func createMilestone(projectID: Int, title: String) async throws {
+        _ = try await data("/api/projects/\(projectID)/milestones", method: "POST",
+                           body: try JSONSerialization.data(withJSONObject: ["title": title]))
+    }
+
+    func updateMilestone(id: Int, _ changes: [String: Any]) async throws {
+        _ = try await data("/api/milestones/\(id)", method: "PUT", body: try JSONSerialization.data(withJSONObject: changes))
+    }
+
+    func reorderMilestones(projectID: Int, ids: [Int]) async throws {
+        _ = try await data("/api/projects/\(projectID)/milestones/order", method: "PUT",
+                           body: try JSONSerialization.data(withJSONObject: ["ids": ids]))
+    }
+
+    func deleteMilestone(id: Int) async throws {
+        _ = try await data("/api/milestones/\(id)", method: "DELETE")
     }
 }

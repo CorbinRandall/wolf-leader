@@ -213,3 +213,38 @@ def test_north_stars_are_lifted_from_the_journal_once():
     assert north_star(other)["current"] is None
     assert seed_north_stars() == 0  # already has one; nothing is added twice
     assert first
+
+
+def test_milestones_order_goals_and_survive_being_removed():
+    from fastapi.testclient import TestClient
+
+    from ide_storage.main import app
+    from ide_storage.progress import build_prompt, list_goals
+
+    client = TestClient(app)
+    pid = _project("media")
+
+    style = client.post(f"/api/projects/{pid}/milestones", json={"title": "Lock the art style"}).json()
+    clips = client.post(f"/api/projects/{pid}/milestones", json={"title": "Turn stills into clips"}).json()
+    assert (style["position"], clips["position"], style["status"]) == (1, 2, "not_started")
+    assert client.post(f"/api/projects/{pid}/milestones", json={"title": " "}).status_code == 400
+
+    goal = client.post(f"/api/projects/{pid}/goals", json={"title": "Five approved stills", "milestone_id": style["id"]}).json()
+    loose = client.post(f"/api/projects/{pid}/goals", json={"title": "Tidy the folder"}).json()
+    assert (goal["milestone_id"], loose["milestone_id"]) == (style["id"], None)
+    assert "Part of the milestone: Lock the art style" in build_prompt(pid, [goal["id"]])["body"]
+
+    assert client.put(f"/api/milestones/{style['id']}", json={"status": "done"}).json()["status"] == "done"
+    assert client.put(f"/api/milestones/{style['id']}", json={"status": "someday"}).status_code == 400
+    order = client.put(f"/api/projects/{pid}/milestones/order", json={"ids": [clips["id"], style["id"]]}).json()["milestones"]
+    assert [m["title"] for m in order] == ["Turn stills into clips", "Lock the art style"]
+
+    project = next(p for p in client.get("/api/progress").json()["projects"] if p["project_id"] == pid)
+    assert [m["title"] for m in project["milestones"]] == ["Turn stills into clips", "Lock the art style"]
+
+    assert client.put(f"/api/goals/{loose['id']}", json={"milestone_id": clips["id"]}).json()["milestone_id"] == clips["id"]
+    assert client.put(f"/api/goals/{loose['id']}", json={"milestone_id": 0}).json()["milestone_id"] is None
+
+    # Removing a milestone keeps its goals.
+    assert client.delete(f"/api/milestones/{style['id']}").json()["ok"] is True
+    assert {g["id"]: g["milestone_id"] for g in list_goals(pid)}[goal["id"]] is None

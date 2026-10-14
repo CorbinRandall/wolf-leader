@@ -294,6 +294,16 @@ class GoalBody(BaseModel):
     status: Optional[str] = None
     proof: Optional[str] = None
     source_memory_id: Optional[int] = None
+    milestone_id: Optional[int] = None  # on update, 0 takes the goal out of its milestone
+
+
+class MilestoneBody(BaseModel):
+    title: Optional[str] = None
+    status: Optional[str] = None
+
+
+class MilestoneOrder(BaseModel):
+    ids: List[int]
 
 
 class BuildPromptBody(BaseModel):
@@ -356,8 +366,36 @@ async def post_goal(project_id: int, body: GoalBody):
 
     return _progress_call(
         create_goal, project_id, body.title or "", done_when=body.done_when or "", phase=body.phase or "now",
-        status=body.status or "proposed", source_memory_id=body.source_memory_id,
+        status=body.status or "proposed", source_memory_id=body.source_memory_id, milestone_id=body.milestone_id,
     )
+
+
+@router.post("/projects/{project_id}/milestones")
+async def post_milestone(project_id: int, body: MilestoneBody):
+    from ide_storage.progress import create_milestone
+
+    return _progress_call(create_milestone, project_id, body.title or "")
+
+
+@router.put("/projects/{project_id}/milestones/order")
+async def put_milestone_order(project_id: int, body: MilestoneOrder):
+    from ide_storage.progress import reorder_milestones
+
+    return {"milestones": reorder_milestones(project_id, body.ids)}
+
+
+@router.put("/milestones/{milestone_id}")
+async def put_milestone(milestone_id: int, body: MilestoneBody):
+    from ide_storage.progress import update_milestone
+
+    return _progress_call(update_milestone, milestone_id, body.model_dump())
+
+
+@router.delete("/milestones/{milestone_id}")
+async def remove_milestone(milestone_id: int):
+    from ide_storage.progress import delete_milestone
+
+    return _progress_call(delete_milestone, milestone_id)
 
 
 @router.put("/goals/{goal_id}")

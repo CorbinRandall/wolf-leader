@@ -31,6 +31,10 @@ struct ProjectPage: View {
     @State private var goalTitle = ""
     @State private var goalDoneWhen = ""
     @State private var goalPhase = "now"
+    @State private var goalMilestone = 0
+    @State private var milestoneTitle = ""
+    @State private var renamingMilestone: HubMilestone?
+    @State private var renameText = ""
     @State private var memoryText = ""
     @State private var memoryKind = "note"
     @State private var editing = false
@@ -76,6 +80,14 @@ struct ProjectPage: View {
         .task(id: entry.id) { await load() }
         .sheet(item: $reading) { SessionReader(chatID: $0.id, title: $0.title, when: $0.occurredAt ?? $0.updatedAt) }
         .sheet(item: $verifying) { verifySheet($0) }
+        .alert("Rename milestone", isPresented: Binding(get: { renamingMilestone != nil }, set: { if !$0 { renamingMilestone = nil } })) {
+            TextField("Name", text: $renameText)
+            Button("Save") {
+                if let milestone = renamingMilestone { changeMilestone(milestone, ["title": renameText]) }
+                renamingMilestone = nil
+            }
+            Button("Cancel", role: .cancel) { renamingMilestone = nil }
+        }
         .sheet(isPresented: $editingStar) {
             NorthStarEditor(current: star?.current?.body ?? "", suggestion: entry.project.description ?? "") { body, why in
                 Task {
@@ -238,38 +250,37 @@ struct ProjectPage: View {
         }
     }
 
-    // MARK: Goals
+    // MARK: The path: milestones, and the goals under each
+
+    private var milestones: [HubMilestone] { progress?.milestones ?? [] }
 
     private var goals: some View {
-        WLGroup(title: "Goals", subtitle: "Steps toward the North Star. Proposed, then committed, then verified once you have seen it work.", icon: "flag") {
+        WLGroup(title: "The path", subtitle: "A few milestones between here and the North Star, in order, with the goals under each. Re-order or drop them as the star moves.", icon: "point.topleft.down.to.point.bottomright.curvepath") {
             let all = progress?.goals ?? []
-            if all.isEmpty { Text("No goals yet.").font(DS.Font.bodySmall).foregroundStyle(p.textMuted) }
-            ForEach(all) { goal in
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(goal.title).font(DS.Font.bodySmall.weight(.semibold))
-                        if !goal.doneWhen.isEmpty {
-                            Text("Done when: \(goal.doneWhen)").font(DS.Font.micro).foregroundStyle(p.textMuted)
-                        }
-                        if !goal.proof.isEmpty { Text("Seen: \(goal.proof)").font(DS.Font.micro).foregroundStyle(p.good) }
-                    }
-                    Spacer()
-                    MainTag(text: goal.phase.capitalized, color: p.textMuted)
-                    GoalStatusTag(status: goal.status)
-                    Menu {
-                        ForEach(["now", "next", "later"], id: \.self) { phase in
-                            Button("Move to \(phase.capitalized)") { change(goal, ["phase": phase]) }.disabled(goal.phase == phase)
-                        }
-                        Divider()
-                        if goal.status == "proposed" { Button("Commit to it") { change(goal, ["status": "committed"]) } }
-                        if goal.status != "verified" { Button("Mark verified…") { proof = ""; verifying = goal } }
-                        if goal.status == "verified" { Button("Reopen") { change(goal, ["status": "committed"]) } }
-                        Divider()
-                        Button("Delete", role: .destructive) { model.perform { try await $0.deleteGoal(id: goal.id) } }
-                    } label: { Image(systemName: "ellipsis.circle") }
-                    .menuStyle(.borderlessButton).fixedSize()
+            ForEach(Array(milestones.enumerated()), id: \.element.id) { index, milestone in
+                milestoneHeader(milestone, number: index + 1)
+                let mine = all.filter { $0.milestoneID == milestone.id }
+                if mine.isEmpty {
+                    Text("No goals under this yet.").font(DS.Font.micro).foregroundStyle(p.textFaint).padding(.leading, 30)
                 }
+                ForEach(mine) { goalRow($0).padding(.leading, 30) }
                 WLDivider()
+            }
+            let loose = all.filter { goal in goal.milestoneID == nil || !milestones.contains { $0.id == goal.milestoneID } }
+            if !loose.isEmpty {
+                if !milestones.isEmpty { WLEyebrow("Not under a milestone") }
+                ForEach(loose) { goalRow($0) }
+                WLDivider()
+            }
+            if all.isEmpty && milestones.isEmpty {
+                Text("Nothing mapped out yet. Add the big chunks first, then the small steps.")
+                    .font(DS.Font.bodySmall).foregroundStyle(p.textMuted)
+            }
+            HStack(spacing: 8) {
+                TextField("Add a milestone (a big chunk of the journey)", text: $milestoneTitle).mainField()
+                    .onSubmit { addMilestone() }
+                Button("Add milestone") { addMilestone() }.buttonStyle(SecondaryButtonStyle())
+                    .disabled(milestoneTitle.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             VStack(alignment: .leading, spacing: 8) {
                 WLEyebrow("Add a goal")
@@ -280,17 +291,110 @@ struct ProjectPage: View {
                         Text("Now").tag("now"); Text("Next").tag("next"); Text("Later").tag("later")
                     }
                     .pickerStyle(.segmented).frame(width: 220).labelsHidden()
+                    if !milestones.isEmpty {
+                        Picker("", selection: $goalMilestone) {
+                            Text("No milestone").tag(0)
+                            ForEach(milestones) { Text($0.title).tag($0.id) }
+                        }
+                        .labelsHidden().frame(maxWidth: 220)
+                    }
                     Spacer()
                     Button("Add goal") {
-                        let (title, done, phase) = (goalTitle, goalDoneWhen, goalPhase)
+                        let (title, done, phase, milestone) = (goalTitle, goalDoneWhen, goalPhase, goalMilestone)
                         goalTitle = ""; goalDoneWhen = ""
-                        model.perform { try await $0.createGoal(projectID: entry.id, title: title, doneWhen: done, phase: phase) }
+                        model.perform {
+                            try await $0.createGoal(projectID: entry.id, title: title, doneWhen: done, phase: phase,
+                                                    milestoneID: milestone == 0 ? nil : milestone)
+                        }
                     }
                     .buttonStyle(SecondaryButtonStyle())
                     .disabled(goalTitle.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
         }
+    }
+
+    private func milestoneHeader(_ milestone: HubMilestone, number: Int) -> some View {
+        let done = milestone.status == "done"
+        return HStack(spacing: 10) {
+            Text("\(number)").font(.system(size: 11, weight: .bold)).foregroundStyle(done ? p.onAccent : p.text)
+                .frame(width: 20, height: 20)
+                .background(Circle().fill(done ? p.good : (milestone.status == "in_play" ? p.accent2.opacity(0.35) : p.surfaceRaised)))
+            Text(milestone.title).font(DS.Font.body.weight(.semibold)).foregroundStyle(done ? p.textMuted : p.text)
+                .strikethrough(done, color: p.textFaint)
+            Spacer()
+            Menu {
+                Button("Not started") { changeMilestone(milestone, ["status": "not_started"]) }.disabled(milestone.status == "not_started")
+                Button("In play") { changeMilestone(milestone, ["status": "in_play"]) }.disabled(milestone.status == "in_play")
+                Button("Done") { changeMilestone(milestone, ["status": "done"]) }.disabled(done)
+            } label: {
+                MainTag(text: done ? "Done" : (milestone.status == "in_play" ? "In play" : "Not started"),
+                        color: done ? p.good : (milestone.status == "in_play" ? p.accent2 : p.textMuted))
+            }
+            .menuStyle(.borderlessButton).fixedSize()
+            Menu {
+                Button("Move up") { moveMilestone(milestone, by: -1) }.disabled(number == 1)
+                Button("Move down") { moveMilestone(milestone, by: 1) }.disabled(number == milestones.count)
+                Button("Rename…") { renameText = milestone.title; renamingMilestone = milestone }
+                Divider()
+                Button("Delete", role: .destructive) { model.perform { try await $0.deleteMilestone(id: milestone.id) } }
+            } label: { Image(systemName: "ellipsis.circle") }
+            .menuStyle(.borderlessButton).fixedSize()
+            .help("Deleting a milestone keeps its goals")
+        }
+    }
+
+    private func goalRow(_ goal: HubGoal) -> some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(goal.title).font(DS.Font.bodySmall.weight(.semibold))
+                if !goal.doneWhen.isEmpty {
+                    Text("Done when: \(goal.doneWhen)").font(DS.Font.micro).foregroundStyle(p.textMuted)
+                }
+                if !goal.proof.isEmpty { Text("Seen: \(goal.proof)").font(DS.Font.micro).foregroundStyle(p.good) }
+            }
+            Spacer()
+            MainTag(text: goal.phase.capitalized, color: p.textMuted)
+            GoalStatusTag(status: goal.status)
+            Menu {
+                ForEach(["now", "next", "later"], id: \.self) { phase in
+                    Button("Move to \(phase.capitalized)") { change(goal, ["phase": phase]) }.disabled(goal.phase == phase)
+                }
+                if !milestones.isEmpty {
+                    Divider()
+                    ForEach(milestones) { milestone in
+                        Button("Put under: \(milestone.title)") { change(goal, ["milestone_id": milestone.id]) }
+                            .disabled(goal.milestoneID == milestone.id)
+                    }
+                    Button("Take out of its milestone") { change(goal, ["milestone_id": 0]) }.disabled(goal.milestoneID == nil)
+                }
+                Divider()
+                if goal.status == "proposed" { Button("Commit to it") { change(goal, ["status": "committed"]) } }
+                if goal.status != "verified" { Button("Mark verified…") { proof = ""; verifying = goal } }
+                if goal.status == "verified" { Button("Reopen") { change(goal, ["status": "committed"]) } }
+                Divider()
+                Button("Delete", role: .destructive) { model.perform { try await $0.deleteGoal(id: goal.id) } }
+            } label: { Image(systemName: "ellipsis.circle") }
+            .menuStyle(.borderlessButton).fixedSize()
+        }
+    }
+
+    private func addMilestone() {
+        let title = milestoneTitle.trimmingCharacters(in: .whitespaces)
+        guard !title.isEmpty else { return }
+        milestoneTitle = ""
+        model.perform { try await $0.createMilestone(projectID: entry.id, title: title) }
+    }
+
+    private func changeMilestone(_ milestone: HubMilestone, _ changes: [String: Any]) {
+        model.perform { try await $0.updateMilestone(id: milestone.id, changes) }
+    }
+
+    private func moveMilestone(_ milestone: HubMilestone, by offset: Int) {
+        var ids = milestones.map(\.id)
+        guard let from = ids.firstIndex(of: milestone.id), ids.indices.contains(from + offset) else { return }
+        ids.swapAt(from, from + offset)
+        model.perform { try await $0.reorderMilestones(projectID: entry.id, ids: ids) }
     }
 
     private func fromNotes(_ notes: [HubProgressProject.Note]) -> some View {

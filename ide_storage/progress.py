@@ -15,6 +15,7 @@ from typing import Any
 from ide_storage.db import db_conn
 
 PHASES = ("now", "next", "later")
+MILESTONE_STATES = ("not_started", "in_play", "done")
 STATUSES = ("proposed", "committed", "verified")
 
 
@@ -41,6 +42,7 @@ def _goal(row: dict[str, Any]) -> dict[str, Any]:
         "id": int(row["id"]), "project_id": int(row["project_id"]), "title": row["title"],
         "done_when": row.get("done_when") or "", "phase": row.get("phase") or "now",
         "status": row.get("status") or "proposed", "proof": row.get("proof") or "",
+        "milestone_id": row.get("milestone_id"),
         "source_memory_id": row.get("source_memory_id"),
         "created_at": row.get("created_at"), "updated_at": row.get("updated_at"),
     }
@@ -59,9 +61,89 @@ def list_goals(project_id: int | None = None) -> list[dict[str, Any]]:
     return goals
 
 
+def list_milestones(project_id: int | None = None) -> list[dict[str, Any]]:
+    with db_conn() as conn:
+        cur = conn.cursor()
+        if project_id is None:
+            cur.execute("SELECT * FROM milestones ORDER BY project_id, position, id")
+        else:
+            cur.execute("SELECT * FROM milestones WHERE project_id = ? ORDER BY position, id", (project_id,))
+        return [
+            {"id": int(r["id"]), "project_id": int(r["project_id"]), "title": r["title"], "position": int(r["position"]),
+             "status": r["status"] or "not_started"}
+            for r in cur.fetchall()
+        ]
+
+
+def create_milestone(project_id: int, title: str) -> dict[str, Any]:
+    title = " ".join((title or "").split())
+    if not title:
+        raise ValueError("A milestone needs a title")
+    now = _now()
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,))
+        if not cur.fetchone():
+            raise LookupError("project not found")
+        cur.execute("SELECT COALESCE(MAX(position), 0) + 1 AS next FROM milestones WHERE project_id = ?", (project_id,))
+        position = int(cur.fetchone()["next"])
+        cur.execute(
+            "INSERT INTO milestones (project_id, title, position, status, created_at, updated_at) VALUES (?, ?, ?, 'not_started', ?, ?)",
+            (project_id, title[:200], position, now, now),
+        )
+        milestone_id = int(cur.lastrowid)
+        conn.commit()
+    return next(m for m in list_milestones(project_id) if m["id"] == milestone_id)
+
+
+def update_milestone(milestone_id: int, changes: dict[str, Any]) -> dict[str, Any]:
+    allowed = {k: v for k, v in changes.items() if k in ("title", "status") and v is not None}
+    if "status" in allowed and allowed["status"] not in MILESTONE_STATES:
+        raise ValueError(f"status is one of {MILESTONE_STATES}")
+    if "title" in allowed:
+        allowed["title"] = " ".join(str(allowed["title"]).split())[:200]
+        if not allowed["title"]:
+            raise ValueError("A milestone needs a title")
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT project_id FROM milestones WHERE id = ?", (milestone_id,))
+        row = cur.fetchone()
+        if not row:
+            raise LookupError("milestone not found")
+        if allowed:
+            sets = ", ".join(f"{k} = ?" for k in allowed)
+            cur.execute(f"UPDATE milestones SET {sets}, updated_at = ? WHERE id = ?", (*allowed.values(), _now(), milestone_id))
+            conn.commit()
+    return next(m for m in list_milestones(int(row["project_id"])) if m["id"] == milestone_id)
+
+
+def reorder_milestones(project_id: int, ordered_ids: list[int]) -> list[dict[str, Any]]:
+    """Put a project's milestones in the given order; any left out keep their order after those."""
+    current = [m["id"] for m in list_milestones(project_id)]
+    wanted = [i for i in ordered_ids if i in current] + [i for i in current if i not in ordered_ids]
+    with db_conn() as conn:
+        cur = conn.cursor()
+        for position, milestone_id in enumerate(wanted, 1):
+            cur.execute("UPDATE milestones SET position = ?, updated_at = ? WHERE id = ?", (position, _now(), milestone_id))
+        conn.commit()
+    return list_milestones(project_id)
+
+
+def delete_milestone(milestone_id: int) -> dict[str, Any]:
+    """Remove a milestone. Its goals are kept and simply belong to no milestone."""
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM milestones WHERE id = ?", (milestone_id,))
+        removed = cur.rowcount or 0
+        conn.commit()
+    if not removed:
+        raise LookupError("milestone not found")
+    return {"ok": True, "id": milestone_id}
+
+
 def create_goal(
     project_id: int, title: str, *, done_when: str = "", phase: str = "now",
-    status: str = "proposed", source_memory_id: int | None = None,
+    status: str = "proposed", source_memory_id: int | None = None, milestone_id: int | None = None,
 ) -> dict[str, Any]:
     title = " ".join((title or "").split())
     if not title:
@@ -76,10 +158,10 @@ def create_goal(
             raise LookupError("project not found")
         cur.execute(
             """
-            INSERT INTO goals (project_id, title, done_when, phase, status, proof, source_memory_id, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, '', ?, ?, ?)
+            INSERT INTO goals (project_id, title, done_when, phase, status, proof, source_memory_id, milestone_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, '', ?, ?, ?, ?)
             """,
-            (project_id, title[:300], (done_when or "").strip()[:600], phase, status, source_memory_id, now, now),
+            (project_id, title[:300], (done_when or "").strip()[:600], phase, status, source_memory_id, milestone_id, now, now),
         )
         goal_id = int(cur.lastrowid)
         conn.commit()
@@ -89,6 +171,9 @@ def create_goal(
 
 def update_goal(goal_id: int, changes: dict[str, Any]) -> dict[str, Any]:
     allowed = {k: v for k, v in changes.items() if k in ("title", "done_when", "phase", "status", "proof") and v is not None}
+    # milestone_id: a number files the goal under a milestone, 0 takes it out of any.
+    if changes.get("milestone_id") is not None:
+        allowed["milestone_id"] = int(changes["milestone_id"]) or None
     if "phase" in allowed and allowed["phase"] not in PHASES:
         raise ValueError(f"phase is one of {PHASES}")
     if "status" in allowed and allowed["status"] not in STATUSES:
@@ -220,6 +305,9 @@ def progress_overview() -> dict[str, Any]:
     goals_by_project: dict[int, list[dict[str, Any]]] = {}
     for goal in list_goals():
         goals_by_project.setdefault(goal["project_id"], []).append(goal)
+    milestones_by_project: dict[int, list[dict[str, Any]]] = {}
+    for milestone in list_milestones():
+        milestones_by_project.setdefault(milestone["project_id"], []).append(milestone)
     out: list[dict[str, Any]] = []
     with db_conn() as conn:
         cur = conn.cursor()
@@ -264,6 +352,7 @@ def progress_overview() -> dict[str, Any]:
                 "open_problems": [{"id": m["id"], "text": _clip(m["content"], 200)} for m in problems],
                 "suggestions": [{"memory_id": m["id"], "text": _clip(m["content"], 220), "type": m["type"]} for m in suggestions],
                 "goals": goals,
+                "milestones": milestones_by_project.get(pid, []),
                 "goal_counts": {s: sum(1 for g in goals if g["status"] == s) for s in STATUSES},
             })
         cur.execute("SELECT COUNT(*) AS n FROM chats WHERE project_id IS NULL")
@@ -375,8 +464,11 @@ def build_prompt(project_id: int, goal_ids: list[int], *, note: str = "", public
         lines += ["## North Star", "", star, "",
                   "This is where the project is heading. It can change; if this work suggests it should, say so.", ""]
     lines += ["## Build this", ""]
+    milestone_titles = {m["id"]: m["title"] for m in list_milestones(project_id)}
     for i, goal in enumerate(goals, 1):
         lines.append(f"{i}. **{goal['title']}**")
+        if goal.get("milestone_id") in milestone_titles:
+            lines.append(f"   Part of the milestone: {milestone_titles[goal['milestone_id']]}")
         if goal["done_when"]:
             lines.append(f"   Done when: {goal['done_when']}")
     lines += ["", "Build only what is listed. If something else looks necessary, say so and stop instead of widening the scope.", ""]

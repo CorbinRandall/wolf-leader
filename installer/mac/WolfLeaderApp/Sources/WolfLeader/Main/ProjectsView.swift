@@ -13,17 +13,22 @@ struct ProjectsView: View {
     @Environment(\.palette) private var p
     var openSettings: () -> Void = {}
     @StateObject private var model = ProjectsModel()
-    @AppStorage("wl.projects.tab") private var tabRaw = ProjectsTab.focus.rawValue
+    @EnvironmentObject private var nav: Navigator
     @State private var query = ""
-    @State private var openID: Int?
     @State private var promptFor: ProjectEntry?
     @State private var columnEditor: ColumnEditorContext?
     @State private var showLoose = false
     @State private var stageFilter = "open"
     @State private var topic = ""
 
+    // Which view and which project are part of the window's history, so back and forward work here.
     private var tab: Binding<ProjectsTab> {
-        Binding(get: { ProjectsTab(rawValue: tabRaw) ?? .focus }, set: { tabRaw = $0.rawValue })
+        Binding(get: { ProjectsTab(rawValue: nav.route.projectsTab) ?? .focus }, set: { nav.open(projectsTab: $0.rawValue) })
+    }
+
+    private var openID: Int? {
+        get { nav.route.projectID }
+        nonmutating set { nav.open(project: newValue) }
     }
 
     private var tabs: [WLTab<ProjectsTab>] {
@@ -39,7 +44,7 @@ struct ProjectsView: View {
     var body: some View {
         Group {
             if let openID, let entry = model.entry(openID) {
-                ProjectPage(entry: entry, model: model, back: { self.openID = nil }, prompt: { promptFor = $0 },
+                ProjectPage(entry: entry, model: model, back: { nav.closeProject() }, prompt: { promptFor = $0 },
                             open: { self.openID = $0 })
                     .id(openID)
             } else {
@@ -335,6 +340,11 @@ private struct FocusCard: View {
                         Image(systemName: "star.fill").font(.system(size: 9)).foregroundStyle(p.accent2).padding(.top, 2)
                         Text(star).font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(2).multilineTextAlignment(.leading)
                     }
+                }
+                if let progress = entry.progress, let milestone = progress.currentMilestone,
+                   let index = progress.milestones.firstIndex(of: milestone) {
+                    Text("Milestone \(index + 1) of \(progress.milestones.count): \(milestone.title)")
+                        .font(DS.Font.micro.weight(.semibold)).foregroundStyle(p.text).lineLimit(1)
                 }
                 if let next = entry.progress?.nextStep {
                     VStack(alignment: .leading, spacing: 3) {

@@ -3,7 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 private enum LibraryTab: String, Hashable {
-    case skills, people, repos, cleanup, snippets
+    case skills, people, bringin, tools, repos, cleanup, snippets
 }
 
 /// Client-first management tools. The hub keeps a compact fallback UI; day-to-day organization
@@ -20,6 +20,8 @@ struct LibraryView: View {
         [
             WLTab(id: .skills, title: "Skills", icon: "shippingbox"),
             WLTab(id: .people, title: "People", icon: "person.2"),
+            WLTab(id: .bringin, title: "Bring in", icon: "tray.and.arrow.down"),
+            WLTab(id: .tools, title: "My tools", icon: "laptopcomputer"),
             WLTab(id: .repos, title: "Backups", icon: "externaldrive.badge.checkmark"),
             WLTab(id: .cleanup, title: "Cleanup", icon: "arrow.triangle.merge"),
             WLTab(id: .snippets, title: "Snippets", icon: "chevron.left.forwardslash.chevron.right"),
@@ -35,6 +37,8 @@ struct LibraryView: View {
             switch tab.wrappedValue {
             case .skills: SkillsLibraryView()
             case .people: PeopleLibraryView()
+            case .bringin: BringInView()
+            case .tools: MyToolsView()
             case .repos: ReposLibraryView()
             case .cleanup: DuplicateCleanupView()
             case .snippets: SnippetsLibraryView()
@@ -382,11 +386,12 @@ private struct PeopleLibraryView: View {
     @State private var renaming: String?
     @State private var renameText = ""
     @State private var removing: String?
+    @State private var profileOf: String?
     @State private var error: String?
     @State private var notice: String?
 
     var body: some View {
-        WLPageHeader(title: "People", subtitle: "Who a project can belong to. Change a project's owner from its tag in Projects.")
+        WLPageHeader(title: "People", subtitle: "Who a project can belong to, and what AI tools should know about each person.")
         if let notice { WLStatusPill(text: notice, kind: .good) }
         if let error { WLStatusPill(text: error, kind: .bad) }
         WLGroup(title: "Owners", subtitle: "\(counts[""] ?? 0) project\((counts[""] ?? 0) == 1 ? " has" : "s have") no owner.", icon: "person.2") {
@@ -406,6 +411,7 @@ private struct PeopleLibraryView: View {
                     }
                     Spacer()
                     if renaming != name {
+                        Button("Profile") { profileOf = name }.buttonStyle(SecondaryButtonStyle())
                         Button("Rename") { renameText = name; renaming = name }.buttonStyle(OutlineButtonStyle())
                         Button("Remove") { removing = name }.buttonStyle(OutlineButtonStyle())
                     }
@@ -420,6 +426,9 @@ private struct PeopleLibraryView: View {
             }
         }
         Color.clear.frame(height: 0).task(id: store.config.hubURL) { await load() }
+            .sheet(item: Binding(get: { profileOf.map(PersonRef.init) }, set: { profileOf = $0?.id })) { ref in
+                ProfileSheet(person: ref.id).environmentObject(store)
+            }
             .confirmationDialog(
                 "Remove \(removing ?? "")?",
                 isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
@@ -467,3 +476,5 @@ private struct PeopleLibraryView: View {
         } catch { self.error = error.localizedDescription }
     }
 }
+
+private struct PersonRef: Identifiable { var id: String }

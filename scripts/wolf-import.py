@@ -34,6 +34,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 HOME = Path.home()
+SKILL_DIRS = {"claude": HOME / ".claude" / "skills", "codex": HOME / ".agents" / "skills", "cursor": HOME / ".cursor" / "skills"}
 HERE = Path(__file__).resolve().parent
 SESSION_PY = HERE.parent / "examples" / "shared" / "skills" / "wolfhowl" / "scripts" / "session.py"
 SKIP_PREFIXES = ("<environment_context>", "<recommended_plugins>", "# AGENTS.md instructions", "<system-reminder>",
@@ -167,7 +168,8 @@ def is_broad(folder: str | None) -> bool:
         return True
     n = folder.rstrip("/").lower()
     return n in ("", "/", "/root", "/tmp") or bool(re.fullmatch(r"/(users|home)/[^/]+", n)) or "/var/folders/" in n \
-        or n.startswith("/private/var/") or "/documents/codex/20" in n  # Codex's dated scratch folders
+        or n.startswith("/private/var/") or "/documents/codex/20" in n \
+        or bool(re.fullmatch(r"/(users|home)/[^/]+/(downloads|desktop|documents|applications|projects)", n))
 
 
 def scan(api: str) -> dict:
@@ -191,7 +193,10 @@ def scan(api: str) -> dict:
     for s in sessions:
         s["already_in"] = s["id"] in known
 
-    projects = {p["id"]: p["name"] for p in call(api, "GET", "/api/projects?limit=1000").get("projects", [])}
+    rows = call(api, "GET", "/api/projects?limit=1000").get("projects", [])
+    projects = {p["id"]: p["name"] for p in rows}
+    # A person's own catch-all project ("Corbin") matches anything that mentions them; never suggest it.
+    catch_all = {p["id"] for p in rows if "owner-folder" in str(p.get("tags") or "")}
     groups: dict[str, dict] = {}
 
     def suggest_by_content(text: str) -> dict:
@@ -199,7 +204,7 @@ def scan(api: str) -> dict:
             best = call(api, "POST", "/api/projects/match", {"text": text[:20000]}).get("best") or {}
         except Exception:  # noqa: BLE001
             best = {}
-        if best.get("project_id") and best.get("confidence") in ("high", "medium"):
+        if best.get("project_id") and best.get("confidence") in ("high", "medium") and best["project_id"] not in catch_all:
             return {"action": "existing", "project_id": best["project_id"], "project_name": projects.get(best["project_id"], "")}
         return {}
 
@@ -231,9 +236,22 @@ def scan(api: str) -> dict:
             if owner:
                 group["suggestion"] = {"action": "existing", "project_id": owner, "project_name": projects.get(owner, "")}
             else:
-                text = "\n".join(f"{s['title']}\n{s['said']}" for s in group["sessions"][:12])
-                group["suggestion"] = suggest_by_content(text) or {
-                    "action": "new", "name": re.sub(r"[-_]+", " ", group["label"]).strip().title() or "New project"}
+                # Decide each session from what was said. If most agree on one project, that is the
+                # folder's project; if not, the folder is a mixed workspace and each session goes its own way.
+                for s in group["sessions"]:
+                    s["suggestion"] = suggest_by_content(f"{s['title']}\n{s['said']}") or None
+                votes: dict[int, int] = {}
+                for s in group["sessions"]:
+                    if s["suggestion"]:
+                        votes[s["suggestion"]["project_id"]] = votes.get(s["suggestion"]["project_id"], 0) + 1
+                top = max(votes.items(), key=lambda kv: kv[1]) if votes else None
+                if top and top[1] >= 0.7 * len(group["sessions"]):
+                    group["suggestion"] = {"action": "existing", "project_id": top[0], "project_name": projects.get(top[0], "")}
+                elif len(group["sessions"]) >= 6 and votes:
+                    group["suggestion"] = {"action": "split"}
+                else:
+                    group["suggestion"] = {"action": "new",
+                                           "name": re.sub(r"[-_]+", " ", group["label"]).strip().title() or "New project"}
         times = sorted(t for s in group["sessions"] for t in (s.get("started"), s.get("ended")) if t)
         group.update({
             "first": times[0] if times else None, "last": times[-1] if times else None,
@@ -241,6 +259,25 @@ def scan(api: str) -> dict:
             "tools": sorted({s["tool"] for s in group["sessions"]}),
         })
         group["sessions"].sort(key=lambda s: s.get("started") or s.get("ended") or "")
+
+    # A mixed folder becomes one group per project it touched, plus the rest left loose.
+    for key in [k for k, g in groups.items() if g["suggestion"]["action"] == "split"]:
+        mixed = groups.pop(key)
+        for s in mixed["sessions"]:
+            sg = s.get("suggestion")
+            sub_key = f"project:{sg['project_id']}" if sg else "loose"
+            sub = groups.setdefault(sub_key, {
+                "key": sub_key, "folder": None, "label": sg["project_name"] if sg else "No clear project",
+                "suggestion": sg or {"action": "loose"}, "sessions": [],
+            })
+            sub["sessions"].append(s)
+            sub["from_mixed"] = mixed["label"]
+        for sub in groups.values():
+            if "count" not in sub or sub.get("from_mixed") == mixed["label"]:
+                times = sorted(t for s in sub["sessions"] for t in (s.get("started"), s.get("ended")) if t)
+                sub.update({"first": times[0] if times else None, "last": times[-1] if times else None,
+                            "count": len(sub["sessions"]), "new": sum(1 for s in sub["sessions"] if not s["already_in"]),
+                            "tools": sorted({s["tool"] for s in sub["sessions"]})})
 
     tools = {}
     for s in sessions:
@@ -253,13 +290,12 @@ def scan(api: str) -> dict:
 
 
 def profile_candidates() -> list[dict]:
-    sys.path.insert(0, str(HERE.parent))
-    try:
-        from ide_storage.profiles import items_from_text  # type: ignore
-    except Exception:  # noqa: BLE001  - the app bundle has the hub sources; a bare checkout too
-        def items_from_text(text, source, default_kind="about"):  # type: ignore
-            return [{"text": " ".join(line.split()), "kind": default_kind, "source": source}
-                    for line in text.splitlines() if 12 <= len(line.strip()) <= 600 and line.strip()[0] in "-*"]
+    spec = importlib.util.spec_from_file_location("wl_profile_text", HERE.parent / "ide_storage" / "profile_text.py")
+    if not spec or not spec.loader:
+        return []
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    items_from_text = module.items_from_text
     found: list[dict] = []
 
     def add(path: Path, source: str, kind: str = "about") -> None:
@@ -290,9 +326,8 @@ def profile_candidates() -> list[dict]:
 
 
 def local_skills() -> list[dict]:
-    places = {"claude": HOME / ".claude" / "skills", "codex": HOME / ".agents" / "skills", "cursor": HOME / ".cursor" / "skills"}
     skills: dict[str, dict] = {}
-    for tool, root in places.items():
+    for tool, root in SKILL_DIRS.items():
         if not root.is_dir():
             continue
         for skill in sorted(root.iterdir()):
@@ -300,6 +335,92 @@ def local_skills() -> list[dict]:
                 entry = skills.setdefault(skill.name, {"name": skill.name, "tools": [], "path": str(skill)})
                 entry["tools"].append(tool)
     return sorted(skills.values(), key=lambda s: s["name"])
+
+
+TOOL_HOMES = {"claude": HOME / ".claude", "codex": HOME / ".codex", "cursor": HOME / ".cursor"}
+START, END = "<!-- wolf-leader-profile:start -->", "<!-- wolf-leader-profile:end -->"
+
+
+def tool_status() -> list[dict]:
+    """Which AI tools are on this computer, and whether each one already talks to Wolf Leader."""
+    def has(path: Path, needle: str) -> bool:
+        try:
+            return needle in path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return False
+    mcp = {
+        "claude": has(HOME / ".claude.json", "wolf-leader"),
+        "codex": has(HOME / ".codex" / "config.toml", "wolf-leader"),
+        "cursor": has(HOME / ".cursor" / "mcp.json", "wolf-leader"),
+    }
+    names = {"claude": "Claude Code", "codex": "Codex", "cursor": "Cursor"}
+    out = []
+    for tool, home in TOOL_HOMES.items():
+        skills = SKILL_DIRS[tool]
+        out.append({"tool": tool, "name": names[tool], "installed": home.is_dir(), "connected": mcp[tool],
+                    "skills": sum(1 for d in skills.iterdir() if (d / "SKILL.md").is_file()) if skills.is_dir() else 0,
+                    "has_profile": profile_block_present(tool)})
+    return out
+
+
+def profile_target(tool: str) -> Path:
+    return {"claude": HOME / ".claude" / "CLAUDE.md", "codex": HOME / ".codex" / "AGENTS.md",
+            "cursor": HOME / ".cursor" / "rules" / "wolf-leader-profile.mdc"}[tool]
+
+
+def profile_block_present(tool: str) -> bool:
+    try:
+        return START in profile_target(tool).read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+
+def write_profile(tool: str, markdown: str) -> str:
+    """Put the profile into the file this tool reads at the start of every chat. Only the marked
+    block is ever replaced; anything the person wrote around it stays."""
+    target = profile_target(tool)
+    block = f"{START}\n{markdown.strip()}\n{END}"
+    if tool == "cursor":
+        text = "---\ndescription: Who I am and how I like to work (from Wolf Leader)\nalwaysApply: true\n---\n\n" + block + "\n"
+    else:
+        try:
+            old = target.read_text(encoding="utf-8")
+        except OSError:
+            old = ""
+        if START in old and END in old:
+            text = old[:old.index(START)] + block + old[old.index(END) + len(END):]
+        else:
+            text = (old.rstrip() + "\n\n" if old.strip() else "") + block + "\n"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
+    return str(target)
+
+
+def send_to_tools(api: str, person: str, tools: list[str], skills: list[str]) -> dict:
+    """Give the chosen tools the person's profile and skills, so switching tools loses nothing."""
+    import shutil
+    result: dict = {"profile": [], "skills": [], "skipped": []}
+    tools = [t for t in tools if t in TOOL_HOMES and TOOL_HOMES[t].is_dir()]
+    if person:
+        req = urllib.request.Request(api + f"/api/people/{urllib.parse.quote(person)}/profile.md")
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            markdown = resp.read().decode("utf-8")
+        for tool in tools:
+            result["profile"].append({"tool": tool, "file": write_profile(tool, markdown)})
+    have = {s["name"]: s for s in local_skills()}
+    for name in skills:
+        found = have.get(name)
+        if not found:
+            result["skipped"].append({"skill": name, "why": "not on this computer"})
+            continue
+        for tool in tools:
+            dest = SKILL_DIRS[tool] / name
+            if dest.exists():
+                continue  # never overwrite a skill a tool already has
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(found["path"], dest, symlinks=True, ignore=shutil.ignore_patterns(".DS_Store", "__pycache__"))
+            result["skills"].append({"skill": name, "tool": tool})
+    return result
 
 
 def run_import(api: str, plan: dict) -> int:
@@ -359,11 +480,21 @@ def run_import(api: str, plan: dict) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("mode", choices=["scan", "import"])
+    ap.add_argument("mode", choices=["scan", "import", "tools", "send"])
     ap.add_argument("plan", nargs="?")
     ap.add_argument("--api", default=None)
+    ap.add_argument("--person", default="")
+    ap.add_argument("--to", default="", help="send: tools, comma separated (claude,codex,cursor)")
+    ap.add_argument("--skills", default="", help="send: skill names, comma separated")
     args = ap.parse_args()
     api = api_url(args.api)
+    if args.mode == "tools":
+        print(json.dumps({"tools": tool_status(), "skills": local_skills()}))
+        return 0
+    if args.mode == "send":
+        split = lambda v: [x for x in (v or "").split(",") if x.strip()]  # noqa: E731
+        print(json.dumps(send_to_tools(api, args.person, split(args.to), split(args.skills))))
+        return 0
     if args.mode == "scan":
         print(json.dumps(scan(api)))
         return 0

@@ -1277,3 +1277,59 @@ extension HubClient {
         _ = try await data("/api/projects/\(id)", method: "DELETE", timeout: 120)
     }
 }
+
+// MARK: - Profiles
+
+struct HubProfileItem: Identifiable, Hashable {
+    var id: Int
+    var kind: String
+    var text: String
+    var source: String
+}
+
+struct HubProfileSection: Identifiable, Hashable {
+    var id: String { kind }
+    var kind: String
+    var title: String
+    var items: [HubProfileItem]
+}
+
+extension HubClient {
+    private func personPath(_ name: String) -> String {
+        "/api/people/" + (name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name)
+    }
+
+    func profile(person: String) async throws -> [HubProfileSection] {
+        let json = (try JSONSerialization.jsonObject(with: try await data(personPath(person) + "/profile")) as? [String: Any]) ?? [:]
+        return ((json["sections"] as? [[String: Any]]) ?? []).map { section in
+            HubProfileSection(
+                kind: section["kind"] as? String ?? "about",
+                title: section["title"] as? String ?? "",
+                items: ((section["items"] as? [[String: Any]]) ?? []).compactMap { item in
+                    guard let id = item["id"] as? Int else { return nil }
+                    return HubProfileItem(id: id, kind: item["kind"] as? String ?? "about",
+                                          text: item["text"] as? String ?? "", source: item["source"] as? String ?? "manual")
+                })
+        }
+    }
+
+    func profileMarkdown(person: String) async throws -> String {
+        String(decoding: try await data(personPath(person) + "/profile.md"), as: UTF8.self)
+    }
+
+    func addProfileItem(person: String, text: String, kind: String) async throws {
+        _ = try await data(personPath(person) + "/profile", method: "POST",
+                           body: try JSONSerialization.data(withJSONObject: ["text": text, "kind": kind, "source": "manual"]))
+    }
+
+    func updateProfileItem(id: Int, text: String? = nil, kind: String? = nil) async throws {
+        var body: [String: String] = [:]
+        if let text { body["text"] = text }
+        if let kind { body["kind"] = kind }
+        _ = try await data("/api/profile-items/\(id)", method: "PUT", body: try JSONSerialization.data(withJSONObject: body))
+    }
+
+    func deleteProfileItem(id: Int) async throws {
+        _ = try await data("/api/profile-items/\(id)", method: "DELETE")
+    }
+}

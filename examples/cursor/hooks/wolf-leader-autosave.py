@@ -64,12 +64,12 @@ def main():
     title=title_for(messages); text="\n".join(m["content"] for m in messages)[:80000]
     match=call("POST","/api/projects/match",{"text":text,"messages":messages,"workspace_path":cwd})
     best=match.get("best") or {}; slug="ide-storage" if is_wolf_leader_topic(text) else (best.get("slug") if best.get("confidence") in ("high","medium") else None)
-    # No clear project: save it as a loose chat. It shows up in Projects to file by hand,
-    # instead of a new project being made for every unmatched chat.
+    # No clear project: it goes to One-offs, the standard home for chats that belong to no
+    # project, instead of a new project being made for every unmatched chat.
     body={"session_id":sid,"workspace_path":cwd,"title":title,
         "content":f"Automatic checkpoint with {len(messages)} messages.","messages":messages,
         "occurred_at":messages[0].get("created_at")}
-    if slug: body["slug"]=slug
+    body["slug"]=slug or "one-offs"
     result=call("POST","/api/save-project",body)
     CLIENT_DIR.joinpath("wolf-leader-last-save.json").write_text(json.dumps(result,indent=2))
     print('{"continue":true}')

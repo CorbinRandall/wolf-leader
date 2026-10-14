@@ -40,17 +40,41 @@ def test_profile_block_replaces_only_itself(tmp_path):
     assert "very short" in text and "- likes short answers" not in text
 
 
-def test_skills_copy_without_overwriting(tmp_path):
+def test_push_gives_every_tool_the_master_set(tmp_path, monkeypatch):
+    import io
+    import zipfile
+
     m = load(tmp_path)
-    source = tmp_path / ".agents" / "skills" / "talk"
-    source.mkdir(parents=True)
-    (source / "SKILL.md").write_text("---\nname: talk\n---\n", encoding="utf-8")
-    kept = tmp_path / ".cursor" / "skills" / "talk"
-    kept.mkdir(parents=True)
-    (kept / "SKILL.md").write_text("mine", encoding="utf-8")
-    (tmp_path / ".claude").mkdir()
-    (tmp_path / ".codex").mkdir()
-    result = m.send_to_tools("http://unused", "", ["claude", "codex", "cursor"], ["talk"])
-    assert result["skills"] == [{"skill": "talk", "tool": "claude"}]
-    assert (tmp_path / ".claude" / "skills" / "talk" / "SKILL.md").is_file()
-    assert (kept / "SKILL.md").read_text(encoding="utf-8") == "mine"
+    m.BACKUPS = tmp_path / "backups"
+    for home in (".claude", ".codex", ".cursor"):
+        (tmp_path / home).mkdir()
+    old = tmp_path / ".cursor" / "skills" / "talk"
+    old.mkdir(parents=True)
+    (old / "SKILL.md").write_text("old words", encoding="utf-8")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("skills/talk/SKILL.md", "---\nname: talk\n---\n")
+    class Reply:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return buffer.getvalue()
+    monkeypatch.setattr(m.urllib.request, "urlopen", lambda *a, **k: Reply())
+
+    first = m.push_skills("http://unused")
+    assert {(a["tool"], a["skill"]) for a in first["added"]} == {("claude", "talk"), ("codex", "talk")}
+    assert first["updated"] == [{"tool": "cursor", "skill": "talk"}]
+    assert "name: talk" in (old / "SKILL.md").read_text(encoding="utf-8")
+    assert any("old words" in f.read_text(encoding="utf-8") for f in m.BACKUPS.rglob("SKILL.md"))
+    again = m.push_skills("http://unused")
+    assert (again["added"], again["updated"], again["unchanged"]) == ([], [], 3)
+
+
+def test_remove_skills_keeps_a_backup(tmp_path):
+    m = load(tmp_path)
+    m.BACKUPS = tmp_path / "backups"
+    skill = tmp_path / ".agents" / "skills" / "old"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("x", encoding="utf-8")
+    assert m.remove_skills("codex", ["old", "../etc"])["removed"] == ["old"]
+    assert not skill.exists()
+    assert list(m.BACKUPS.rglob("SKILL.md"))

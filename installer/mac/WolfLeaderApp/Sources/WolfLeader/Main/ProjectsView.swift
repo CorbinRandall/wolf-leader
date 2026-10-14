@@ -406,10 +406,16 @@ private struct LooseSessionsSheet: View {
                 VStack(alignment: .leading, spacing: 4) {
                     WLEyebrow("Loose sessions")
                     Text("Chats that belong to no project").font(DS.Font.section).foregroundStyle(p.text)
-                    Text("One-off questions end up here. The hub files a session by itself when it clearly matches a project. You can leave the rest.")
+                    Text("Chats that match a project are filed by themselves. Move the rest to One-offs to keep things tidy.")
                         .font(DS.Font.micro).foregroundStyle(p.textMuted).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
+                if !model.unfiled.isEmpty {
+                    Button("Move all to One-offs") {
+                        model.perform("Moved to One-offs.") { try await $0.fileLooseInOneOffs() }
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                }
                 if model.unfiled.count > 1 {
                     Button("Delete all") { confirmAll = true }.buttonStyle(OutlineButtonStyle())
                 }

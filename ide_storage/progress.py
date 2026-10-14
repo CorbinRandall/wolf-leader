@@ -506,6 +506,44 @@ def auto_file_sessions() -> dict[str, Any]:
     return {"filed": filed, "left_loose": len(loose) - len(filed)}
 
 
+def one_offs_project() -> dict[str, Any]:
+    """The standard home for chats that belong to no project: quick questions, experiments.
+    Every hub gets one, so unmatched chats never turn into a pile of tiny projects."""
+    from ide_storage.project_match import ONE_OFFS_SLUG, ONE_OFFS_TAG
+
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, name, slug FROM projects WHERE slug = ?", (ONE_OFFS_SLUG,))
+        row = cur.fetchone()
+        if row:
+            return dict(row)
+        now = _now()
+        cur.execute(
+            """
+            INSERT INTO projects (name, path, description, slug, status, tags, created_at, updated_at, metadata)
+            VALUES (?, '', ?, ?, 'done', ?, ?, ?, ?)
+            """,
+            ("One-offs", "Chats that belong to no project: quick questions, experiments, one-time fixes.",
+             ONE_OFFS_SLUG, json.dumps([ONE_OFFS_TAG]), now, now, json.dumps({"created_from": "one-offs"})),
+        )
+        project_id = int(cur.lastrowid)
+        conn.commit()
+    return {"id": project_id, "name": "One-offs", "slug": ONE_OFFS_SLUG}
+
+
+def file_loose_in_one_offs() -> dict[str, Any]:
+    """File loose chats that clearly belong somewhere, then put the rest in One-offs."""
+    filed = auto_file_sessions()["filed"]
+    home = one_offs_project()
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM chats WHERE project_id IS NULL")
+        rest = [int(r["id"]) for r in cur.fetchall()]
+    for chat_id in rest:
+        file_session(chat_id, int(home["id"]))
+    return {"filed": filed, "one_offs": len(rest), "project_id": home["id"]}
+
+
 def file_session(chat_id: int, project_id: int) -> dict[str, Any]:
     with db_conn() as conn:
         cur = conn.cursor()

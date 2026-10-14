@@ -561,6 +561,14 @@ async def post_auto_file_sessions():
     return auto_file_sessions()
 
 
+@router.post("/sessions/one-offs")
+async def post_sessions_to_one_offs():
+    """File loose chats that clearly belong to a project; the rest go to One-offs."""
+    from ide_storage.progress import file_loose_in_one_offs
+
+    return file_loose_in_one_offs()
+
+
 @router.post("/sessions/{chat_id}/file")
 async def post_file_session(chat_id: int, body: FileSessionBody):
     from ide_storage.progress import file_session

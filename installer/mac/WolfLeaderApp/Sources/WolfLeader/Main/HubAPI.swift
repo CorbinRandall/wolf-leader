@@ -492,6 +492,11 @@ extension HubClient {
         try await get("/api/skills", as: HubSkillsResponse.self)
     }
 
+    /// Take a skill out of the master set. The hub keeps the files in its trash.
+    func deleteSkill(id: String) async throws {
+        _ = try await data("/api/skills/" + (id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id), method: "DELETE")
+    }
+
     /// Add a skill from a ZIP. The hub names it from SKILL.md, its folder, or the file name.
     func addSkill(archive: Data, filename: String, overwrite: Bool) async throws -> String {
         try await postSkill(["archive_base64": archive.base64EncodedString(), "filename": filename, "overwrite": overwrite])
@@ -1028,6 +1033,11 @@ extension HubClient {
     func autoFileSessions() async throws -> Int {
         let raw = try await data("/api/sessions/auto-file", method: "POST", body: Data("{}".utf8), timeout: 120)
         return (((try JSONSerialization.jsonObject(with: raw) as? [String: Any])?["filed"] as? [Any]) ?? []).count
+    }
+
+    /// File loose chats that clearly match a project; everything else goes to One-offs.
+    func fileLooseInOneOffs() async throws {
+        _ = try await data("/api/sessions/one-offs", method: "POST", body: Data("{}".utf8), timeout: 180)
     }
 
     func deleteSession(id: Int) async throws {

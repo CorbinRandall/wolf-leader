@@ -127,7 +127,7 @@ struct BringInView: View {
             }
             Picker("", selection: Binding(get: { choices[group.key] ?? "skip" }, set: { choices[group.key] = $0 })) {
                 Text("New project").tag("new")
-                Text("Loose chats").tag("loose")
+                Text("One-offs").tag("loose")
                 Text("Skip").tag("skip")
                 Divider()
                 ForEach(projects) { Text($0.name).tag("p:\($0.id)") }
@@ -188,7 +188,7 @@ struct BringInView: View {
             switch choices[group.key] ?? "skip" {
             case "skip": continue
             case "new": raw["choice"] = ["action": "new", "name": newNames[group.key] ?? group.label]
-            case "loose": raw["choice"] = ["action": "loose"]
+            case "loose": raw["choice"] = ["action": "one-offs"]
             case let value where value.hasPrefix("p:"):
                 raw["choice"] = ["action": "existing", "project_id": Int(value.dropFirst(2)) ?? 0]
             default: continue
@@ -236,6 +236,7 @@ struct BringInView: View {
 /// one to another loses nothing. Wolf Leader keeps the history for all of them.
 struct MyToolsView: View {
     @EnvironmentObject private var store: ConfigStore
+    @EnvironmentObject private var nav: Navigator
     @Environment(\.palette) private var p
 
     private struct Tool: Identifiable {
@@ -247,24 +248,16 @@ struct MyToolsView: View {
         var hasProfile: Bool
     }
 
-    private struct Skill: Identifiable {
-        var id: String { name }
-        var name: String
-        var tools: [String]
-    }
-
     @State private var tools: [Tool] = []
-    @State private var skills: [Skill] = []
     @State private var owners: [String] = []
     @State private var person = ""
-    @State private var picked: Set<String> = []
     @State private var loading = false
     @State private var sending = false
     @State private var notice: String?
     @State private var error: String?
 
     var body: some View {
-        WLPageHeader(title: "My tools", subtitle: "Give every AI tool on this Mac the same profile and skills.") {
+        WLPageHeader(title: "My tools", subtitle: "Every AI tool on this Mac gets the same profile and skills.") {
             Button("Check again") { Task { await load() } }.buttonStyle(SecondaryButtonStyle()).disabled(loading)
         }
         if let notice { WLStatusPill(text: notice, kind: .good) }
@@ -291,32 +284,13 @@ struct MyToolsView: View {
                         .font(DS.Font.micro).foregroundStyle(p.textMuted)
                 }
             }
-            let missing = skills.filter { skill in installed.contains(where: { !skill.tools.contains($0) }) }
-            WLGroup(title: "Skills", subtitle: missing.isEmpty ? "Every tool has every skill." : "Tick skills to copy to the tools that lack them.", icon: "shippingbox") {
-                ForEach(missing) { skill in
-                    Toggle(isOn: Binding(get: { picked.contains(skill.name) },
-                                         set: { if $0 { picked.insert(skill.name) } else { picked.remove(skill.name) } })) {
-                        HStack {
-                            Text(skill.name).font(DS.Font.bodySmall)
-                            Spacer()
-                            Text("in " + skill.tools.map(toolName).joined(separator: ", "))
-                                .font(DS.Font.micro).foregroundStyle(p.textMuted)
-                        }
-                    }
-                    .toggleStyle(.checkbox)
-                }
-                if !missing.isEmpty {
-                    HStack {
-                        Button("Tick all") { picked = Set(missing.map(\.name)) }.buttonStyle(OutlineButtonStyle())
-                        Button("Clear") { picked = [] }.buttonStyle(OutlineButtonStyle())
-                    }
-                }
+            WLGroup(title: "Skills", subtitle: "Your skills live in one master set. Push it from My skills.", icon: "shippingbox") {
+                Button("Open My skills") { nav.open(libraryTab: "skills") }.buttonStyle(OutlineButtonStyle())
             }
             WLGroup(title: "Profile", subtitle: "Each tool reads it at the start of every chat.", icon: "person.text.rectangle") {
                 HStack {
                     Text("Whose profile").font(DS.Font.bodySmall)
                     Picker("", selection: $person) {
-                        Text("Don't send a profile").tag("")
                         ForEach(owners, id: \.self) { Text($0).tag($0) }
                     }
                     .labelsHidden().frame(width: 200)
@@ -328,9 +302,9 @@ struct MyToolsView: View {
             HStack {
                 Spacer()
                 if sending { ProgressView().controlSize(.small) }
-                Button("Send to all my tools") { Task { await send() } }
+                Button("Send profile to all my tools") { Task { await send() } }
                     .buttonStyle(PrimaryButtonStyle())
-                    .disabled(sending || (person.isEmpty && picked.isEmpty))
+                    .disabled(sending || person.isEmpty)
             }
         }
         Color.clear.frame(height: 0).task(id: store.config.hubURL) { await load() }
@@ -351,9 +325,6 @@ struct MyToolsView: View {
                      connected: $0["connected"] as? Bool ?? false, skills: $0["skills"] as? Int ?? 0,
                      hasProfile: $0["has_profile"] as? Bool ?? false)
             }
-            skills = ((json["skills"] as? [[String: Any]]) ?? []).map {
-                Skill(name: $0["name"] as? String ?? "", tools: $0["tools"] as? [String] ?? [])
-            }
             owners = (try? await store.hub.owners()) ?? owners
             if person.isEmpty, let first = owners.first { person = first }
             error = nil
@@ -362,18 +333,11 @@ struct MyToolsView: View {
 
     private func send() async {
         sending = true; defer { sending = false }
-        var args = ["send", "--to", installed.joined(separator: ",")]
-        if !person.isEmpty { args += ["--person", person] }
-        if !picked.isEmpty { args += ["--skills", picked.sorted().joined(separator: ",")] }
+        let args = ["send", "--to", installed.joined(separator: ","), "--person", person]
         do {
             let json = try await ToolBridge.json(args, hubURL: store.config.hubURL)
-            let copied = ((json["skills"] as? [Any]) ?? []).count
             let profiles = ((json["profile"] as? [Any]) ?? []).count
-            var parts: [String] = []
-            if profiles > 0 { parts.append("Profile sent to \(profiles) tool\(profiles == 1 ? "" : "s").") }
-            if copied > 0 { parts.append("Copied \(copied) skill\(copied == 1 ? "" : "s").") }
-            notice = parts.isEmpty ? "Nothing needed sending." : parts.joined(separator: " ")
-            picked = []
+            notice = "Profile sent to \(profiles) tool\(profiles == 1 ? "" : "s")."
             error = nil
             await load()
         } catch { self.error = error.localizedDescription }

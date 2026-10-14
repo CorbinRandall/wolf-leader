@@ -331,7 +331,7 @@ def local_skills() -> list[dict]:
         if not root.is_dir():
             continue
         for skill in sorted(root.iterdir()):
-            if (skill / "SKILL.md").is_file():
+            if not skill.name.startswith(".") and (skill / "SKILL.md").is_file():
                 entry = skills.setdefault(skill.name, {"name": skill.name, "tools": [], "path": str(skill)})
                 entry["tools"].append(tool)
     return sorted(skills.values(), key=lambda s: s["name"])
@@ -396,10 +396,9 @@ def write_profile(tool: str, markdown: str) -> str:
     return str(target)
 
 
-def send_to_tools(api: str, person: str, tools: list[str], skills: list[str]) -> dict:
-    """Give the chosen tools the person's profile and skills, so switching tools loses nothing."""
-    import shutil
-    result: dict = {"profile": [], "skills": [], "skipped": []}
+def send_to_tools(api: str, person: str, tools: list[str]) -> dict:
+    """Give the chosen tools the person's profile, so switching tools loses nothing."""
+    result: dict = {"profile": []}
     tools = [t for t in tools if t in TOOL_HOMES and TOOL_HOMES[t].is_dir()]
     if person:
         req = urllib.request.Request(api + f"/api/people/{urllib.parse.quote(person)}/profile.md")
@@ -407,20 +406,115 @@ def send_to_tools(api: str, person: str, tools: list[str], skills: list[str]) ->
             markdown = resp.read().decode("utf-8")
         for tool in tools:
             result["profile"].append({"tool": tool, "file": write_profile(tool, markdown)})
+    return result
+
+
+BACKUPS = HOME / ".wolf-leader" / "skill-backups"
+
+
+def _tree_digest(folder: Path) -> str:
+    import hashlib
+    digest = hashlib.sha256()
+    for path in sorted(folder.rglob("*")):
+        if path.is_file() and not any(part in ("__pycache__", ".DS_Store", ".git") for part in path.parts):
+            digest.update(path.relative_to(folder).as_posix().encode())
+            digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def _put_aside(path: Path, tool: str) -> str:
+    """Move a skill out of a tool's folder into a dated backup. Nothing is deleted outright."""
+    import shutil
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest = BACKUPS / stamp / tool / path.name
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(path), str(dest))
+    return str(dest)
+
+
+def skill_overview(api: str) -> dict:
+    """The master set kept in Wolf Leader, and what each AI tool on this Mac has."""
+    master = call(api, "GET", "/api/skills").get("skills", [])
+    names = {m["id"] for m in master}
+    tools = []
+    for tool, root in SKILL_DIRS.items():
+        if not TOOL_HOMES[tool].is_dir():
+            continue
+        have = sorted(d.name for d in root.iterdir()
+                      if not d.name.startswith(".") and (d / "SKILL.md").is_file()) if root.is_dir() else []
+        tools.append({"tool": tool, "skills": [{"name": n, "in_set": n in names} for n in have],
+                      "missing": sorted(names - set(have))})
+    return {"master": [{"id": m["id"], "name": m.get("name") or m["id"], "description": m.get("description") or "",
+                        "tools": [t["tool"] for t in tools if m["id"] not in t["missing"]]} for m in master],
+            "tools": tools,
+            "not_in_set": sorted({s["name"] for t in tools for s in t["skills"] if not s["in_set"]})}
+
+
+def push_skills(api: str) -> dict:
+    """Write every skill in the master set into every AI tool on this Mac. A tool's own copy that
+    differs is replaced; the old copy is kept under ~/.wolf-leader/skill-backups."""
+    import io
+    import shutil
+    import tempfile
+    import zipfile
+    req = urllib.request.Request(api + "/api/skills/export.zip")
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        archive = zipfile.ZipFile(io.BytesIO(resp.read()))
+    added, updated, same = [], [], 0
+    with tempfile.TemporaryDirectory() as tmp:
+        archive.extractall(tmp)  # zipfile drops ".." and absolute paths, so this stays inside tmp
+        root = Path(tmp) / "skills"
+        masters = [d for d in root.iterdir() if (d / "SKILL.md").is_file()] if root.is_dir() else []
+        for tool, folder in SKILL_DIRS.items():
+            if not TOOL_HOMES[tool].is_dir():
+                continue
+            folder.mkdir(parents=True, exist_ok=True)
+            for skill in masters:
+                dest = folder / skill.name
+                if dest.exists() or dest.is_symlink():
+                    if dest.is_dir() and _tree_digest(dest) == _tree_digest(skill):
+                        same += 1
+                        continue
+                    _put_aside(dest, tool)
+                    updated.append({"tool": tool, "skill": skill.name})
+                else:
+                    added.append({"tool": tool, "skill": skill.name})
+                shutil.copytree(skill, dest)
+    return {"added": added, "updated": updated, "unchanged": same, "backups": str(BACKUPS)}
+
+
+def remove_skills(tool: str, names: list[str]) -> dict:
+    root = SKILL_DIRS.get(tool)
+    removed = []
+    for name in names:
+        path = root / name if root else None
+        if path and (path / "SKILL.md").is_file() and "/" not in name and not name.startswith("."):
+            _put_aside(path, tool)
+            removed.append(name)
+    return {"removed": removed, "backups": str(BACKUPS)}
+
+
+def adopt_skills(api: str, names: list[str]) -> dict:
+    """Add skills found in a tool to the master set in Wolf Leader."""
+    import base64
     have = {s["name"]: s for s in local_skills()}
-    for name in skills:
+    added, skipped = [], []
+    for name in names:
         found = have.get(name)
         if not found:
-            result["skipped"].append({"skill": name, "why": "not on this computer"})
+            skipped.append({"skill": name, "why": "not on this computer"})
             continue
-        for tool in tools:
-            dest = SKILL_DIRS[tool] / name
-            if dest.exists():
-                continue  # never overwrite a skill a tool already has
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(found["path"], dest, symlinks=True, ignore=shutil.ignore_patterns(".DS_Store", "__pycache__"))
-            result["skills"].append({"skill": name, "tool": tool})
-    return result
+        folder = Path(found["path"])
+        files = [{"path": f"{name}/{p.relative_to(folder).as_posix()}",
+                  "content_base64": base64.b64encode(p.read_bytes()).decode()}
+                 for p in sorted(folder.rglob("*"))
+                 if p.is_file() and not any(part in ("__pycache__", ".DS_Store", ".git") for part in p.parts)]
+        try:
+            call(api, "POST", "/api/skills/import", {"name": name.lower(), "files": files, "overwrite": False})
+            added.append(name)
+        except Exception as exc:  # noqa: BLE001
+            skipped.append({"skill": name, "why": "already in your set" if "409" in str(exc) else str(exc)[:160]})
+    return {"added": added, "skipped": skipped}
 
 
 def run_import(api: str, plan: dict) -> int:
@@ -447,8 +541,8 @@ def run_import(api: str, plan: dict) -> int:
             })
             slugs[group["key"]] = made.get("slug")
             print(json.dumps({"event": "project", "name": made.get("name"), "slug": made.get("slug")}), flush=True)
-        else:
-            slugs[group["key"]] = None
+        else:  # "one-offs" (older plans say "loose")
+            slugs[group["key"]] = "one-offs"
     for group, session in todo:
         path = Path(session["path"])
         try:
@@ -480,20 +574,33 @@ def run_import(api: str, plan: dict) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("mode", choices=["scan", "import", "tools", "send"])
+    ap.add_argument("mode", choices=["scan", "import", "tools", "send", "skills", "push-skills", "remove-skills", "adopt-skills"])
     ap.add_argument("plan", nargs="?")
     ap.add_argument("--api", default=None)
     ap.add_argument("--person", default="")
     ap.add_argument("--to", default="", help="send: tools, comma separated (claude,codex,cursor)")
-    ap.add_argument("--skills", default="", help="send: skill names, comma separated")
+    ap.add_argument("--skills", default="", help="skill names, comma separated")
+    ap.add_argument("--tool", default="", help="remove-skills: the tool to remove them from")
     args = ap.parse_args()
     api = api_url(args.api)
     if args.mode == "tools":
         print(json.dumps({"tools": tool_status(), "skills": local_skills()}))
         return 0
+    split = lambda v: [x.strip() for x in (v or "").split(",") if x.strip()]  # noqa: E731
     if args.mode == "send":
-        split = lambda v: [x for x in (v or "").split(",") if x.strip()]  # noqa: E731
-        print(json.dumps(send_to_tools(api, args.person, split(args.to), split(args.skills))))
+        print(json.dumps(send_to_tools(api, args.person, split(args.to))))
+        return 0
+    if args.mode == "skills":
+        print(json.dumps(skill_overview(api)))
+        return 0
+    if args.mode == "push-skills":
+        print(json.dumps(push_skills(api)))
+        return 0
+    if args.mode == "remove-skills":
+        print(json.dumps(remove_skills(args.tool, split(args.skills))))
+        return 0
+    if args.mode == "adopt-skills":
+        print(json.dumps(adopt_skills(api, split(args.skills))))
         return 0
     if args.mode == "scan":
         print(json.dumps(scan(api)))

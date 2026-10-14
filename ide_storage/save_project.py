@@ -23,6 +23,8 @@ from ide_storage.project_match import (
 STATE_FILE = Path(os.environ.get("IDE_STORAGE_SESSION_FILE", "/root/.cursor/wolf-leader-current-session"))
 
 
+from ide_storage.project_match import ONE_OFFS_SLUG  # noqa: E402
+
 def find_transcript(
     session_id: str | None = None,
     *,
@@ -158,6 +160,10 @@ def save_from_conversation(
     project_id: int | None = None
 
     if project_slug:
+        if project_slug == ONE_OFFS_SLUG:
+            from ide_storage.progress import one_offs_project
+
+            one_offs_project()  # made the first time something is filed there
         project = resolve_project(slug=project_slug)
         if not project:
             report["error"] = f"Unknown project slug: {project_slug}"
@@ -297,6 +303,10 @@ def save_project(
     match: dict[str, Any] | None = None
 
     if project_slug:
+        if project_slug == ONE_OFFS_SLUG:
+            from ide_storage.progress import one_offs_project
+
+            one_offs_project()  # made the first time something is filed there
         project = resolve_project(slug=project_slug)
         if not project:
             report["error"] = f"Unknown project slug: {project_slug}"

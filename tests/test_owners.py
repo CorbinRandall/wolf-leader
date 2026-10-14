@@ -101,3 +101,41 @@ def test_summary_counts_and_unassigned():
     assert summary["counts"] == {"Alice": 1, "Bob": 1, "": 1}
     assert unassigned_project_ids() == [nobody]
     assert in_folder != by_hand
+
+
+def test_owners_can_be_added_renamed_and_removed(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from ide_storage import owners
+    from ide_storage.db import db_conn
+    from ide_storage.main import app
+
+    monkeypatch.setenv("WOLF_OWNERS", "Ann,Bo")
+    owners._cache.update(at=0.0, owners=None)
+    client = TestClient(app)
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("INSERT INTO projects (name, path, slug, status, created_at, updated_at) VALUES ('Fans', '', 'fans', 'active', 'now', 'now')")
+        conn.commit()
+        cur.execute("SELECT id FROM projects WHERE slug = 'fans'")
+        pid = int(cur.fetchone()["id"])
+
+    assert client.get("/api/owners").json()["owners"] == ["Ann", "Bo"]
+    assert client.post("/api/owners", json={"name": "Cy"}).json()["owners"] == ["Ann", "Bo", "Cy"]
+    assert client.post("/api/owners", json={"name": "cy"}).status_code == 400
+    assert client.put(f"/api/projects/{pid}", json={"owner": "Cy"}).status_code == 200
+
+    renamed = client.put("/api/owners/Cy", json={"name": "Cyrus"}).json()
+    assert renamed["owners"] == ["Ann", "Bo", "Cyrus"]
+    assert renamed["projects_updated"] == 1
+    assert client.get(f"/api/projects/{pid}").json()["owner"] == "Cyrus"
+    assert client.put("/api/owners/Nobody", json={"name": "X"}).status_code == 404
+
+    moved = client.delete("/api/owners/Cyrus", params={"move_to": "Ann"}).json()
+    assert moved["owners"] == ["Ann", "Bo"]
+    assert client.get(f"/api/projects/{pid}").json()["owner"] == "Ann"
+
+    cleared = client.delete("/api/owners/Ann").json()
+    assert cleared["owners"] == ["Bo"]
+    assert client.get(f"/api/projects/{pid}").json()["owner"] is None
+    owners._cache.update(at=0.0, owners=None)

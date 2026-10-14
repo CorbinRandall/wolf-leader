@@ -226,6 +226,9 @@ def unlink_folder(project_id: int, path: str) -> dict[str, Any]:
 # ------------------------------------------------------------------- notes vaults
 def notes_repos() -> list[str]:
     """Git repos holding notes: this hub's vault, and each person's vault on the share."""
+    # A dev or demo hub shares the real folders but must not write history into them.
+    if os.environ.get("WOLF_NOTES_DISABLED", "").lower() in ("1", "true", "yes"):
+        return []
     found: list[str] = []
     candidates = [get_vault_dir() or ""]
     candidates += sorted(glob.glob(os.path.join(share_root(), "*", "wolfleader", "vault")))

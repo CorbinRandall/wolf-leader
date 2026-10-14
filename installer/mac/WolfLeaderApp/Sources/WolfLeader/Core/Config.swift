@@ -112,7 +112,7 @@ final class ConfigStore: ObservableObject {
 
     static var supportDir: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return base.appendingPathComponent("WolfLeader", isDirectory: true)
+        return base.appendingPathComponent(BuildInfo.isDev ? "WolfLeaderDev" : "WolfLeader", isDirectory: true)
     }
     private static var file: URL { supportDir.appendingPathComponent("config.json") }
 
@@ -120,6 +120,13 @@ final class ConfigStore: ObservableObject {
         if let data = try? Data(contentsOf: Self.file),
            let saved = try? JSONDecoder().decode(WolfConfig.self, from: data) {
             config = saved
+        } else if BuildInfo.isDev {
+            // A dev build skips setup and talks to the dev hub: a copy of the real data.
+            var dev = WolfConfig()
+            dev.setupComplete = true
+            dev.hubURL = BuildInfo.devHubURL
+            dev.mcpURL = BuildInfo.devHubURL.replacingOccurrences(of: ":6981", with: ":6982") + "/mcp"
+            config = dev
         } else {
             config = WolfConfig()
         }
@@ -145,6 +152,9 @@ enum BuildInfo {
     static let defaultBranch = "feat/background-memory-installer"
 
     static var version: String { plist("CFBundleShortVersionString") ?? "dev" }
+    /// A "Wolf Leader Dev" build (build-app.sh --dev): its own settings, pointed at the dev hub.
+    static var isDev: Bool { plist("WLDevBuild") == "1" }
+    static var devHubURL: String { plist("WLDevHubURL") ?? "http://127.0.0.1:6981" }
     /// Commit the app was built from (set by build-app.sh from a git checkout).
     static var gitSHA: String? { plist("WLGitSHA") }
     static var branch: String { plist("WLGitBranch") ?? defaultBranch }

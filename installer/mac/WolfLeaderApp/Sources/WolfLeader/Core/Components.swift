@@ -72,8 +72,54 @@ private struct AccentSwitch: ViewModifier {
 }
 
 /// Page title + one-line explanation at the top of a screen.
+/// The Wolf Leader mark: a minimal line wolf on a 24-unit grid (same points as the app icon and the
+/// web SVGs; see installer/assets/make_logo.py).
+struct WolfMark: View {
+    var size: CGFloat = 18
+    var color: Color? = nil
+    @Environment(\.palette) private var p
+
+    var body: some View {
+        Canvas { context, canvas in
+            let u = canvas.width / 24
+            func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * u, y: y * u) }
+            var path = Path()
+            path.move(to: pt(3, 3))
+            for (x, y) in [(7, 17), (12, 21), (17, 17), (21, 3), (15, 8), (12, 6), (9, 8)] as [(CGFloat, CGFloat)] {
+                path.addLine(to: pt(x, y))
+            }
+            path.closeSubpath()
+            path.move(to: pt(7, 12)); path.addLine(to: pt(12, 16)); path.addLine(to: pt(17, 12))
+            path.move(to: pt(12, 16)); path.addLine(to: pt(12, 21))
+            context.stroke(path, with: .color(color ?? p.text), style: StrokeStyle(lineWidth: 1.6 * u, lineJoin: .miter))
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Small uppercase, letter-spaced label that sits above a title or names a section.
+struct WLEyebrow: View {
+    @Environment(\.palette) private var p
+    let text: String
+    var color: Color? = nil
+
+    init(_ text: String, color: Color? = nil) {
+        self.text = text
+        self.color = color
+    }
+
+    var body: some View {
+        Text(text.uppercased())
+            .font(.system(size: 10.5, weight: .semibold))
+            .tracking(1.6)
+            .foregroundStyle(color ?? p.textMuted)
+    }
+}
+
 struct WLPageHeader<Trailing: View>: View {
     @Environment(\.palette) private var p
+    var eyebrow: String? = nil
     let title: String
     var subtitle: String? = nil
     @ViewBuilder var trailing: () -> Trailing
@@ -81,6 +127,7 @@ struct WLPageHeader<Trailing: View>: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: DS.Spacing.md) {
             VStack(alignment: .leading, spacing: 4) {
+                if let eyebrow { WLEyebrow(eyebrow) }
                 Text(title).font(DS.Font.page).foregroundStyle(p.text)
                 if let subtitle {
                     Text(subtitle).font(DS.Font.bodySmall).foregroundStyle(p.textMuted)
@@ -93,8 +140,8 @@ struct WLPageHeader<Trailing: View>: View {
 }
 
 extension WLPageHeader where Trailing == EmptyView {
-    init(title: String, subtitle: String? = nil) {
-        self.init(title: title, subtitle: subtitle, trailing: { EmptyView() })
+    init(eyebrow: String? = nil, title: String, subtitle: String? = nil) {
+        self.init(eyebrow: eyebrow, title: title, subtitle: subtitle, trailing: { EmptyView() })
     }
 }
 

@@ -286,6 +286,178 @@ async def delete_path(project_id: int, path: str):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+# ------------------------------------------------------------- progress, goals, build prompts
+class GoalBody(BaseModel):
+    title: Optional[str] = None
+    done_when: Optional[str] = None
+    phase: Optional[str] = None
+    status: Optional[str] = None
+    proof: Optional[str] = None
+    source_memory_id: Optional[int] = None
+    milestone_id: Optional[int] = None  # on update, 0 takes the goal out of its milestone
+
+
+class MilestoneBody(BaseModel):
+    title: Optional[str] = None
+    status: Optional[str] = None
+
+
+class MilestoneOrder(BaseModel):
+    ids: List[int]
+
+
+class BuildPromptBody(BaseModel):
+    goal_ids: List[int]
+    note: Optional[str] = None
+
+
+class FileSessionBody(BaseModel):
+    project_id: int
+
+
+def _progress_call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/ask")
+async def get_ask(q: str, limit: int = 40):
+    """Answer a plain question from the journal: reads the project, the time and the kind of thing asked about."""
+    from ide_storage.ask import ask
+
+    return ask(q, limit=limit)
+
+
+@router.get("/progress")
+async def get_progress():
+    """Every project: where it stands, the next useful step, open problems, and its goals."""
+    from ide_storage.progress import progress_overview
+
+    return progress_overview()
+
+
+class NorthStarBody(BaseModel):
+    body: str = ""
+    why: Optional[str] = None
+
+
+@router.get("/projects/{project_id}/north-star")
+async def get_north_star(project_id: int):
+    """The project's North Star now, and what it was before."""
+    from ide_storage.progress import north_star
+
+    return north_star(project_id)
+
+
+@router.put("/projects/{project_id}/north-star")
+async def put_north_star(project_id: int, body: NorthStarBody):
+    """Set or change the North Star. Changing it is normal; the earlier one is kept as history."""
+    from ide_storage.progress import set_north_star
+
+    return _progress_call(set_north_star, project_id, body.body, body.why or "")
+
+
+@router.delete("/north-star-versions/{version_id}")
+async def remove_north_star_version(version_id: int):
+    from ide_storage.progress import delete_north_star_version
+
+    return _progress_call(delete_north_star_version, version_id)
+
+
+@router.post("/projects/{project_id}/goals")
+async def post_goal(project_id: int, body: GoalBody):
+    from ide_storage.progress import create_goal
+
+    return _progress_call(
+        create_goal, project_id, body.title or "", done_when=body.done_when or "", phase=body.phase or "now",
+        status=body.status or "proposed", source_memory_id=body.source_memory_id, milestone_id=body.milestone_id,
+    )
+
+
+@router.post("/projects/{project_id}/milestones")
+async def post_milestone(project_id: int, body: MilestoneBody):
+    from ide_storage.progress import create_milestone
+
+    return _progress_call(create_milestone, project_id, body.title or "")
+
+
+@router.put("/projects/{project_id}/milestones/order")
+async def put_milestone_order(project_id: int, body: MilestoneOrder):
+    from ide_storage.progress import reorder_milestones
+
+    return {"milestones": reorder_milestones(project_id, body.ids)}
+
+
+@router.put("/milestones/{milestone_id}")
+async def put_milestone(milestone_id: int, body: MilestoneBody):
+    from ide_storage.progress import update_milestone
+
+    return _progress_call(update_milestone, milestone_id, body.model_dump())
+
+
+@router.delete("/milestones/{milestone_id}")
+async def remove_milestone(milestone_id: int):
+    from ide_storage.progress import delete_milestone
+
+    return _progress_call(delete_milestone, milestone_id)
+
+
+@router.put("/goals/{goal_id}")
+async def put_goal(goal_id: int, body: GoalBody):
+    from ide_storage.progress import update_goal
+
+    return _progress_call(update_goal, goal_id, body.model_dump(exclude={"source_memory_id"}))
+
+
+@router.delete("/goals/{goal_id}")
+async def remove_goal(goal_id: int):
+    from ide_storage.progress import delete_goal
+
+    return _progress_call(delete_goal, goal_id)
+
+
+@router.post("/projects/{project_id}/build-prompts")
+async def post_build_prompt(project_id: int, body: BuildPromptBody):
+    """Freeze a scoped brief for a coding agent from the chosen goals."""
+    from ide_storage.howl import _public_base
+    from ide_storage.progress import build_prompt
+
+    return _progress_call(build_prompt, project_id, body.goal_ids, note=body.note or "", public_url=_public_base())
+
+
+@router.get("/projects/{project_id}/build-prompts")
+async def get_build_prompts(project_id: int):
+    from ide_storage.progress import list_build_prompts
+
+    return {"prompts": list_build_prompts(project_id)}
+
+
+@router.get("/sessions/unfiled")
+async def get_unfiled_sessions(limit: int = 100):
+    from ide_storage.progress import unfiled_sessions
+
+    return {"sessions": unfiled_sessions(limit)}
+
+
+@router.post("/sessions/auto-file")
+async def post_auto_file_sessions():
+    """File the loose sessions that clearly belong to a project; leave the rest alone."""
+    from ide_storage.progress import auto_file_sessions
+
+    return auto_file_sessions()
+
+
+@router.post("/sessions/{chat_id}/file")
+async def post_file_session(chat_id: int, body: FileSessionBody):
+    from ide_storage.progress import file_session
+
+    return _progress_call(file_session, chat_id, body.project_id)
+
+
 # ------------------------------------------------------------- repo health
 class OffsiteReport(BaseModel):
     device_name: Optional[str] = None

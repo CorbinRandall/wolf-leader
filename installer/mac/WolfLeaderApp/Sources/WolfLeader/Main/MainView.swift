@@ -2,19 +2,17 @@ import AppKit
 import SwiftUI
 
 enum MainSection: String, CaseIterable, Identifiable, Hashable {
-    case home, projects, library, ask, wiki, shares, settings
+    case projects, library, ask, shares, settings
 
     var id: String { rawValue }
 
-    static let primary: [MainSection] = [.home, .projects, .library, .ask, .wiki]
+    static let primary: [MainSection] = [.projects, .library, .ask]
 
     var label: String {
         switch self {
-        case .home: return "Home"
         case .projects: return "Projects"
         case .library: return "Library"
         case .ask: return "Ask"
-        case .wiki: return "Wiki"
         case .shares: return "Shares"
         case .settings: return "Settings"
         }
@@ -22,13 +20,34 @@ enum MainSection: String, CaseIterable, Identifiable, Hashable {
 
     var symbol: String {
         switch self {
-        case .home: return "house"
         case .projects: return "folder"
         case .library: return "rectangle.3.group"
         case .ask: return "sparkle.magnifyingglass"
-        case .wiki: return "book.closed"
         case .shares: return "externaldrive.connected.to.line.below"
         case .settings: return "gearshape"
+        }
+    }
+}
+
+/// A row in the sidebar: a whole section, or one view inside Projects or Library.
+enum SidebarItem: Hashable {
+    case projects(String)
+    case library(String)
+    case section(MainSection)
+
+    @MainActor init(_ route: Route) {
+        switch route.section {
+        case .projects: self = .projects(route.projectsTab)
+        case .library: self = .library(route.libraryTab)
+        default: self = .section(route.section)
+        }
+    }
+
+    @MainActor func open(in nav: Navigator) {
+        switch self {
+        case .projects(let tab): nav.open(projectsTab: tab)
+        case .library(let tab): nav.open(libraryTab: tab)
+        case .section(let section): nav.open(section: section)
         }
     }
 }
@@ -38,26 +57,37 @@ struct MainView: View {
     @EnvironmentObject private var store: ConfigStore
     @Environment(\.palette) private var p
     @StateObject private var updates = UpdateChecker()
-    @State private var section: MainSection? = .home
-    @StateObject private var wiki = WikiBrowser()
-    // Back / forward across sidebar tabs, like a browser.
-    @State private var backStack: [MainSection] = []
-    @State private var forwardStack: [MainSection] = []
-    @State private var steppingThroughHistory = false
+    @StateObject private var nav = Navigator()
     @State private var hubOK: Bool? = nil
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $section) {
+            List(selection: Binding<SidebarItem?>(get: { SidebarItem(nav.route) }, set: { if let item = $0 { item.open(in: nav) } })) {
                 Section {
-                    ForEach(MainSection.primary) { s in
-                        Label(s.label, systemImage: s.symbol)
-                            .tag(s)
+                    HStack(spacing: 8) {
+                        WolfMark(size: 18)
+                        WLEyebrow("Wolf Leader", color: p.text)
+                        if BuildInfo.isDev { MainTag(text: "DEV", color: p.accent2) }
                     }
+                    .padding(.vertical, 4)
+                    .selectionDisabled()
+                }
+                // Every view inside a section is one click away, no menu diving.
+                Section("Projects") {
+                    Label("Focus", systemImage: "scope").tag(SidebarItem.projects("focus"))
+                    Label("Board", systemImage: "rectangle.3.group").tag(SidebarItem.projects("board"))
+                    Label("All projects", systemImage: "list.bullet").tag(SidebarItem.projects("all"))
+                }
+                Section("Library") {
+                    Label("Skills", systemImage: "shippingbox").tag(SidebarItem.library("skills"))
+                    Label("People", systemImage: "person.2").tag(SidebarItem.library("people"))
+                    Label("Backups", systemImage: "externaldrive.badge.checkmark").tag(SidebarItem.library("repos"))
+                    Label("Cleanup", systemImage: "arrow.triangle.merge").tag(SidebarItem.library("cleanup"))
+                    Label("Snippets", systemImage: "chevron.left.forwardslash.chevron.right").tag(SidebarItem.library("snippets"))
                 }
                 Section {
-                    Label(MainSection.shares.label, systemImage: MainSection.shares.symbol)
-                        .tag(MainSection.shares)
+                    Label(MainSection.ask.label, systemImage: MainSection.ask.symbol).tag(SidebarItem.section(.ask))
+                    Label(MainSection.shares.label, systemImage: MainSection.shares.symbol).tag(SidebarItem.section(.shares))
                     Label {
                         HStack(spacing: 6) {
                             Text(MainSection.settings.label)
@@ -72,14 +102,14 @@ struct MainView: View {
                     } icon: {
                         Image(systemName: MainSection.settings.symbol)
                     }
-                    .tag(MainSection.settings)
+                    .tag(SidebarItem.section(.settings))
                 }
             }
             .listStyle(.sidebar)
             .tint(p.accent)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 HubStatusCard(hubOK: hubOK, hubURL: store.config.hubURL) {
-                    section = .settings
+                    nav.open(section: .settings)
                 }
             }
             .navigationSplitViewColumnWidth(min: 170, ideal: 200, max: 240)
@@ -90,22 +120,18 @@ struct MainView: View {
         }
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
-                Button(action: goBack) { Image(systemName: "chevron.left") }
-                    .disabled(!canGoBack)
+                Button { nav.goBack() } label: { Image(systemName: "chevron.left") }
+                    .disabled(!nav.canGoBack)
                     .help("Back")
                     .keyboardShortcut("[", modifiers: .command)
-                Button(action: goForward) { Image(systemName: "chevron.right") }
-                    .disabled(!canGoForward)
+                Button { nav.goForward() } label: { Image(systemName: "chevron.right") }
+                    .disabled(!nav.canGoForward)
                     .help("Forward")
                     .keyboardShortcut("]", modifiers: .command)
             }
         }
-        .onChange(of: section) { old, new in
-            if steppingThroughHistory { steppingThroughHistory = false; return }
-            guard let old, old != new else { return }
-            backStack.append(old)
-            forwardStack.removeAll()
-        }
+        .environmentObject(nav)
+        .onAppear { nav.watchSwipes() }
         .environmentObject(updates)
         .task {
             updates.start(store: store)
@@ -119,40 +145,15 @@ struct MainView: View {
         }
     }
 
-    // Inside the wiki, back and forward step through its pages first, then through the tabs.
-    private var inWiki: Bool { section == .wiki }
-    private var canGoBack: Bool { (inWiki && wiki.canGoBack) || !backStack.isEmpty }
-    private var canGoForward: Bool { (inWiki && wiki.canGoForward) || !forwardStack.isEmpty }
-
-    private func goBack() {
-        if inWiki, wiki.canGoBack { wiki.web.goBack(); return }
-        guard let previous = backStack.popLast() else { return }
-        if let section { forwardStack.append(section) }
-        steppingThroughHistory = true
-        section = previous
-    }
-
-    private func goForward() {
-        if inWiki, wiki.canGoForward { wiki.web.goForward(); return }
-        guard let next = forwardStack.popLast() else { return }
-        if let section { backStack.append(section) }
-        steppingThroughHistory = true
-        section = next
-    }
-
     @ViewBuilder
     private var detail: some View {
-        switch section ?? .home {
-        case .home:
-            HomeView(openSettings: { section = .settings }, openProjects: { section = .projects })
+        switch nav.route.section {
         case .projects:
-            ProjectsView()
+            ProjectsView(openSettings: { nav.open(section: .settings) })
         case .library:
             LibraryView()
         case .ask:
             AskView()
-        case .wiki:
-            WikiView(browser: wiki)
         case .shares:
             SharesView()
         case .settings:

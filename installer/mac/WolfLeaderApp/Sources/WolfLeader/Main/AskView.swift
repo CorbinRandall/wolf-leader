@@ -2,8 +2,11 @@ import SwiftUI
 
 struct AskView: View {
     @EnvironmentObject private var store: ConfigStore
+    @EnvironmentObject private var nav: Navigator
     @Environment(\.palette) private var p
 
+    @State private var answer: HubAnswer?
+    @State private var reading: ReadingSession?
     @State private var query = ""
     @State private var lastQuery = ""
     @State private var hits: [HubSearchHit] = []
@@ -21,6 +24,7 @@ struct AskView: View {
             results
         }
         .task(id: store.config.hubURL) { await loadProjectNames() }
+        .sheet(item: $reading) { SessionReader(chatID: $0.id, title: $0.title, when: $0.when) }
         .onAppear { focused = true }
     }
 
@@ -37,7 +41,7 @@ struct AskView: View {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(p.textMuted)
-                        TextField("What did we work on in the billing service around March 3?", text: $query)
+                        TextField(placeholder, text: $query)
                             .textFieldStyle(.plain)
                             .font(DS.Font.bodySmall)
                             .foregroundStyle(p.text)
@@ -69,7 +73,7 @@ struct AskView: View {
                     .disabled(!canSearch)
                 }
                 .frame(maxWidth: 520)
-                Text("Searches memories, chats, projects and files saved by every agent, on your own hub.")
+                Text("Name a project and a time, like \u{201C}three days ago\u{201D} or \u{201C}last week\u{201D}. Answers are quoted from your journal, not written by an AI.")
                     .font(DS.Font.caption)
                     .foregroundStyle(p.textFaint)
                     .multilineTextAlignment(.center)
@@ -89,20 +93,90 @@ struct AskView: View {
             )
         } else if lastQuery.isEmpty {
             EmptyView()
-        } else if hits.isEmpty && !searching {
+        } else if hits.isEmpty && !searching && (answer?.summary.isEmpty ?? true) {
             MainNotice(
                 symbol: "questionmark.bubble",
                 title: "Nothing found for \u{201C}\(lastQuery)\u{201D}",
                 message: "Try fewer or different words."
             )
         } else {
-            WLSectionLabel(text: "\(hits.count) result\(hits.count == 1 ? "" : "s") for \u{201C}\(lastQuery)\u{201D}")
+            if let answer, !answer.summary.isEmpty { answerBlock(answer) }
+            if !hits.isEmpty {
+            WLSectionLabel(text: (answer?.summary.isEmpty ?? true)
+                           ? "\(hits.count) result\(hits.count == 1 ? "" : "s") for \u{201C}\(lastQuery)\u{201D}"
+                           : "Also found by search")
                 .padding(.top, DS.Spacing.sm)
             LazyVStack(spacing: DS.Spacing.sm + 4) {
                 ForEach(hits) { hit in
                     AskResultCard(hit: hit, projectName: projectName(for: hit)) {
                         open(hit)
                     }
+                }
+            }
+            }
+        }
+    }
+
+    private var placeholder: String {
+        let name = projectNames.values.sorted().first { $0.count > 3 } ?? "my project"
+        return "What did I learn for \(name) three days ago?"
+    }
+
+    /// The direct answer: what the hub understood, then the matching entries in full.
+    @ViewBuilder
+    private func answerBlock(_ answer: HubAnswer) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                if let project = answer.understoodProject { MainTag(text: project) }
+                if let when = answer.understoodWhen { MainTag(text: when, color: p.accent2) }
+                if let about = answer.understoodAbout { MainTag(text: about, color: p.textMuted) }
+                Spacer(minLength: 0)
+            }
+            Text(answer.summary).font(DS.Font.body.weight(.semibold)).foregroundStyle(p.text)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.top, DS.Spacing.sm)
+        ForEach(answer.sections) { section in
+            WLGroup(title: section.title, subtitle: "\(section.items.count)", icon: MemoryKind(rawValue: section.kind)?.symbol ?? "square.stack") {
+                ForEach(section.items) { item in
+                    if item.id != section.items.first?.id { WLDivider() }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.text).font(DS.Font.bodySmall).foregroundStyle(p.text).textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: 8) {
+                            Text([item.project, HubDate.format(item.when)].compactMap { $0 }.joined(separator: " · "))
+                                .font(DS.Font.micro).foregroundStyle(p.textFaint)
+                            if let chat = item.chatID {
+                                Button("Read the session") { reading = ReadingSession(id: chat, title: item.project ?? "Session", when: item.when) }
+                                    .buttonStyle(.plain).font(DS.Font.micro.weight(.semibold)).foregroundStyle(p.accent)
+                            }
+                            if let project = item.projectID {
+                                Button("Open project") { nav.open(project: project) }
+                                    .buttonStyle(.plain).font(DS.Font.micro.weight(.semibold)).foregroundStyle(p.accent)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if !answer.sessions.isEmpty {
+            WLGroup(title: "Sessions", subtitle: "What was worked on then. Click one to read it.", icon: "book") {
+                ForEach(answer.sessions) { session in
+                    if session.id != answer.sessions.first?.id { WLDivider() }
+                    Button { reading = ReadingSession(id: session.chatID, title: session.title, when: session.when) } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(session.title).font(DS.Font.bodySmall.weight(.semibold)).foregroundStyle(p.text).lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                            if !session.summary.isEmpty {
+                                Text(session.summary).font(DS.Font.micro).foregroundStyle(p.textMuted)
+                                    .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                            }
+                            Text([session.project, HubDate.format(session.when)].compactMap { $0 }.joined(separator: " · "))
+                                .font(DS.Font.micro).foregroundStyle(p.textFaint)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -115,13 +189,11 @@ struct AskView: View {
     }
 
     private func open(_ hit: HubSearchHit) {
-        let hub = store.hub
+        // Everything opens here in the app: a session in the reader, anything else on its project's page.
         if let chat = hit.linkedChatID {
-            MainLinks.open(hub.webURL(chat: chat))
+            reading = ReadingSession(id: chat, title: hit.chatTitle ?? hit.title ?? "Session", when: hit.stamp)
         } else if let project = hit.linkedProjectID {
-            MainLinks.open(hub.webURL(project: project))
-        } else {
-            MainLinks.open(hub.webURL)
+            nav.open(project: project)
         }
     }
 
@@ -133,9 +205,10 @@ struct AskView: View {
             searching = true
             defer { searching = false }
             do {
-                let found = try await store.hub.search(q)
+                let found = try await store.hub.ask(q)
                 guard !Task.isCancelled else { return }
-                hits = found
+                answer = found
+                hits = found.results
                 lastQuery = q
                 error = nil
             } catch {
@@ -268,4 +341,12 @@ private struct AskResultCard: View {
         .onHover { h in withAnimation(DS.Anim.hover) { hovering = h } }
         .help("Open in the hub")
     }
+}
+
+
+/// A saved session picked to be read in the app.
+struct ReadingSession: Identifiable, Hashable {
+    let id: Int
+    let title: String
+    let when: String?
 }

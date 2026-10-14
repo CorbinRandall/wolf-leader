@@ -1,5 +1,6 @@
 # Installer artwork
 
+- `make_logo.py` (needs `pillow`) draws the Wolf Leader mark (the minimal line wolf, on a 24-unit grid shared with the in-app and web SVGs) and writes `app-icon-source.png`. Run it first when the mark changes.
 - `make_icons.py` (needs `pillow`) cuts `app-icon-source.png` into `app-icon.png` (1024, product icon; `build-app.sh` turns it into the Mac `AppIcon.icns`), `mac-icon.png` (512), `wolfleader.ico` and `wizard-small.bmp` (110x110, Inno `WizardSmallImageFile`).
 - `render.py` (needs `playwright` + `pillow`) reads `app-icon.png` and `icons/` and renders the rest; it never writes the four files above. Run `make_icons.py` first.
 - `wizard-side.bmp` (328x628, 24-bit, 2x of 164x314): Inno `WizardImageFile`, app icon over the "Wolf Leader" wordmark. `render.py`.

@@ -1,12 +1,13 @@
 import SwiftUI
 
 enum ThemeID: String, CaseIterable, Identifiable, Codable {
-    case system, wolf, parakeet, halo
+    case system, wolf, parakeet, halo, pack
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
+        case .pack: return "Pack"
         case .system: return "Follow System"
         case .wolf: return "Wolf"
         case .parakeet: return "Parakeet"
@@ -16,6 +17,7 @@ enum ThemeID: String, CaseIterable, Identifiable, Codable {
 
     var blurb: String {
         switch self {
+        case .pack: return "Warm paper with forest green. Calm and readable."
         case .system: return "Parakeet, light or dark to match your Mac."
         case .wolf: return "Deep navy with a blue glow, like the icon."
         case .parakeet: return "Charcoal with warm coral buttons. Always dark."
@@ -83,6 +85,17 @@ struct Palette {
         good: Color(hex: 0x5CC8A0), warn: Color(hex: 0xE3B04B), bad: Color(hex: 0xE06C75)
     )
 
+    /// Warm paper, forest green, dark ink: the Development OS look.
+    static let pack = Palette(
+        scheme: .light,
+        background: Color(hex: 0xF6F6F0), sidebar: Color(hex: 0xEDF0E7),
+        surface: Color(hex: 0xFCFCF8), surfaceRaised: Color(hex: 0xE8EEE2),
+        border: Color(hex: 0xDBE0D5), divider: Color(hex: 0xE4EADB),
+        text: Color(hex: 0x28352E), textMuted: Color(hex: 0x69716A), textFaint: Color(hex: 0x89947F),
+        accent: Color(hex: 0x385C47), accent2: Color(hex: 0x87603D), onAccent: Color(hex: 0xFCFCF8),
+        good: Color(hex: 0x385C47), warn: Color(hex: 0x87603D), bad: Color(hex: 0x924C3F)
+    )
+
     static let halo = Palette(
         scheme: .light,
         background: Color(hex: 0xEAE3DA), sidebar: Color(hex: 0xF0EBE2),
@@ -114,6 +127,7 @@ final class ThemeStore: ObservableObject {
 
     static func palette(for id: ThemeID, systemScheme: ColorScheme) -> Palette {
         switch id {
+        case .pack: return .pack
         case .system: return systemScheme == .dark ? .parakeetDark : .parakeetLight
         case .wolf: return .wolf
         case .parakeet: return .parakeet

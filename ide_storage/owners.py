@@ -20,14 +20,104 @@ from ide_storage.db import db_conn
 from ide_storage.paths import split_share
 
 
-def configured_owners() -> list[str]:
-    """Owner names from ``WOLF_OWNERS``, in the order given, without duplicates."""
+_SETTING = "owners"
+_cache: dict[str, Any] = {"at": 0.0, "owners": None, "db": None}
+
+
+def _dedupe(names: Iterable[str]) -> list[str]:
     out: list[str] = []
-    for raw in os.environ.get("WOLF_OWNERS", "").split(","):
-        name = raw.strip()
+    for raw in names:
+        name = " ".join(str(raw or "").split())
         if name and name.lower() not in {o.lower() for o in out}:
             out.append(name)
     return out
+
+
+def _saved_owners() -> list[str] | None:
+    """The owner list kept on the hub, or None if nobody has edited it yet."""
+    import time
+
+    db = os.environ.get("DATABASE_URL")
+    if _cache["owners"] is not None and _cache["db"] == db and time.monotonic() - _cache["at"] < 5:
+        return _cache["owners"] or None
+    try:
+        with db_conn() as conn:
+            row = conn.execute("SELECT value FROM app_settings WHERE key = ?", (_SETTING,)).fetchone()
+        saved = _dedupe(json.loads(row["value"])) if row and row["value"] else []
+    except Exception:  # noqa: BLE001
+        saved = []
+    _cache.update(at=time.monotonic(), owners=saved, db=db)
+    return saved or None
+
+
+def configured_owners() -> list[str]:
+    """Owner names: the list kept on the hub if there is one, else ``WOLF_OWNERS``."""
+    saved = _saved_owners()
+    if saved is not None:
+        return list(saved)
+    return _dedupe(os.environ.get("WOLF_OWNERS", "").split(","))
+
+
+def _save_owners(names: list[str]) -> list[str]:
+    from datetime import datetime
+
+    names = _dedupe(names)
+    with db_conn() as conn:
+        conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
+            (_SETTING, json.dumps(names), datetime.utcnow().isoformat()),
+        )
+        conn.commit()
+    _cache.update(at=0.0, owners=None)
+    return names
+
+
+def _projects_owned_by(name: str) -> list[int]:
+    """Projects whose owner was set by hand to ``name`` (folder-derived owners are not stored)."""
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, metadata FROM projects")
+        rows = [dict(r) for r in cur.fetchall()]
+    return [int(r["id"]) for r in rows if str(_metadata(r).get("owner") or "").strip().lower() == name.lower()]
+
+
+def add_owner(name: str) -> list[str]:
+    name = " ".join((name or "").split())
+    if not name:
+        raise ValueError("An owner needs a name")
+    owners = configured_owners()
+    if name.lower() in {o.lower() for o in owners}:
+        raise ValueError(f"{name} is already an owner")
+    return _save_owners([*owners, name])
+
+
+def rename_owner(old: str, new: str) -> dict[str, Any]:
+    new = " ".join((new or "").split())
+    owners = configured_owners()
+    current = next((o for o in owners if o.lower() == (old or "").strip().lower()), None)
+    if current is None:
+        raise LookupError(f"No owner called {old}")
+    if not new:
+        raise ValueError("An owner needs a name")
+    if new.lower() != current.lower() and new.lower() in {o.lower() for o in owners}:
+        raise ValueError(f"{new} is already an owner")
+    ids = _projects_owned_by(current)
+    _save_owners([new if o == current else o for o in owners])
+    return {"owners": configured_owners(), "renamed": current, "to": new, "projects_updated": set_owner(ids, new)}
+
+
+def remove_owner(name: str, move_to: str | None = None) -> dict[str, Any]:
+    owners = configured_owners()
+    current = next((o for o in owners if o.lower() == (name or "").strip().lower()), None)
+    if current is None:
+        raise LookupError(f"No owner called {name}")
+    target = (move_to or "").strip()
+    if target and (canonical_owner(target) is None or target.lower() == current.lower()):
+        raise ValueError(f"Cannot move projects to {target}")
+    ids = _projects_owned_by(current)
+    _save_owners([o for o in owners if o != current])
+    return {"owners": configured_owners(), "removed": current, "projects_updated": set_owner(ids, target or None)}
 
 
 def canonical_owner(name: str | None) -> str | None:

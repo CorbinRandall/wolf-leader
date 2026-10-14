@@ -81,6 +81,14 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         logger.exception("mirror refresh at boot failed")
     try:
+        from .progress import seed_north_stars
+
+        seeded = seed_north_stars()
+        if seeded:
+            logger.info("Lifted %d North Star(s) from the journal", seeded)
+    except Exception:  # noqa: BLE001
+        logger.exception("North Star seeding failed")
+    try:
         from .repo_health import start_notes_schedule
 
         start_notes_schedule()
@@ -1127,6 +1135,46 @@ async def list_owners():
     from ide_storage.owners import owner_summary
 
     return owner_summary()
+
+
+class OwnerName(BaseModel):
+    name: str
+
+
+def _owner_call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/owners")
+async def create_owner(body: OwnerName):
+    """Add a person projects can belong to."""
+    from ide_storage.owners import add_owner, owner_summary
+
+    _owner_call(add_owner, body.name)
+    return owner_summary()
+
+
+@app.put("/api/owners/{name}")
+async def update_owner(name: str, body: OwnerName):
+    """Rename an owner; projects set to the old name follow."""
+    from ide_storage.owners import owner_summary, rename_owner
+
+    result = _owner_call(rename_owner, name, body.name)
+    return {**owner_summary(), "projects_updated": result["projects_updated"]}
+
+
+@app.delete("/api/owners/{name}")
+async def delete_owner(name: str, move_to: Optional[str] = None):
+    """Remove an owner. Their projects go to ``move_to``, or are left with no owner."""
+    from ide_storage.owners import owner_summary, remove_owner
+
+    result = _owner_call(remove_owner, name, move_to)
+    return {**owner_summary(), "projects_updated": result["projects_updated"]}
 
 
 @app.post("/api/owners/assign")

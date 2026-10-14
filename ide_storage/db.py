@@ -126,6 +126,10 @@ _HAS_ID_TABLES = {
     "memories",
     "embeddings",
     "howls",
+    "north_stars",
+    "milestones",
+    "goals",
+    "build_prompts",
     "offsite_copies",
     "jobs",
     "fs_catalog",
@@ -423,6 +427,58 @@ SCHEMA_STATEMENTS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_howls_project ON howls(project_id)",
+    # A project's North Star, one row per version: it is expected to change, and the
+    # earlier ones (with why they changed) are part of the story.
+    """
+    CREATE TABLE IF NOT EXISTS north_stars (
+        id BIGSERIAL PRIMARY KEY,
+        project_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        body TEXT NOT NULL,
+        why TEXT,
+        source_memory_id BIGINT,
+        created_at TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_north_stars_project ON north_stars(project_id)",
+    """
+    CREATE TABLE IF NOT EXISTS goals (
+        id BIGSERIAL PRIMARY KEY,
+        project_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        done_when TEXT,
+        phase TEXT NOT NULL DEFAULT 'now',
+        status TEXT NOT NULL DEFAULT 'proposed',
+        proof TEXT,
+        source_memory_id BIGINT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_goals_project ON goals(project_id)",
+    # Milestones: the few big chunks between where a project is and its North Star, in order.
+    """
+    CREATE TABLE IF NOT EXISTS milestones (
+        id BIGSERIAL PRIMARY KEY,
+        project_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        position INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'not_started',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_milestones_project ON milestones(project_id)",
+    "ALTER TABLE goals ADD COLUMN IF NOT EXISTS milestone_id BIGINT REFERENCES milestones(id) ON DELETE SET NULL",
+    """
+    CREATE TABLE IF NOT EXISTS build_prompts (
+        id BIGSERIAL PRIMARY KEY,
+        project_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        goal_ids TEXT,
+        title TEXT,
+        body TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )
+    """,
     # Uncommitted files in the project repo at howl time (NULL: not a repo / unknown).
     "ALTER TABLE howls ADD COLUMN IF NOT EXISTS git_dirty_files INTEGER",
     """

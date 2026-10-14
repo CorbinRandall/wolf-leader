@@ -5,6 +5,7 @@ import SwiftUI
 struct Route: Hashable {
     var section: MainSection = .projects
     var projectsTab: String = "focus"
+    var libraryTab: String = "skills"
     var projectID: Int?
 }
 
@@ -62,7 +63,19 @@ final class Navigator: ObservableObject {
     }
 
     func open(projectsTab: String) {
-        go(Route(section: .projects, projectsTab: projectsTab, projectID: nil))
+        var next = route
+        next.section = .projects
+        next.projectsTab = projectsTab
+        next.projectID = nil
+        go(next)
+    }
+
+    func open(libraryTab: String) {
+        var next = route
+        next.section = .library
+        next.libraryTab = libraryTab
+        next.projectID = nil
+        go(next)
     }
 
     func open(project id: Int?) {

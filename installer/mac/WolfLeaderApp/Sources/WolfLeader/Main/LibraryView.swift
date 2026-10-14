@@ -9,7 +9,12 @@ private enum LibraryTab: String, Hashable {
 /// Client-first management tools. The hub keeps a compact fallback UI; day-to-day organization
 /// lives here in the native app.
 struct LibraryView: View {
-    @State private var tab: LibraryTab = .skills
+    @EnvironmentObject private var nav: Navigator
+
+    // The sidebar links straight to each of these, so the choice lives in the window's history.
+    private var tab: Binding<LibraryTab> {
+        Binding(get: { LibraryTab(rawValue: nav.route.libraryTab) ?? .skills }, set: { nav.open(libraryTab: $0.rawValue) })
+    }
 
     private var tabs: [WLTab<LibraryTab>] {
         [
@@ -24,10 +29,10 @@ struct LibraryView: View {
     var body: some View {
         MainPage {
             HStack {
-                WLTabBar(tabs: tabs, selection: $tab)
+                WLTabBar(tabs: tabs, selection: tab)
                 Spacer(minLength: 0)
             }
-            switch tab {
+            switch tab.wrappedValue {
             case .skills: SkillsLibraryView()
             case .people: PeopleLibraryView()
             case .repos: ReposLibraryView()

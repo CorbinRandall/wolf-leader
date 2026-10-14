@@ -29,6 +29,29 @@ enum MainSection: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
+/// A row in the sidebar: a whole section, or one view inside Projects or Library.
+enum SidebarItem: Hashable {
+    case projects(String)
+    case library(String)
+    case section(MainSection)
+
+    @MainActor init(_ route: Route) {
+        switch route.section {
+        case .projects: self = .projects(route.projectsTab)
+        case .library: self = .library(route.libraryTab)
+        default: self = .section(route.section)
+        }
+    }
+
+    @MainActor func open(in nav: Navigator) {
+        switch self {
+        case .projects(let tab): nav.open(projectsTab: tab)
+        case .library(let tab): nav.open(libraryTab: tab)
+        case .section(let section): nav.open(section: section)
+        }
+    }
+}
+
 /// The app's main window once setup is done: native sidebar (MacParakeet layout) + detail pages.
 struct MainView: View {
     @EnvironmentObject private var store: ConfigStore
@@ -39,7 +62,7 @@ struct MainView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(selection: Binding<MainSection?>(get: { nav.route.section }, set: { if let s = $0 { nav.open(section: s) } })) {
+            List(selection: Binding<SidebarItem?>(get: { SidebarItem(nav.route) }, set: { if let item = $0 { item.open(in: nav) } })) {
                 Section {
                     HStack(spacing: 8) {
                         WolfMark(size: 18)
@@ -49,15 +72,22 @@ struct MainView: View {
                     .padding(.vertical, 4)
                     .selectionDisabled()
                 }
-                Section {
-                    ForEach(MainSection.primary) { s in
-                        Label(s.label, systemImage: s.symbol)
-                            .tag(s)
-                    }
+                // Every view inside a section is one click away, no menu diving.
+                Section("Projects") {
+                    Label("Focus", systemImage: "scope").tag(SidebarItem.projects("focus"))
+                    Label("Board", systemImage: "rectangle.3.group").tag(SidebarItem.projects("board"))
+                    Label("All projects", systemImage: "list.bullet").tag(SidebarItem.projects("all"))
+                }
+                Section("Library") {
+                    Label("Skills", systemImage: "shippingbox").tag(SidebarItem.library("skills"))
+                    Label("People", systemImage: "person.2").tag(SidebarItem.library("people"))
+                    Label("Backups", systemImage: "externaldrive.badge.checkmark").tag(SidebarItem.library("repos"))
+                    Label("Cleanup", systemImage: "arrow.triangle.merge").tag(SidebarItem.library("cleanup"))
+                    Label("Snippets", systemImage: "chevron.left.forwardslash.chevron.right").tag(SidebarItem.library("snippets"))
                 }
                 Section {
-                    Label(MainSection.shares.label, systemImage: MainSection.shares.symbol)
-                        .tag(MainSection.shares)
+                    Label(MainSection.ask.label, systemImage: MainSection.ask.symbol).tag(SidebarItem.section(.ask))
+                    Label(MainSection.shares.label, systemImage: MainSection.shares.symbol).tag(SidebarItem.section(.shares))
                     Label {
                         HStack(spacing: 6) {
                             Text(MainSection.settings.label)
@@ -72,7 +102,7 @@ struct MainView: View {
                     } icon: {
                         Image(systemName: MainSection.settings.symbol)
                     }
-                    .tag(MainSection.settings)
+                    .tag(SidebarItem.section(.settings))
                 }
             }
             .listStyle(.sidebar)

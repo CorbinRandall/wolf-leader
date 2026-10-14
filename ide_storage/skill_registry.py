@@ -82,11 +82,21 @@ def _parse_manifest(text: str, fallback_name: str) -> tuple[str, str]:
     parts = text.split("---", 2)
     if len(parts) < 3:
         return name, description
-    for line in parts[1].splitlines():
+    lines = parts[1].splitlines()
+    for index, line in enumerate(lines):
         key, separator, value = line.partition(":")
-        if not separator:
+        if not separator or line[:1].isspace():
             continue
-        value = value.strip().strip('"\'')
+        value = value.strip()
+        if value in (">", ">-", "|", "|-", ""):
+            # A YAML block: the value is the indented lines that follow.
+            block = []
+            for follow in lines[index + 1:]:
+                if follow.strip() and not follow[:1].isspace():
+                    break
+                block.append(follow.strip())
+            value = " ".join(b for b in block if b)
+        value = value.strip('"\'')
         if key.strip() == "name" and value:
             name = value
         elif key.strip() == "description":

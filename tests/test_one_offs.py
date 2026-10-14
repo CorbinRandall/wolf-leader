@@ -40,3 +40,10 @@ def test_removed_skill_stays_removed(tmp_path, monkeypatch):
     assert any(p.name.startswith("wolfhowl-") for p in (tmp_path / "skills" / ".trash").iterdir())
     skill_registry.import_skill_files(None, [{"path": "wolfhowl/SKILL.md", "content_base64": "LS0tCm5hbWU6IHdvbGZob3dsCi0tLQo="}], False)
     assert "wolfhowl" in {s["id"] for s in skill_registry.list_skills()}
+
+
+def test_skill_description_on_several_lines():
+    from ide_storage.skill_registry import _parse_manifest
+
+    text = "---\nname: talk\ndescription: >-\n  Short and plain\n  answers.\nother: x\n---\nbody"
+    assert _parse_manifest(text, "x") == ("talk", "Short and plain answers.")

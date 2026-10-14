@@ -340,6 +340,42 @@ async def get_progress():
     return progress_overview()
 
 
+class StartProjectBody(BaseModel):
+    name: str
+    description: Optional[str] = None
+    north_star: Optional[str] = None
+    owner: Optional[str] = None
+    status: Optional[str] = None
+    milestones: Optional[List[str]] = None
+    folder: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+class JournalBody(BaseModel):
+    text: str
+    title: Optional[str] = None
+
+
+@router.post("/projects/start")
+async def post_start_project(body: StartProjectBody):
+    """Start a project by hand: name, what it is, its North Star, owner, stage, first milestones, folder."""
+    from ide_storage.progress import start_project
+
+    return _progress_call(
+        start_project, body.name, description=body.description or "", north_star=body.north_star or "",
+        owner=body.owner, status=body.status or "in_progress", milestones=body.milestones or [],
+        folder=body.folder or "", tags=body.tags or [],
+    )
+
+
+@router.post("/projects/{project_id}/journal")
+async def post_journal(project_id: int, body: JournalBody):
+    """Write a journal entry by hand. It is saved like an agent's session."""
+    from ide_storage.progress import write_journal
+
+    return _progress_call(write_journal, project_id, body.text, body.title or "")
+
+
 class NorthStarBody(BaseModel):
     body: str = ""
     why: Optional[str] = None

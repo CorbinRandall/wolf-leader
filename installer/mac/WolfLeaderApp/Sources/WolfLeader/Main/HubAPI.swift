@@ -1236,3 +1236,44 @@ extension HubClient {
         try JSONDecoder().decode(HubAnswer.self, from: try await data("/api/ask", query: ["q": question], timeout: 60))
     }
 }
+
+// MARK: - Making and keeping projects by hand
+
+extension HubClient {
+    private func json(_ path: String, _ method: String, _ payload: [String: Any], timeout: TimeInterval = 60) async throws -> [String: Any] {
+        let raw = try await data(path, method: method, body: try JSONSerialization.data(withJSONObject: payload), timeout: timeout)
+        return (try? JSONSerialization.jsonObject(with: raw) as? [String: Any]) ?? [:]
+    }
+
+    /// Returns the new project's id.
+    func startProject(name: String, description: String, northStar: String, owner: String, status: String,
+                      milestones: [String], folder: String, tags: [String]) async throws -> Int {
+        let reply = try await json("/api/projects/start", "POST", [
+            "name": name, "description": description, "north_star": northStar, "owner": owner, "status": status,
+            "milestones": milestones, "folder": folder, "tags": tags,
+        ], timeout: 120)
+        return (reply["id"] as? Int) ?? 0
+    }
+
+    func writeJournal(projectID: Int, text: String) async throws {
+        _ = try await json("/api/projects/\(projectID)/journal", "POST", ["text": text], timeout: 180)
+    }
+
+    /// Link a folder. Returns the projects that already use it, if any (then it is not linked).
+    func addFolder(projectID: Int, path: String) async throws -> [String] {
+        let reply = try await json("/api/projects/\(projectID)/paths", "POST", ["path": path])
+        return (reply["shared_with"] as? [String]) ?? []
+    }
+
+    func removeFolder(projectID: Int, path: String) async throws {
+        _ = try await data("/api/projects/\(projectID)/paths", query: ["path": path], method: "DELETE")
+    }
+
+    func setTags(projectID: Int, tags: [String]) async throws {
+        _ = try await json("/api/projects/\(projectID)", "PUT", ["tags": tags])
+    }
+
+    func deleteProject(id: Int) async throws {
+        _ = try await data("/api/projects/\(id)", method: "DELETE", timeout: 120)
+    }
+}

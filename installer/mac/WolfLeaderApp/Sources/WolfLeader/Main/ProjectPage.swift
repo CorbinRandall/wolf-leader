@@ -38,6 +38,10 @@ struct ProjectPage: View {
     @State private var memoryText = ""
     @State private var memoryKind = "note"
     @State private var editing = false
+    @State private var journalText = ""
+    @State private var savingJournal = false
+    @State private var newFolder = ""
+    @State private var deleting = false
     @State private var showBrief = false
     @State private var showAllSessions = false
 
@@ -97,9 +101,24 @@ struct ProjectPage: View {
             }
         }
         .sheet(isPresented: $editing) {
-            ProjectEditor(name: entry.name, description: entry.project.description ?? "") { name, description in
-                model.perform("Saved.") { try await $0.updateProject(id: entry.id, name: name, description: description) }
+            ProjectEditor(name: entry.name, description: entry.project.description ?? "",
+                          topics: entry.project.tags.joined(separator: ", ")) { name, description, topics in
+                let tags = topics.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                model.perform("Saved.") {
+                    try await $0.updateProject(id: entry.id, name: name, description: description)
+                    try await $0.setTags(projectID: entry.id, tags: tags)
+                }
             }
+        }
+        .confirmationDialog("Delete \(entry.name)?", isPresented: $deleting) {
+            Button("Delete project", role: .destructive) {
+                let id = entry.id
+                back()
+                model.perform("Deleted \(entry.name).") { try await $0.deleteProject(id: id) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Its goals, milestones, North Star and memories are deleted. Its sessions are kept as loose sessions. To just put it away, move it to Done on the board instead.")
         }
     }
 
@@ -123,7 +142,9 @@ struct ProjectPage: View {
                         .disabled((brief?.briefMarkdown ?? "").isEmpty)
                     Button("Refresh brief") { refreshBrief() }
                     Divider()
-                    Button("Edit name and description…") { editing = true }
+                    Button("Edit name, description and topics…") { editing = true }
+                    Divider()
+                    Button("Delete project…", role: .destructive) { deleting = true }
                 } label: { Image(systemName: "ellipsis.circle") }
                 .menuStyle(.borderlessButton).fixedSize()
             }
@@ -440,6 +461,18 @@ struct ProjectPage: View {
 
     private var logbookGroup: some View {
         WLGroup(title: "Logbook", subtitle: "What each session did, newest first. Open one to read it.", icon: "book") {
+            VStack(alignment: .leading, spacing: 6) {
+                TextField("Write an entry: what you did, decided or learned", text: $journalText, axis: .vertical)
+                    .lineLimit(2...6).mainField()
+                HStack {
+                    Text("Saved like an AI session: it shows here, its decisions and problems become memories, and Ask can find it.")
+                        .font(DS.Font.micro).foregroundStyle(p.textFaint)
+                    Spacer()
+                    Button(savingJournal ? "Saving…" : "Add entry") { writeEntry() }.buttonStyle(SecondaryButtonStyle())
+                        .disabled(journalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || savingJournal)
+                }
+            }
+            WLDivider()
             if logbook.isEmpty && sessions.isEmpty {
                 Text("Nothing saved yet. It fills in after the first /wolfhowl.").font(DS.Font.bodySmall).foregroundStyle(p.textMuted)
             }
@@ -519,6 +552,20 @@ struct ProjectPage: View {
         }
     }
 
+    private func writeEntry() {
+        let text = journalText
+        savingJournal = true
+        Task {
+            defer { savingJournal = false }
+            do {
+                try await store.hub.writeJournal(projectID: entry.id, text: text)
+                journalText = ""
+                notice = "Entry saved."
+                await load(); await model.reload()
+            } catch { model.error = error.localizedDescription }
+        }
+    }
+
     // MARK: Brief and where it lives
 
     private var knowledge: some View {
@@ -560,7 +607,7 @@ struct ProjectPage: View {
 
     @ViewBuilder
     private var whereItLives: some View {
-        if !folders.isEmpty || entry.project.slug != nil {
+        Group {
             WLGroup(title: "Where it lives", icon: "folder") {
                 if !entry.project.tags.isEmpty {
                     HStack(spacing: 6) {
@@ -577,13 +624,47 @@ struct ProjectPage: View {
                             .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                         MainTag(text: folder.kind == "compose" ? "Compose stack" : "Folder", color: p.textMuted)
                         if let device = folder.deviceName { Text(device).font(DS.Font.micro).foregroundStyle(p.textFaint) }
+                        Spacer()
+                        Button { unlinkFolder(folder.path) } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)) }
+                            .buttonStyle(.plain).foregroundStyle(p.textFaint).help("Unlink this folder")
                     }
+                }
+                HStack {
+                    TextField("Link a folder: where the work lives", text: $newFolder).mainField().onSubmit { linkFolder(newFolder) }
+                    Button("Choose…") {
+                        let panel = NSOpenPanel()
+                        panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.prompt = "Link"
+                        if panel.runModal() == .OK, let url = panel.url { linkFolder(url.path) }
+                    }
+                    .buttonStyle(OutlineButtonStyle())
+                    Button("Link") { linkFolder(newFolder) }.buttonStyle(SecondaryButtonStyle())
+                        .disabled(newFolder.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
         }
     }
 
     // MARK: Actions
+
+    private func linkFolder(_ path: String) {
+        let path = path.trimmingCharacters(in: .whitespaces)
+        guard !path.isEmpty else { return }
+        newFolder = ""
+        Task {
+            do {
+                let shared = try await store.hub.addFolder(projectID: entry.id, path: path)
+                notice = shared.isEmpty ? "Folder linked." : "Not linked: \(shared.joined(separator: ", ")) already uses that folder."
+                await load()
+            } catch { model.error = error.localizedDescription }
+        }
+    }
+
+    private func unlinkFolder(_ path: String) {
+        Task {
+            do { try await store.hub.removeFolder(projectID: entry.id, path: path); notice = "Folder unlinked."; await load() }
+            catch { model.error = error.localizedDescription }
+        }
+    }
 
     private func copy(_ value: String, _ message: String) {
         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(value, forType: .string)
@@ -709,17 +790,19 @@ private struct ProjectEditor: View {
     @Environment(\.palette) private var p
     @State var name: String
     @State var description: String
-    let save: (String, String) -> Void
+    @State var topics: String
+    let save: (String, String, String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Edit project").font(DS.Font.section)
             TextField("Name", text: $name).mainField()
             TextField("What is this project?", text: $description, axis: .vertical).lineLimit(3...6).mainField()
+            TextField("Topics, comma separated", text: $topics).mainField()
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.buttonStyle(OutlineButtonStyle())
-                Button("Save") { save(name.trimmingCharacters(in: .whitespaces), description); dismiss() }
+                Button("Save") { save(name.trimmingCharacters(in: .whitespaces), description, topics); dismiss() }
                     .buttonStyle(PrimaryButtonStyle()).disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }

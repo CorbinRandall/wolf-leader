@@ -324,6 +324,14 @@ def _progress_call(fn, *args, **kwargs):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/ask")
+async def get_ask(q: str, limit: int = 40):
+    """Answer a plain question from the journal: reads the project, the time and the kind of thing asked about."""
+    from ide_storage.ask import ask
+
+    return ask(q, limit=limit)
+
+
 @router.get("/progress")
 async def get_progress():
     """Every project: where it stands, the next useful step, open problems, and its goals."""

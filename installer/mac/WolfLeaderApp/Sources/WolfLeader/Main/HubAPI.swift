@@ -1151,3 +1151,88 @@ extension HubClient {
         _ = try await data("/api/milestones/\(id)", method: "DELETE")
     }
 }
+
+// MARK: - Ask (GET /api/ask): answers quoted from the journal
+
+struct HubAnswerItem: Decodable, Identifiable, Hashable {
+    var memoryID: Int
+    var text: String
+    var when: String?
+    var projectID: Int?
+    var project: String?
+    var chatID: Int?
+    var id: Int { memoryID }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        memoryID = c.int("memory_id") ?? 0
+        text = c.str("text") ?? ""
+        when = c.str("when")
+        projectID = c.int("project_id")
+        project = c.str("project")
+        chatID = c.int("chat_id")
+    }
+}
+
+struct HubAnswerSection: Decodable, Identifiable, Hashable {
+    var kind: String
+    var title: String
+    var items: [HubAnswerItem]
+    var id: String { kind }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        kind = c.str("kind") ?? "note"
+        title = c.str("title") ?? kind.capitalized
+        items = (try? c.decode([HubAnswerItem].self, forKey: HubJSONKey("items"))) ?? []
+    }
+}
+
+struct HubAnswerSession: Decodable, Identifiable, Hashable {
+    var chatID: Int
+    var title: String
+    var summary: String
+    var when: String?
+    var project: String?
+    var id: Int { chatID }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        chatID = c.int("chat_id") ?? 0
+        title = c.str("title") ?? "Session"
+        summary = c.str("summary") ?? ""
+        when = c.str("when")
+        project = c.str("project")
+    }
+}
+
+struct HubAnswer: Decodable {
+    var summary: String
+    var understoodProject: String?
+    var understoodWhen: String?
+    var understoodAbout: String?
+    var sections: [HubAnswerSection]
+    var sessions: [HubAnswerSession]
+    var results: [HubSearchHit]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        summary = c.str("summary") ?? ""
+        sections = (try? c.decode([HubAnswerSection].self, forKey: HubJSONKey("sections"))) ?? []
+        sessions = (try? c.decode([HubAnswerSession].self, forKey: HubJSONKey("sessions"))) ?? []
+        results = (try? c.decode(HubList<HubSearchHit>.self, forKey: HubJSONKey("results")))?.items ?? []
+        if let u = try? c.nestedContainer(keyedBy: HubJSONKey.self, forKey: HubJSONKey("understood")) {
+            understoodWhen = u.str("when")
+            understoodAbout = u.str("about")
+            if let project = try? u.nestedContainer(keyedBy: HubJSONKey.self, forKey: HubJSONKey("project")) {
+                understoodProject = project.str("name")
+            }
+        }
+    }
+}
+
+extension HubClient {
+    func ask(_ question: String) async throws -> HubAnswer {
+        try JSONDecoder().decode(HubAnswer.self, from: try await data("/api/ask", query: ["q": question], timeout: 60))
+    }
+}

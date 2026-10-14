@@ -106,21 +106,28 @@ final class Navigator: ObservableObject {
         }
     }
 
+    private var swipeTravel: CGFloat = 0
+    private var swipeDrift: CGFloat = 0
+    private var swipeFired = false
+
+    /// Add up how far two fingers travel sideways in one gesture. Far enough, and mostly sideways,
+    /// is back or forward. (The first event of a gesture carries no distance, so this cannot be
+    /// decided there, and it should not depend on the Mac's "swipe between pages" setting.)
     private func handleSwipe(_ event: NSEvent) {
-        // Only a deliberate sideways two-finger swipe, and only when the Mac's own setting allows it.
-        guard event.phase == .began, NSEvent.isSwipeTrackingFromScrollEventsEnabled,
-              abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) * 2 else { return }
+        guard event.hasPreciseScrollingDeltas, event.momentumPhase.isEmpty else { return }
+        if event.phase.contains(.began) || event.phase.contains(.mayBegin) {
+            swipeTravel = 0; swipeDrift = 0; swipeFired = false
+        }
+        guard event.phase.contains(.changed), !swipeFired else { return }
         // The board scrolls sideways itself; do not fight it.
         if route.section == .projects, route.projectID == nil, route.projectsTab == "board" { return }
         // Sheets (a session being read, an editor) keep their own gestures.
         if event.window?.sheets.isEmpty == false || event.window?.isSheet == true { return }
-        guard canGoBack || canGoForward else { return }
-        event.trackSwipeEvent(options: [.lockDirection], dampenAmountThresholdMin: canGoForward ? -1 : 0,
-                              max: canGoBack ? 1 : 0) { [weak self] amount, phase, complete, _ in
-            guard phase == .ended, complete else { return }
-            Task { @MainActor in
-                if amount > 0 { self?.goBack() } else if amount < 0 { self?.goForward() }
-            }
-        }
+        // Fingers moving right is "back", whichever way the Mac's scroll direction is set.
+        swipeTravel += event.isDirectionInvertedFromDevice ? event.scrollingDeltaX : -event.scrollingDeltaX
+        swipeDrift += abs(event.scrollingDeltaY)
+        guard abs(swipeTravel) > 90, abs(swipeTravel) > swipeDrift * 3 else { return }
+        swipeFired = true
+        if swipeTravel > 0 { goBack() } else { goForward() }
     }
 }

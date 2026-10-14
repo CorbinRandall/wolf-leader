@@ -47,13 +47,18 @@ struct BringInView: View {
     @State private var error: String?
 
     var body: some View {
-        WLPageHeader(title: "Bring in", subtitle: "Add your past AI chats: Claude Code, Codex and Cursor on this Mac, plus Claude.ai and ChatGPT.") {
+        WLPageHeader(title: "Bring in", subtitle: "Move what your AI tools know into Wolf Leader. Do it once; new chats save themselves after that.")
+        ChatPasteCard()
+        WLGroup(title: "From this computer", subtitle: "Claude Code, Codex and Cursor keep every chat on this Mac. One click brings in the old ones.", icon: "laptopcomputer") {
             HStack(spacing: 8) {
-                Button(scanned ? "Look again" : "Review first") { Task { await scan() } }
-                    .buttonStyle(SecondaryButtonStyle()).disabled(scanning || running)
                 Button("Bring everything in") { Task { await scan(); if scanned && error == nil { await importNow() } } }
                     .buttonStyle(PrimaryButtonStyle()).disabled(scanning || running)
+                Button(scanned ? "Look again" : "Review first") { Task { await scan() } }
+                    .buttonStyle(OutlineButtonStyle()).disabled(scanning || running)
+                Spacer()
             }
+            Text("Each chat goes to the project it matches. Everything else goes to One-offs.")
+                .font(DS.Font.micro).foregroundStyle(p.textMuted)
         }
         if let result { WLStatusPill(text: result, kind: .good) }
         if let error { WLStatusPill(text: error, kind: .bad) }
@@ -67,10 +72,7 @@ struct BringInView: View {
                 ProgressView(value: Double(done), total: Double(max(total, 1)))
                 Text(current).font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(1)
             }
-        } else if !scanned {
-            MainNotice(symbol: "tray.and.arrow.down", title: "One button",
-                       message: "Bring everything in files each chat with the project it belongs to, and the rest in One-offs. Review first lets you choose.")
-        } else {
+        } else if scanned {
             found
         }
         if !scanning && !running { websites }
@@ -122,7 +124,7 @@ struct BringInView: View {
 
     /// Chats on the Claude and ChatGPT websites are not on this Mac. Each site emails an export.
     private var websites: some View {
-        WLGroup(title: "Claude.ai and ChatGPT", subtitle: "Their chats live on the website. Ask each site for an export, then drop the zip here.", icon: "globe") {
+        WLGroup(title: "Every chat, word for word (optional)", subtitle: "The prompt above brings the gist. For full old chats from Claude.ai or ChatGPT, ask the site for an export and drop the zip here.", icon: "doc.zipper") {
             HStack(spacing: 8) {
                 Button("Open Claude export") { MainLinks.open(URL(string: "https://claude.ai/settings/data-privacy-controls")) }
                     .buttonStyle(OutlineButtonStyle())
@@ -288,6 +290,195 @@ struct BringInView: View {
     }
 }
 
+/// Bring in from any AI chatbot: copy one prompt into it, paste its answer back. Works with
+/// ChatGPT, Claude, Gemini or anything else that remembers you, with nothing to install.
+private struct ChatPasteCard: View {
+    @EnvironmentObject private var store: ConfigStore
+    @Environment(\.palette) private var p
+
+    private struct Line: Identifiable { var id: Int; var kind: String; var text: String }
+    private struct Proj: Identifiable {
+        var id: Int
+        var raw: [String: Any]
+        var name: String
+        var what: String
+        var notes: Int
+        var matchID: Int?
+        var matchName: String?
+    }
+
+    @State private var prompt = ""
+    @State private var copied = false
+    @State private var answer = ""
+    @State private var source = "chatgpt"
+    @State private var reading = false
+    @State private var saving = false
+    @State private var about: [Line] = []
+    @State private var keepAbout: Set<Int> = []
+    @State private var projects: [Proj] = []
+    @State private var choice: [Int: String] = [:]   // "p:<id>", "new", "one-offs", "skip"
+    @State private var allProjects: [HubProject] = []
+    @State private var owners: [String] = []
+    @State private var person = ""
+    @State private var notice: String?
+    @State private var error: String?
+
+    var body: some View {
+        WLGroup(title: "From any AI chat", subtitle: "ChatGPT, Claude, Gemini, or any AI that remembers you. Nothing to install.", icon: "text.bubble") {
+            step(1, "Copy the prompt.") {
+                Button(copied ? "Copied" : "Copy the prompt") { copyPrompt() }.buttonStyle(SecondaryButtonStyle())
+            }
+            step(2, "Paste it into a new chat in the AI you use most, and send it.") { EmptyView() }
+            step(3, "Copy its whole answer and paste it here.") { EmptyView() }
+            TextEditor(text: $answer)
+                .font(.system(size: 12, design: .monospaced)).frame(minHeight: 90, maxHeight: 160)
+                .padding(6).background(p.surface, in: RoundedRectangle(cornerRadius: DS.Radius.row))
+            HStack {
+                Picker("From", selection: $source) {
+                    Text("ChatGPT").tag("chatgpt"); Text("Claude").tag("claude"); Text("Gemini").tag("gemini"); Text("Another AI").tag("other")
+                }
+                .frame(width: 200)
+                Spacer()
+                if reading { ProgressView().controlSize(.small) }
+                Button("Read it") { Task { await read() } }
+                    .buttonStyle(PrimaryButtonStyle()).disabled(answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || reading)
+            }
+            if let notice { WLStatusPill(text: notice, kind: .good) }
+            if let error { WLStatusPill(text: error, kind: .bad) }
+            if !about.isEmpty || !projects.isEmpty { review }
+        }
+        .task(id: store.config.hubURL) { await loadLists() }
+    }
+
+    private func step<Trailing: View>(_ n: Int, _ text: String, @ViewBuilder trailing: () -> Trailing) -> some View {
+        HStack(spacing: 10) {
+            Text("\(n)").font(DS.Font.micro.weight(.bold)).foregroundStyle(p.accent)
+                .frame(width: 20, height: 20).background(p.accent.opacity(0.12), in: Circle())
+            Text(text).font(DS.Font.bodySmall)
+            Spacer()
+            trailing()
+        }
+    }
+
+    @ViewBuilder private var review: some View {
+        WLDivider()
+        if !about.isEmpty {
+            HStack {
+                WLEyebrow("About you")
+                Spacer()
+                Text("Add to").font(DS.Font.micro)
+                Picker("", selection: $person) { ForEach(owners, id: \.self) { Text($0).tag($0) } }.labelsHidden().frame(width: 160)
+            }
+            ForEach(about) { line in
+                Toggle(line.text, isOn: Binding(get: { keepAbout.contains(line.id) },
+                                                set: { if $0 { keepAbout.insert(line.id) } else { keepAbout.remove(line.id) } }))
+                    .toggleStyle(.checkbox).font(DS.Font.bodySmall)
+            }
+        }
+        if !projects.isEmpty {
+            WLEyebrow("Projects").padding(.top, 6)
+            ForEach(projects) { proj in
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(proj.name).font(DS.Font.bodySmall.weight(.semibold))
+                        Text([proj.what, proj.notes > 0 ? "\(proj.notes) notes" : ""].filter { !$0.isEmpty }.joined(separator: " · "))
+                            .font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(2)
+                    }
+                    Spacer()
+                    Picker("", selection: Binding(get: { choice[proj.id] ?? "skip" }, set: { choice[proj.id] = $0 })) {
+                        Text("New project").tag("new")
+                        Text("One-offs").tag("one-offs")
+                        Text("Skip").tag("skip")
+                        Divider()
+                        ForEach(allProjects) { Text($0.name).tag("p:\($0.id)") }
+                    }
+                    .labelsHidden().frame(width: 190)
+                }
+            }
+        }
+        HStack {
+            Button("Clear") { reset() }.buttonStyle(OutlineButtonStyle())
+            Spacer()
+            if saving { ProgressView().controlSize(.small) }
+            Button("Add to Wolf Leader") { Task { await save() } }.buttonStyle(PrimaryButtonStyle()).disabled(saving)
+        }
+    }
+
+    private func loadLists() async {
+        owners = (try? await store.hub.owners()) ?? []
+        if person.isEmpty { person = owners.first ?? "" }
+        allProjects = ((try? await store.hub.projects()) ?? []).sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func copyPrompt() {
+        Task {
+            if prompt.isEmpty, let json = try? await store.hub.jsonObject("/api/bring-in/prompt") {
+                prompt = json["prompt"] as? String ?? ""
+            }
+            guard !prompt.isEmpty else { error = "Couldn't get the prompt from the hub."; return }
+            NSPasteboard.general.clearContents(); NSPasteboard.general.setString(prompt, forType: .string)
+            copied = true
+        }
+    }
+
+    private func read() async {
+        reading = true; defer { reading = false }
+        do {
+            let json = try await store.hub.jsonObject("/api/bring-in/preview", body: ["text": answer], timeout: 120)
+            about = ((json["about_me"] as? [[String: Any]]) ?? []).enumerated().map {
+                Line(id: $0.offset, kind: $0.element["kind"] as? String ?? "about", text: $0.element["text"] as? String ?? "")
+            }
+            keepAbout = Set(about.map(\.id))
+            projects = ((json["projects"] as? [[String: Any]]) ?? []).enumerated().map { index, raw in
+                let match = raw["match"] as? [String: Any]
+                return Proj(id: index, raw: raw, name: raw["name"] as? String ?? "", what: raw["what"] as? String ?? "",
+                            notes: (raw["notes"] as? [Any])?.count ?? 0, matchID: match?["project_id"] as? Int,
+                            matchName: match?["name"] as? String)
+            }
+            choice = [:]
+            for proj in projects {
+                if let id = proj.matchID { choice[proj.id] = "p:\(id)" }
+                else if proj.matchName == "One-offs" { choice[proj.id] = "one-offs" }
+                else { choice[proj.id] = "new" }
+            }
+            error = nil; notice = nil
+            if about.isEmpty && projects.isEmpty { error = "The answer had nothing to add." }
+        } catch HubClient.HubError.http(400) {
+            error = "That doesn't look like the answer to the prompt. Paste the whole reply, including the code block."
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func save() async {
+        saving = true; defer { saving = false }
+        let keptAbout = about.filter { keepAbout.contains($0.id) }.map { ["kind": $0.kind, "text": $0.text] }
+        let chosen: [[String: Any]] = projects.map { proj in
+            var raw = proj.raw
+            let pick = choice[proj.id] ?? "skip"
+            if pick.hasPrefix("p:") { raw["choice"] = "existing"; raw["project_id"] = Int(pick.dropFirst(2)) ?? 0 }
+            else { raw["choice"] = pick }
+            raw.removeValue(forKey: "match")
+            return raw
+        }
+        do {
+            let json = try await store.hub.jsonObject("/api/bring-in/apply", body: [
+                "person": person, "source": source, "about_me": keptAbout, "projects": chosen,
+            ], timeout: 600)
+            let made = (json["projects_made"] as? [Any])?.count ?? 0
+            let updated = (json["projects_updated"] as? [Any])?.count ?? 0
+            let memories = json["memories"] as? Int ?? 0
+            let added = json["profile_added"] as? Int ?? 0
+            reset()
+            notice = "Added \(added) profile line\(added == 1 ? "" : "s"), \(made) new project\(made == 1 ? "" : "s"), "
+                + "\(updated) updated, \(memories) notes."
+            await loadLists()
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func reset() {
+        about = []; keepAbout = []; projects = []; choice = [:]; answer = ""; copied = false; error = nil
+    }
+}
+
 /// Library → My tools: every AI tool on this Mac gets the same profile and skills, so moving from
 /// one to another loses nothing. Wolf Leader keeps the history for all of them.
 struct MyToolsView: View {
@@ -416,6 +607,9 @@ struct ProfileSheet: View {
     @State private var draft: [HubProfileItem] = []
     @State private var draftPicked: Set<Int> = []
     @State private var draftNote = ""
+    @State private var anyChat = false
+    @State private var chatAnswer = ""
+    @State private var promptCopied = false
     @State private var notice: String?
     @State private var error: String?
 
@@ -484,8 +678,26 @@ struct ProfileSheet: View {
                 }
                 Spacer()
                 if drafting { ProgressView().controlSize(.small) }
+                Button("Use any AI chat") { anyChat.toggle() }.buttonStyle(OutlineButtonStyle())
                 Button(draft.isEmpty ? "Write it" : "Write again") { Task { await writeDraft() } }
                     .buttonStyle(PrimaryButtonStyle()).disabled(drafting)
+            }
+            if anyChat {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("No Claude Code or Codex? Copy this into ChatGPT, Claude, Gemini or any AI chat. It holds a summary of your chats, so the AI can write from them. Then paste its answer below.")
+                        .font(DS.Font.micro).foregroundStyle(p.textMuted)
+                    HStack {
+                        Button(promptCopied ? "Copied" : "Copy the prompt") { Task { await copyProfilePrompt() } }
+                            .buttonStyle(SecondaryButtonStyle())
+                        Spacer()
+                    }
+                    TextField("Paste the answer here", text: $chatAnswer, axis: .vertical).lineLimit(3...8).mainField()
+                    HStack {
+                        Spacer()
+                        Button("Read it") { Task { await readChatAnswer() } }.buttonStyle(SecondaryButtonStyle())
+                            .disabled(chatAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
             }
             if drafting {
                 Text("This takes a minute or two.").font(DS.Font.micro).foregroundStyle(p.textFaint)
@@ -528,10 +740,32 @@ struct ProfileSheet: View {
             let by = ["claude": "Claude Code", "codex": "Codex"][json["by"] as? String ?? ""]
             let looked = json["looked_at"] as? Int ?? 0
             draftNote = draft.isEmpty ? "" : (by.map { "Written by \($0) on this Mac from \(looked) of your messages." }
-                ?? "Picked from \(looked) of your messages. Install Claude Code or Codex for a better draft.")
+                ?? "Picked from \(looked) of your messages without an AI. Use any AI chat for a better draft.")
             if draft.isEmpty { notice = "Nothing new to add from your chats yet." }
             error = nil
         } catch { self.error = error.localizedDescription }
+    }
+
+    private func copyProfilePrompt() async {
+        do {
+            let path = "/api/people/" + (person.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? person) + "/profile/prompt"
+            let prompt = try await store.hub.jsonObject(path, timeout: 60)["prompt"] as? String ?? ""
+            NSPasteboard.general.clearContents(); NSPasteboard.general.setString(prompt, forType: .string)
+            promptCopied = true
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func readChatAnswer() async {
+        do {
+            let items = (try await store.hub.jsonObject("/api/profile/read", body: ["text": chatAnswer])["items"] as? [[String: Any]]) ?? []
+            draft = items.enumerated().map { index, item in
+                HubProfileItem(id: index, kind: item["kind"] as? String ?? "about", text: item["text"] as? String ?? "", source: "ai")
+            }
+            draftPicked = Set(draft.map(\.id))
+            draftNote = "Written by your AI chat."
+            chatAnswer = ""; anyChat = false; promptCopied = false
+            error = nil
+        } catch { self.error = "That doesn't look like the answer. Paste the whole reply, including the list." }
     }
 
     private func keepDraft() {

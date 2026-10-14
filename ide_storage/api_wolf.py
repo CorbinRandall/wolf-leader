@@ -350,6 +350,17 @@ class ProfileImportBody(BaseModel):
     items: List[Dict[str, Any]]
 
 
+class BringInText(BaseModel):
+    text: str
+
+
+class BringInApply(BaseModel):
+    person: Optional[str] = None
+    source: Optional[str] = None
+    about_me: List[Dict[str, Any]] = []
+    projects: List[Dict[str, Any]] = []
+
+
 class KnownSessionsBody(BaseModel):
     ids: List[str]
 
@@ -370,6 +381,45 @@ async def get_profile_markdown(name: str):
     from ide_storage.profiles import as_markdown
 
     return PlainTextResponse(_progress_call(as_markdown, name), media_type="text/markdown")
+
+
+@router.get("/people/{name}/profile/prompt")
+async def get_profile_prompt(name: str):
+    """A prompt to paste into any AI chat; it answers with profile lines to paste back."""
+    from ide_storage.profiles import profile_prompt
+
+    return _progress_call(profile_prompt, name)
+
+
+@router.post("/profile/read")
+async def post_profile_read(body: BringInText):
+    """Profile lines from an AI's pasted answer. Nothing is saved."""
+    from ide_storage.profiles import read_items
+
+    return {"items": _progress_call(read_items, body.text)}
+
+
+@router.get("/bring-in/prompt")
+async def get_bring_in_prompt():
+    """The prompt to paste into any AI chatbot to bring its history in."""
+    from ide_storage.bring_in import PROMPT
+
+    return {"prompt": PROMPT}
+
+
+@router.post("/bring-in/preview")
+async def post_bring_in_preview(body: BringInText):
+    """What a chatbot's answer would add. Nothing is saved."""
+    from ide_storage.bring_in import preview
+
+    return _progress_call(preview, body.text)
+
+
+@router.post("/bring-in/apply")
+async def post_bring_in_apply(body: BringInApply):
+    from ide_storage.bring_in import apply
+
+    return _progress_call(apply, body.person or "", body.source or "", body.about_me, body.projects)
 
 
 @router.get("/people/{name}/profile/digest")

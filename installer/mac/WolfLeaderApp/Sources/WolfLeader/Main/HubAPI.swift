@@ -1343,3 +1343,12 @@ extension HubClient {
         _ = try await data("/api/profile-items/\(id)", method: "DELETE")
     }
 }
+
+extension HubClient {
+    /// GET (no body) or POST a JSON body, and read a JSON object back.
+    func jsonObject(_ path: String, body: [String: Any]? = nil, timeout: TimeInterval = 30) async throws -> [String: Any] {
+        let raw = try await data(path, method: body == nil ? "GET" : "POST",
+                                 body: try body.map { try JSONSerialization.data(withJSONObject: $0) }, timeout: timeout)
+        return (try JSONSerialization.jsonObject(with: raw) as? [String: Any]) ?? [:]
+    }
+}

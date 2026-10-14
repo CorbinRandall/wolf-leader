@@ -263,4 +263,40 @@ def suggest_from_history(name: str, limit: int = 15) -> dict[str, Any]:
     return {"person": person, "items": items[:limit], "looked_at": len(lines)}
 
 
+PROFILE_PROMPT = """Below is a summary of my work with AI tools: my projects and things I typed.
+Write a short profile of me that any AI assistant should read before helping me.
+
+Rules:
+- Return only a JSON array in a code block. Each item: {"kind": K, "text": T}.
+- K is one of: about (who I am, what I make), preference (how I like to work),
+  style (how I like answers written), tools (devices, apps and services I use),
+  avoid (things an assistant should not do).
+- T is one short sentence in the first person ("I ..."), under 160 characters.
+- At most 15 items, about 1,500 characters in all. Only things that hold across projects,
+  not details of one task.
+- Leave out anything already listed under "Already in their profile".
+- Never include passwords, keys, addresses, phone numbers, money details, or other people's private details."""
+
+
+def profile_prompt(name: str) -> dict[str, Any]:
+    """Everything to paste into any AI chat so it writes the profile: no AI on this computer needed."""
+    digest = history_digest(name, max_chars=20_000)
+    return {"person": digest["person"], "prompt": PROFILE_PROMPT + "\n\n---\n\n" + digest["text"]}
+
+
+def read_items(text: str) -> list[dict[str, Any]]:
+    """Profile lines from an AI's answer (a JSON list, fenced or not). Nothing is saved."""
+    import json
+
+    start, end = (text or "").find("["), (text or "").rfind("]")
+    if start < 0 or end <= start:
+        raise ValueError("Paste the AI's whole answer, including the list.")
+    try:
+        data = json.loads(text[start:end + 1])
+    except json.JSONDecodeError as exc:
+        raise ValueError("Paste the AI's whole answer, including the list.") from exc
+    return [{"kind": d.get("kind") if d.get("kind") in KINDS else "about", "text": _clean(d["text"])[:300], "source": "ai"}
+            for d in data if isinstance(d, dict) and _clean(d.get("text") or "")][:20]
+
+
 from ide_storage.profile_text import guess_kind, items_from_text  # noqa: E402,F401  (re-exported)

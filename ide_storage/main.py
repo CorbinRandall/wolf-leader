@@ -81,6 +81,14 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         logger.exception("mirror refresh at boot failed")
     try:
+        from .progress import seed_north_stars
+
+        seeded = seed_north_stars()
+        if seeded:
+            logger.info("Lifted %d North Star(s) from the journal", seeded)
+    except Exception:  # noqa: BLE001
+        logger.exception("North Star seeding failed")
+    try:
         from .repo_health import start_notes_schedule
 
         start_notes_schedule()

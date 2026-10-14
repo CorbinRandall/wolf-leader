@@ -171,3 +171,45 @@ def test_auto_file_moves_only_confident_matches(monkeypatch):
     assert [f["chat_id"] for f in result["filed"]] == [clear]
     assert result["left_loose"] == 1
     assert [s["id"] for s in unfiled_sessions()] == [vague]
+
+
+def test_north_star_changes_are_kept_as_history():
+    from ide_storage.progress import build_prompt, create_goal, north_star, progress_overview, set_north_star
+
+    pid = _project("media")
+    assert north_star(pid) == {"current": None, "history": [], "changes": 0}
+
+    set_north_star(pid, "Publish one video a day.", created_at="2026-09-01T00:00:00")
+    set_north_star(pid, "Publish one video a day.", created_at="2026-09-02T00:00:00")  # same text: no new version
+    star = set_north_star(pid, "Find one repeatable format each day.", "Daily posting was the wrong target.",
+                          created_at="2026-09-25T00:00:00")
+
+    assert star["current"]["body"] == "Find one repeatable format each day."
+    assert star["current"]["why"] == "Daily posting was the wrong target."
+    assert [h["body"] for h in star["history"]] == ["Publish one video a day."]
+    assert star["changes"] == 1
+    assert {p["slug"]: p["north_star"] for p in progress_overview()["projects"]}["media"] == star["current"]["body"]
+
+    goal = create_goal(pid, "Daily trend brief")
+    assert "## North Star\n\nFind one repeatable format each day." in build_prompt(pid, [goal["id"]])["body"]
+
+    cleared = set_north_star(pid, "", created_at="2026-10-01T00:00:00")
+    assert cleared["current"] is None and len(cleared["history"]) == 2
+
+
+def test_north_stars_are_lifted_from_the_journal_once():
+    from ide_storage.progress import north_star, seed_north_stars
+
+    pid = _project("media")
+    other = _project("fans")
+    first = _memory(pid, "goal", "North star: publish one original vertical music video per day.")
+    _memory(pid, "goal", "North star revised on 2026-09-25: every day identify one repeatable format.")
+    _memory(pid, "note", "The north star came up in passing.")
+
+    assert seed_north_stars() == 2
+    star = north_star(pid)
+    assert star["current"]["body"] == "every day identify one repeatable format."
+    assert [h["body"] for h in star["history"]] == ["publish one original vertical music video per day."]
+    assert north_star(other)["current"] is None
+    assert seed_north_stars() == 0  # already has one; nothing is added twice
+    assert first

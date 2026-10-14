@@ -160,6 +160,7 @@ struct HubProject: Decodable, Identifiable, Hashable {
     var updatedAt: String?
     var owner: String?
     var ownerSource: String?
+    var tags: [String]
 
     var updated: Date? { HubDate.parse(updatedAt) }
     /// `slug` when the hub has one, else the numeric id (both work for agent-brief).
@@ -179,6 +180,15 @@ struct HubProject: Decodable, Identifiable, Hashable {
         updatedAt = c.str("updated_at", "last_activity", "created_at")
         owner = c.str("owner")
         ownerSource = c.str("owner_source")
+        // Tags arrive as a list or as JSON text.
+        if let list = try? c.decode([String].self, forKey: HubJSONKey("tags")) {
+            tags = list
+        } else if let raw = c.str("tags"), let data = raw.data(using: .utf8),
+                  let list = try? JSONDecoder().decode([String].self, from: data) {
+            tags = list
+        } else {
+            tags = []
+        }
     }
 
     /// Match the web board's compatibility mapping for statuses created before Kanban existed.
@@ -736,6 +746,7 @@ struct HubProgressProject: Decodable, Identifiable, Hashable {
     var slug: String
     var name: String
     var status: String
+    var northStar: String
     var whereItStands: String
     var lastSession: String?
     var sessions: Int
@@ -754,6 +765,7 @@ struct HubProgressProject: Decodable, Identifiable, Hashable {
         slug = c.str("slug") ?? ""
         name = c.str("name") ?? slug
         status = c.str("status") ?? "active"
+        northStar = c.str("north_star") ?? ""
         whereItStands = c.str("where_it_stands") ?? ""
         lastSession = c.str("last_session")
         sessions = c.int("sessions") ?? 0
@@ -1032,5 +1044,66 @@ extension HubClient {
 
     func removeOwner(_ name: String, moveTo: String?) async throws {
         _ = try await data(ownerPath(name), query: moveTo.map { ["move_to": $0] } ?? [:], method: "DELETE", timeout: 60)
+    }
+}
+
+// MARK: - North Star and broadcasts
+
+struct HubNorthStarVersion: Decodable, Identifiable, Hashable {
+    var id: Int
+    var body: String
+    var why: String?
+    var createdAt: String?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        id = c.int("id") ?? 0
+        body = c.str("body") ?? ""
+        why = c.str("why")
+        createdAt = c.str("created_at")
+    }
+}
+
+struct HubNorthStar: Decodable {
+    var current: HubNorthStarVersion?
+    var history: [HubNorthStarVersion]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        current = try? c.decode(HubNorthStarVersion.self, forKey: HubJSONKey("current"))
+        history = (try? c.decode([HubNorthStarVersion].self, forKey: HubJSONKey("history"))) ?? []
+    }
+}
+
+/// One save that was broadcast: which machine it came from and the commit it pointed at.
+struct HubHowl: Decodable, Hashable {
+    var chatID: Int?
+    var deviceName: String?
+    var gitCommit: String?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        chatID = c.int("chat_id")
+        deviceName = c.str("device_name")
+        gitCommit = c.str("git_commit")
+    }
+}
+
+extension HubClient {
+    func northStar(projectID: Int) async throws -> HubNorthStar {
+        try JSONDecoder().decode(HubNorthStar.self, from: try await data("/api/projects/\(projectID)/north-star"))
+    }
+
+    func setNorthStar(projectID: Int, body: String, why: String) async throws {
+        _ = try await data("/api/projects/\(projectID)/north-star", method: "PUT",
+                           body: try JSONSerialization.data(withJSONObject: ["body": body, "why": why]), timeout: 60)
+    }
+
+    func deleteNorthStarVersion(id: Int) async throws {
+        _ = try await data("/api/north-star-versions/\(id)", method: "DELETE")
+    }
+
+    func howls(projectID: Int) async throws -> [HubHowl] {
+        try await get("/api/howls", query: ["project_id": String(projectID), "limit": "100"], as: HubList<HubHowl>.self).items
     }
 }

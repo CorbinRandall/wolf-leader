@@ -322,6 +322,34 @@ async def get_progress():
     return progress_overview()
 
 
+class NorthStarBody(BaseModel):
+    body: str = ""
+    why: Optional[str] = None
+
+
+@router.get("/projects/{project_id}/north-star")
+async def get_north_star(project_id: int):
+    """The project's North Star now, and what it was before."""
+    from ide_storage.progress import north_star
+
+    return north_star(project_id)
+
+
+@router.put("/projects/{project_id}/north-star")
+async def put_north_star(project_id: int, body: NorthStarBody):
+    """Set or change the North Star. Changing it is normal; the earlier one is kept as history."""
+    from ide_storage.progress import set_north_star
+
+    return _progress_call(set_north_star, project_id, body.body, body.why or "")
+
+
+@router.delete("/north-star-versions/{version_id}")
+async def remove_north_star_version(version_id: int):
+    from ide_storage.progress import delete_north_star_version
+
+    return _progress_call(delete_north_star_version, version_id)
+
+
 @router.post("/projects/{project_id}/goals")
 async def post_goal(project_id: int, body: GoalBody):
     from ide_storage.progress import create_goal

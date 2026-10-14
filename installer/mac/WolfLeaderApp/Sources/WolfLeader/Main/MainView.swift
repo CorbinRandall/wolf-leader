@@ -2,18 +2,17 @@ import AppKit
 import SwiftUI
 
 enum MainSection: String, CaseIterable, Identifiable, Hashable {
-    case projects, library, ask, wiki, shares, settings
+    case projects, library, ask, shares, settings
 
     var id: String { rawValue }
 
-    static let primary: [MainSection] = [.projects, .library, .ask, .wiki]
+    static let primary: [MainSection] = [.projects, .library, .ask]
 
     var label: String {
         switch self {
         case .projects: return "Projects"
         case .library: return "Library"
         case .ask: return "Ask"
-        case .wiki: return "Wiki"
         case .shares: return "Shares"
         case .settings: return "Settings"
         }
@@ -24,7 +23,6 @@ enum MainSection: String, CaseIterable, Identifiable, Hashable {
         case .projects: return "folder"
         case .library: return "rectangle.3.group"
         case .ask: return "sparkle.magnifyingglass"
-        case .wiki: return "book.closed"
         case .shares: return "externaldrive.connected.to.line.below"
         case .settings: return "gearshape"
         }
@@ -37,7 +35,6 @@ struct MainView: View {
     @Environment(\.palette) private var p
     @StateObject private var updates = UpdateChecker()
     @State private var section: MainSection? = .projects
-    @StateObject private var wiki = WikiBrowser()
     // Back / forward across sidebar tabs, like a browser.
     @State private var backStack: [MainSection] = []
     @State private var forwardStack: [MainSection] = []
@@ -126,13 +123,10 @@ struct MainView: View {
         }
     }
 
-    // Inside the wiki, back and forward step through its pages first, then through the tabs.
-    private var inWiki: Bool { section == .wiki }
-    private var canGoBack: Bool { (inWiki && wiki.canGoBack) || !backStack.isEmpty }
-    private var canGoForward: Bool { (inWiki && wiki.canGoForward) || !forwardStack.isEmpty }
+    private var canGoBack: Bool { !backStack.isEmpty }
+    private var canGoForward: Bool { !forwardStack.isEmpty }
 
     private func goBack() {
-        if inWiki, wiki.canGoBack { wiki.web.goBack(); return }
         guard let previous = backStack.popLast() else { return }
         if let section { forwardStack.append(section) }
         steppingThroughHistory = true
@@ -140,7 +134,6 @@ struct MainView: View {
     }
 
     private func goForward() {
-        if inWiki, wiki.canGoForward { wiki.web.goForward(); return }
         guard let next = forwardStack.popLast() else { return }
         if let section { backStack.append(section) }
         steppingThroughHistory = true
@@ -156,8 +149,6 @@ struct MainView: View {
             LibraryView()
         case .ask:
             AskView()
-        case .wiki:
-            WikiView(browser: wiki)
         case .shares:
             SharesView()
         case .settings:

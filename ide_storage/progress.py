@@ -8,6 +8,7 @@ exact brief that was handed over even after the project moves on.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from typing import Any
 
@@ -121,6 +122,86 @@ def delete_goal(goal_id: int) -> dict[str, Any]:
     return {"ok": True, "id": goal_id}
 
 
+# ------------------------------------------------------------------ North Star
+_STAR_NOTE = re.compile(r"^\s*north star(?:\s+(?:revised|changed|updated)(?:\s+on\s+([0-9]{4}-[0-9]{2}-[0-9]{2}))?)?\s*:\s*", re.I)
+
+
+def north_star(project_id: int) -> dict[str, Any]:
+    """The project's current North Star and the versions before it, newest first."""
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, body, why, created_at FROM north_stars WHERE project_id = ? ORDER BY created_at DESC, id DESC",
+                    (project_id,))
+        rows = [dict(r) for r in cur.fetchall()]
+    current = rows[0] if rows and rows[0]["body"].strip() else None
+    return {"current": current, "history": rows[1:] if rows else [], "changes": max(0, len([r for r in rows if r["body"].strip()]) - 1)}
+
+
+def set_north_star(project_id: int, body: str, why: str = "", *, created_at: str | None = None,
+                   source_memory_id: int | None = None) -> dict[str, Any]:
+    """Set or change the North Star. The previous one is kept as history; an empty body clears it."""
+    body = " ".join((body or "").split())
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,))
+        if not cur.fetchone():
+            raise LookupError("project not found")
+        cur.execute("SELECT body FROM north_stars WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", (project_id,))
+        last = cur.fetchone()
+        if last and last["body"].strip() == body:
+            return north_star(project_id)  # nothing changed
+        if not body and not last:
+            return north_star(project_id)
+        cur.execute(
+            "INSERT INTO north_stars (project_id, body, why, source_memory_id, created_at) VALUES (?, ?, ?, ?, ?)",
+            (project_id, body[:1200], (why or "").strip()[:600] or None, source_memory_id, created_at or _now()),
+        )
+        conn.commit()
+    return north_star(project_id)
+
+
+def delete_north_star_version(version_id: int) -> dict[str, Any]:
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT project_id FROM north_stars WHERE id = ?", (version_id,))
+        row = cur.fetchone()
+        if not row:
+            raise LookupError("version not found")
+        cur.execute("DELETE FROM north_stars WHERE id = ?", (version_id,))
+        conn.commit()
+    return north_star(int(row["project_id"]))
+
+
+def seed_north_stars() -> int:
+    """Lift North Stars the journal already recorded ("North star: …", "North star revised on …: …").
+
+    Only for projects that have none yet, oldest first, so the changes show up as history.
+    """
+    seeded = 0
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT m.id, m.project_id, m.content, m.created_at FROM memories m
+            WHERE m.project_id IS NOT NULL AND lower(m.content) LIKE 'north star%'
+              AND NOT EXISTS (SELECT 1 FROM north_stars n WHERE n.project_id = m.project_id)
+            ORDER BY m.created_at, m.id
+            """
+        )
+        notes = [dict(r) for r in cur.fetchall()]
+    for note in notes:
+        match = _STAR_NOTE.match(note["content"] or "")
+        if not match:
+            continue
+        body = note["content"][match.end():].strip()
+        if body:
+            # Keep the journal's own order: the date a note was saved, not a date quoted inside it.
+            set_north_star(int(note["project_id"]), body, "From the journal.", created_at=note["created_at"],
+                           source_memory_id=int(note["id"]))
+            seeded += 1
+    return seeded
+
+
 def _memories(cur, project_id: int, kinds: tuple[str, ...], limit: int) -> list[dict[str, Any]]:
     marks = ",".join("?" * len(kinds))
     cur.execute(
@@ -142,6 +223,8 @@ def progress_overview() -> dict[str, Any]:
     out: list[dict[str, Any]] = []
     with db_conn() as conn:
         cur = conn.cursor()
+        cur.execute("SELECT DISTINCT ON (project_id) project_id, body FROM north_stars ORDER BY project_id, created_at DESC, id DESC")
+        stars = {int(r["project_id"]): r["body"] for r in cur.fetchall() if (r["body"] or "").strip()}
         cur.execute(
             """
             SELECT r.id, r.slug, r.name, r.description, r.status, r.left_off, r.updated_at,
@@ -173,6 +256,7 @@ def progress_overview() -> dict[str, Any]:
             out.append({
                 "project_id": pid, "slug": row["slug"], "name": row["name"], "description": row.get("description") or "",
                 "status": row.get("status") or "active",
+                "north_star": stars.get(pid, ""),
                 "where_it_stands": _clip(left.get("summary") or left.get("human_summary") or row.get("description"), 320),
                 "last_session": row.get("last_session") or row.get("updated_at"),
                 "sessions": int(row.get("sessions") or 0), "memories": int(row.get("memories") or 0),
@@ -286,6 +370,10 @@ def build_prompt(project_id: int, goal_ids: list[int], *, note: str = "", public
     lines = [f"# Build brief: {project['name']}", ""]
     if project.get("description"):
         lines += [_clip(project["description"], 400), ""]
+    star = (north_star(project_id)["current"] or {}).get("body")
+    if star:
+        lines += ["## North Star", "", star, "",
+                  "This is where the project is heading. It can change; if this work suggests it should, say so.", ""]
     lines += ["## Build this", ""]
     for i, goal in enumerate(goals, 1):
         lines.append(f"{i}. **{goal['title']}**")

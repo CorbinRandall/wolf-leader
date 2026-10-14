@@ -13,6 +13,10 @@ struct ProjectPage: View {
     var open: (Int) -> Void = { _ in }
 
     @State private var related: [HubRelatedProject] = []
+    @State private var star: HubNorthStar?
+    @State private var howls: [Int: HubHowl] = [:]
+    @State private var editingStar = false
+    @State private var showStarHistory = false
     @State private var memories: [HubMemory] = []
     @State private var logbook: [HubLogEntry] = []
     @State private var sessions: [HubChat] = []
@@ -51,6 +55,7 @@ struct ProjectPage: View {
             if let notice { WLStatusPill(text: notice, kind: .good) }
             if let error = model.error { WLStatusPill(text: error, kind: .bad) }
 
+            northStarCard
             stands
             if !related.isEmpty { connected }
             goals
@@ -71,6 +76,14 @@ struct ProjectPage: View {
         .task(id: entry.id) { await load() }
         .sheet(item: $reading) { SessionReader(chatID: $0.id, title: $0.title, when: $0.occurredAt ?? $0.updatedAt) }
         .sheet(item: $verifying) { verifySheet($0) }
+        .sheet(isPresented: $editingStar) {
+            NorthStarEditor(current: star?.current?.body ?? "", suggestion: entry.project.description ?? "") { body, why in
+                Task {
+                    do { try await store.hub.setNorthStar(projectID: entry.id, body: body, why: why); await load(); await model.reload() }
+                    catch { model.error = error.localizedDescription }
+                }
+            }
+        }
         .sheet(isPresented: $editing) {
             ProjectEditor(name: entry.name, description: entry.project.description ?? "") { name, description in
                 model.perform("Saved.") { try await $0.updateProject(id: entry.id, name: name, description: description) }
@@ -133,6 +146,67 @@ struct ProjectPage: View {
         }
     }
 
+    // MARK: North Star
+
+    /// Where the project is heading. It sits above everything because the goals serve it, and it
+    /// is expected to change as the work teaches you what you actually want.
+    private var northStarCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: "star.fill").font(.system(size: 11)).foregroundStyle(p.accent2)
+                WLEyebrow("North Star", color: p.accent2)
+                Spacer()
+                Button(star?.current == nil ? "Set it" : "Change it") { editingStar = true }.buttonStyle(OutlineButtonStyle())
+            }
+            if let current = star?.current {
+                Text(current.body).font(.system(size: 17, weight: .semibold, design: .rounded)).foregroundStyle(p.text)
+                    .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                let history = star?.history.filter { !$0.body.isEmpty } ?? []
+                HStack(spacing: 8) {
+                    Text("Since \(HubDate.format(current.createdAt))").font(DS.Font.micro).foregroundStyle(p.textMuted)
+                    if !history.isEmpty {
+                        Button(showStarHistory ? "Hide how it changed" : "Changed \(history.count) time\(history.count == 1 ? "" : "s")") {
+                            showStarHistory.toggle()
+                        }
+                        .buttonStyle(.plain).font(DS.Font.micro.weight(.semibold)).foregroundStyle(p.accent)
+                    }
+                }
+                if let why = current.why, !why.isEmpty, why != "From the journal." {
+                    Text("Why it changed: \(why)").font(DS.Font.micro).foregroundStyle(p.textMuted)
+                }
+                if showStarHistory {
+                    ForEach(history) { old in
+                        WLDivider()
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(old.body).font(DS.Font.bodySmall).foregroundStyle(p.textMuted).strikethrough(color: p.textFaint)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Text("Set \(HubDate.format(old.createdAt))").font(DS.Font.micro).foregroundStyle(p.textFaint)
+                            }
+                            Spacer()
+                            Button { removeStarVersion(old) } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)) }
+                                .buttonStyle(.plain).foregroundStyle(p.textFaint).help("Remove from the history")
+                        }
+                    }
+                }
+            } else {
+                Text("Where is this project heading? One or two sentences. It is fine to be unsure, and normal for it to change.")
+                    .font(DS.Font.bodySmall).foregroundStyle(p.textMuted).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 22).padding(.vertical, 18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(p.accent2.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(p.accent2.opacity(0.35), lineWidth: 0.8))
+    }
+
+    private func removeStarVersion(_ version: HubNorthStarVersion) {
+        Task {
+            do { try await store.hub.deleteNorthStarVersion(id: version.id); await load() }
+            catch { model.error = error.localizedDescription }
+        }
+    }
+
     // MARK: Where it stands
 
     private var stands: some View {
@@ -167,7 +241,7 @@ struct ProjectPage: View {
     // MARK: Goals
 
     private var goals: some View {
-        WLGroup(title: "Goals", subtitle: "Proposed, then committed, then verified. A goal is verified when you have seen it work.", icon: "flag") {
+        WLGroup(title: "Goals", subtitle: "Steps toward the North Star. Proposed, then committed, then verified once you have seen it work.", icon: "flag") {
             let all = progress?.goals ?? []
             if all.isEmpty { Text("No goals yet.").font(DS.Font.bodySmall).foregroundStyle(p.textMuted) }
             ForEach(all) { goal in
@@ -276,6 +350,11 @@ struct ProjectPage: View {
                                 Text(row.summary).font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(3)
                                     .multilineTextAlignment(.leading)
                             }
+                            if let howl = howls[row.chat.id] {
+                                Text([howl.deviceName.map { "from \($0)" }, howl.gitCommit.map { "commit \($0.prefix(8))" }]
+                                    .compactMap { $0 }.joined(separator: " · "))
+                                    .font(DS.Font.micro.monospaced()).foregroundStyle(p.textFaint)
+                            }
                         }
                         Spacer(minLength: 8)
                         Text(HubDate.format(row.chat.when)).font(DS.Font.micro.monospacedDigit()).foregroundStyle(p.textFaint)
@@ -379,6 +458,12 @@ struct ProjectPage: View {
     private var whereItLives: some View {
         if !folders.isEmpty || entry.project.slug != nil {
             WLGroup(title: "Where it lives", icon: "folder") {
+                if !entry.project.tags.isEmpty {
+                    HStack(spacing: 6) {
+                        Text("Topics").font(DS.Font.micro).foregroundStyle(p.textMuted)
+                        ForEach(entry.project.tags, id: \.self) { MainTag(text: $0, color: p.textMuted) }
+                    }
+                }
                 if let slug = entry.project.slug {
                     HStack { Text("Slug").foregroundStyle(p.textMuted); Text(slug).textSelection(.enabled) }.font(DS.Font.micro.monospaced())
                 }
@@ -426,6 +511,9 @@ struct ProjectPage: View {
         folders = f ?? folders
         prompts = b ?? prompts
         brief = r ?? brief
+        star = (try? await hub.northStar(projectID: entry.id)) ?? star
+        let broadcast = (try? await hub.howls(projectID: entry.id)) ?? []
+        howls = Dictionary(broadcast.compactMap { h in h.chatID.map { ($0, h) } }, uniquingKeysWith: { a, _ in a })
         if let slug = entry.project.slug {
             let found = (try? await hub.relatedProjects(slug: slug)) ?? []
             related = found.filter { $0.id != entry.id && model.entry($0.id) != nil }
@@ -532,5 +620,49 @@ private struct ProjectEditor: View {
             }
         }
         .padding(24).frame(width: 480).background(p.background)
+    }
+}
+
+
+/// Set or change a project's North Star. Changing it is expected, so the form asks what changed.
+private struct NorthStarEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.palette) private var p
+    let current: String
+    let suggestion: String
+    let save: (String, String) -> Void
+    @State private var text = ""
+    @State private var why = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WLEyebrow("North Star", color: p.accent2)
+            Text(current.isEmpty ? "Where is this heading?" : "Where is this heading now?").font(DS.Font.section)
+            Text("The end result you are after, in a sentence or two. Not a task list.")
+                .font(DS.Font.bodySmall).foregroundStyle(p.textMuted)
+            TextField("For example: an automated pipeline that makes and posts a video every week", text: $text, axis: .vertical)
+                .lineLimit(3...6).mainField()
+            if current.isEmpty && !suggestion.isEmpty && text.isEmpty {
+                Button("Start from the project description") { text = suggestion }.buttonStyle(OutlineButtonStyle())
+            }
+            if !current.isEmpty {
+                Text("What changed your mind? (optional)").font(DS.Font.bodySmall)
+                TextField("What you learned that moved it", text: $why, axis: .vertical).lineLimit(2...4).mainField()
+            }
+            HStack {
+                if !current.isEmpty {
+                    Button("Clear it") { save("", why); dismiss() }.buttonStyle(OutlineButtonStyle())
+                }
+                Spacer()
+                Button("Cancel") { dismiss() }.buttonStyle(OutlineButtonStyle())
+                Button(current.isEmpty ? "Set North Star" : "Change North Star") {
+                    save(text.trimmingCharacters(in: .whitespacesAndNewlines), why); dismiss()
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || text == current)
+            }
+        }
+        .padding(24).frame(width: 540).background(p.background)
+        .onAppear { text = current }
     }
 }

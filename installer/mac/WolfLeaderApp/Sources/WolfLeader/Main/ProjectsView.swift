@@ -20,6 +20,7 @@ struct ProjectsView: View {
     @State private var columnEditor: ColumnEditorContext?
     @State private var showLoose = false
     @State private var stageFilter = "open"
+    @State private var topic = ""
 
     private var tab: Binding<ProjectsTab> {
         Binding(get: { ProjectsTab(rawValue: tabRaw) ?? .focus }, set: { tabRaw = $0.rawValue })
@@ -167,11 +168,16 @@ struct ProjectsView: View {
     // MARK: List
 
     private var listed: [ProjectEntry] {
+        let inTopic = topic.isEmpty ? shown : shown.filter { $0.project.tags.contains(topic) }
         switch stageFilter {
-        case "open": return shown.filter { model.status(of: $0) != "done" }
-        case "all": return shown
-        default: return shown.filter { model.status(of: $0) == stageFilter }
+        case "open": return inTopic.filter { model.status(of: $0) != "done" }
+        case "all": return inTopic
+        default: return inTopic.filter { model.status(of: $0) == stageFilter }
         }
+    }
+
+    private var topics: [String] {
+        Array(Set(model.entries.flatMap(\.project.tags))).sorted()
     }
 
     private var stats: some View {
@@ -197,6 +203,13 @@ struct ProjectsView: View {
                 Text("Everything").tag("all")
             }
             .pickerStyle(.segmented).labelsHidden().fixedSize()
+            if !topics.isEmpty {
+                Picker("", selection: $topic) {
+                    Text("Any topic").tag("")
+                    ForEach(topics, id: \.self) { Text($0).tag($0) }
+                }
+                .labelsHidden().frame(width: 150)
+            }
             Text("\(listed.count) of \(model.entries.count)").font(DS.Font.micro).foregroundStyle(p.textMuted)
             Spacer()
             if !model.unfiled.isEmpty {
@@ -316,6 +329,12 @@ private struct FocusCard: View {
                     Text(entry.name).font(.system(size: 15, weight: .semibold)).foregroundStyle(p.text).lineLimit(1)
                     Spacer(minLength: 6)
                     Text(HubDate.format(entry.lastWorked)).font(DS.Font.micro.monospacedDigit()).foregroundStyle(p.textFaint)
+                }
+                if let star = entry.progress?.northStar, !star.isEmpty {
+                    HStack(alignment: .top, spacing: 5) {
+                        Image(systemName: "star.fill").font(.system(size: 9)).foregroundStyle(p.accent2).padding(.top, 2)
+                        Text(star).font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(2).multilineTextAlignment(.leading)
+                    }
                 }
                 if let next = entry.progress?.nextStep {
                     VStack(alignment: .leading, spacing: 3) {

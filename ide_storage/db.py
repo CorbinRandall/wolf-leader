@@ -126,6 +126,7 @@ _HAS_ID_TABLES = {
     "memories",
     "embeddings",
     "howls",
+    "north_stars",
     "goals",
     "build_prompts",
     "offsite_copies",
@@ -425,6 +426,19 @@ SCHEMA_STATEMENTS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_howls_project ON howls(project_id)",
+    # A project's North Star, one row per version: it is expected to change, and the
+    # earlier ones (with why they changed) are part of the story.
+    """
+    CREATE TABLE IF NOT EXISTS north_stars (
+        id BIGSERIAL PRIMARY KEY,
+        project_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        body TEXT NOT NULL,
+        why TEXT,
+        source_memory_id BIGINT,
+        created_at TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_north_stars_project ON north_stars(project_id)",
     """
     CREATE TABLE IF NOT EXISTS goals (
         id BIGSERIAL PRIMARY KEY,

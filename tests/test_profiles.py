@@ -72,3 +72,27 @@ def test_known_sessions_lets_an_import_skip_what_is_already_saved():
         conn.execute("INSERT INTO chats (title, session_id, status, created_at, updated_at) VALUES ('x', 'abc', 'archived', 'now', 'now')")
         conn.commit()
     assert TestClient(app).post("/api/sessions/known", json={"ids": ["abc", "zzz"]}).json() == {"known": ["abc"]}
+
+
+def test_profile_is_drafted_from_history(monkeypatch):
+    from ide_storage import owners
+    from ide_storage.main import app
+
+    monkeypatch.setenv("WOLF_OWNERS", "Cy")
+    owners._cache.update(at=0.0, owners=None)
+    client = TestClient(app)
+    said = ["I prefer short answers with no jargon.", "I prefer short answers with no jargon!",
+            "Please don't change my Docker setup without asking.", "Set up Docker on my Mac for Plex.",
+            "Docker keeps failing on the Mac, Plex is down.", "Restart Docker and Plex on the Mac."]
+    for i, text in enumerate(said):
+        client.post("/api/save-project", json={"session_id": f"hist-{i}", "slug": "one-offs", "title": f"t{i}",
+                                               "messages": [{"role": "user", "content": text}]})
+    found = client.get("/api/people/Cy/profile/suggestions").json()
+    texts = [i["text"] for i in found["items"]]
+    assert any(t.startswith("I prefer short answers") for t in texts)
+    assert sum(t.startswith("I prefer short answers") for t in texts) == 1  # said twice, suggested once
+    assert any("Docker" in t and t.startswith("I use") for t in texts)
+    assert client.get("/api/profile-items/0").status_code in (404, 405)  # suggestions are not saved
+    digest = client.get("/api/people/Cy/profile/digest").json()
+    assert "I prefer short answers" in digest["text"]
+    owners._cache.update(at=0.0, owners=None)

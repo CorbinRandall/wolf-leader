@@ -21,6 +21,8 @@ mcp = FastMCP(
         "Start: resolve_project(path) then recall(). If unmatched, tell the user in one line and ask "
         "before create_project(path). During work: remember() each decision/constraint/fix; "
         "save_session() after each meaningful step and at least every ~8 turns (same session_id = update). "
+        "When the user says something lasting about themselves (\"remember that I...\", a standing preference), "
+        "add_to_profile() so every AI tool they use knows it. "
         "Mention what was saved in one short line; surface any error or ambiguity and ask."
     ),
 )
@@ -155,6 +157,38 @@ def remember(
         )
         return {"ok": True, **result}
     except ValueError as e:
+        return {"ok": False, "error": str(e)}
+
+
+@mcp.tool
+def add_to_profile(text: str, kind: str = "about", person: Optional[str] = None) -> dict:
+    """Save something lasting the user said about themselves to their Wolf Leader profile, which
+    every AI tool they use reads. Use it when they say "remember that I...", or state a preference
+    that holds beyond this task. kind: about, preference, style, tools, avoid. Tell them in one line."""
+    from .owners import configured_owners
+    from .profiles import add_item
+
+    who = person or next(iter(configured_owners()), None)
+    if not who:
+        return {"ok": False, "error": "No people set up in Wolf Leader yet; ask who this is about"}
+    try:
+        return {"ok": True, **add_item(who, text, kind, "ai")}
+    except (LookupError, ValueError) as e:
+        return {"ok": False, "error": str(e)}
+
+
+@mcp.tool
+def get_profile(person: Optional[str] = None) -> dict:
+    """The user's profile: who they are and how they like to work. Read it at the start of a chat."""
+    from .owners import configured_owners
+    from .profiles import as_markdown
+
+    who = person or next(iter(configured_owners()), None)
+    if not who:
+        return {"ok": False, "error": "No people set up in Wolf Leader yet"}
+    try:
+        return {"ok": True, "person": who, "profile": as_markdown(who)}
+    except LookupError as e:
         return {"ok": False, "error": str(e)}
 
 

@@ -13,6 +13,8 @@
 - notes those tools keep about you (Claude memory files of type user / feedback,
   ~/.claude/CLAUDE.md, ~/.codex/AGENTS.md), split into profile items
 - the skills each tool has installed
+- account exports from Claude.ai and ChatGPT (the zip each site emails you), found in Downloads
+  or passed with --export
 
 `import` takes the scan with the person's choices filled in and saves each session through the
 hub's normal save, so memories, briefs and search work as if an agent had saved it. Sessions the
@@ -163,6 +165,127 @@ def find_sessions() -> list[dict]:
     return list(newest.values())
 
 
+# --- Account exports (Claude.ai and ChatGPT) ---------------------------------------------------
+# Chats on those websites never reach this computer on their own. Each site emails a zip on
+# request (Claude: Settings > Privacy > Export data; ChatGPT: Settings > Data controls > Export).
+
+_EXPORTS: dict[str, list[dict]] = {}
+
+
+def _export_files(path: Path) -> list[tuple[str, bytes]]:
+    """The conversations*.json files inside an export zip or unpacked folder."""
+    import zipfile
+    out = []
+    if path.is_dir():
+        for f in sorted(path.rglob("conversations*.json")):
+            out.append((f.name, f.read_bytes()))
+    elif path.suffix.lower() == ".zip":
+        try:
+            with zipfile.ZipFile(path) as archive:
+                for name in archive.namelist():
+                    if re.fullmatch(r"(?:.*/)?conversations(?:-\d+)?\.json", name):
+                        out.append((name, archive.read(name)))
+        except (zipfile.BadZipFile, OSError):
+            return []
+    return out
+
+
+def find_exports(extra: list[str] | None = None) -> list[Path]:
+    places = [Path(p).expanduser() for p in (extra or [])]
+    downloads = HOME / "Downloads"
+    if downloads.is_dir():
+        for item in downloads.iterdir():
+            if item.suffix.lower() == ".zip" and item.stat().st_size < 2_000_000_000:
+                places.append(item)
+            elif item.is_dir() and (any(item.glob("conversations*.json")) or any(item.glob("*/conversations*.json"))):
+                places.append(item)
+    found = []
+    for place in places:
+        if place.exists() and place not in found and _export_files(place):
+            found.append(place)
+    return found
+
+
+def _when(value) -> str | None:
+    if isinstance(value, (int, float)):
+        return iso(float(value))
+    if isinstance(value, str) and value:
+        return value.replace("Z", "")[:26]
+    return None
+
+
+def _chatgpt_messages(conv: dict) -> list[dict]:
+    """ChatGPT keeps each chat as a tree (edits make branches). Follow the branch that was kept."""
+    mapping = conv.get("mapping") or {}
+    node, path = conv.get("current_node"), []
+    while node and node in mapping:
+        path.append(mapping[node])
+        node = mapping[node].get("parent")
+    out = []
+    for item in reversed(path):
+        msg = item.get("message") or {}
+        role = (msg.get("author") or {}).get("role")
+        if role not in ("user", "assistant") or (msg.get("metadata") or {}).get("is_visually_hidden_from_conversation"):
+            continue
+        parts = (msg.get("content") or {}).get("parts") or []
+        text = "\n".join(p for p in parts if isinstance(p, str)).strip()
+        if text:
+            out.append({"role": role, "content": text, "created_at": _when(msg.get("create_time"))})
+    return out
+
+
+def _claude_messages(conv: dict) -> list[dict]:
+    out = []
+    for msg in conv.get("chat_messages") or []:
+        role = {"human": "user", "assistant": "assistant"}.get(msg.get("sender"))
+        text = msg.get("text") or "\n".join(
+            b.get("text", "") for b in msg.get("content") or [] if isinstance(b, dict) and b.get("type") == "text")
+        if role and text.strip():
+            out.append({"role": role, "content": text.strip(), "created_at": _when(msg.get("created_at"))})
+    return out
+
+
+def read_export(path: Path) -> list[dict]:
+    """Every conversation in one export, as {id, tool, title, started, ended, messages}."""
+    key = str(path)
+    if key in _EXPORTS:
+        return _EXPORTS[key]
+    convs: list[dict] = []
+    for _, raw in _export_files(path):
+        try:
+            data = json.loads(raw.decode("utf-8", errors="replace"))
+        except json.JSONDecodeError:
+            continue
+        for conv in data if isinstance(data, list) else []:
+            if not isinstance(conv, dict):
+                continue
+            if "mapping" in conv:
+                tool, cid, messages = "chatgpt", conv.get("conversation_id") or conv.get("id"), _chatgpt_messages(conv)
+                title, started, ended = conv.get("title"), _when(conv.get("create_time")), _when(conv.get("update_time"))
+            elif "chat_messages" in conv:
+                tool, cid, messages = "claude.ai", conv.get("uuid"), _claude_messages(conv)
+                title, started, ended = conv.get("name"), _when(conv.get("created_at")), _when(conv.get("updated_at"))
+            else:
+                continue
+            if cid and any(m["role"] == "user" for m in messages):
+                convs.append({"id": f"{tool}-{cid}", "tool": tool, "title": (title or "").strip(),
+                              "started": started, "ended": ended, "messages": messages})
+    _EXPORTS[key] = convs
+    return convs
+
+
+def export_sessions(paths: list[Path]) -> list[dict]:
+    out = []
+    for path in paths:
+        for conv in read_export(path):
+            said = " ".join(next(m["content"] for m in conv["messages"] if m["role"] == "user").split())
+            out.append({"tool": conv["tool"], "id": conv["id"], "path": str(path), "export": True,
+                        "title": conv["title"] or said[:90], "said": said[:400], "folder": None,
+                        "started": conv["started"], "ended": conv["ended"] or conv["started"],
+                        "size": sum(len(m["content"]) for m in conv["messages"])})
+    return out
+
+
 def is_broad(folder: str | None) -> bool:
     if not folder:
         return True
@@ -172,7 +295,7 @@ def is_broad(folder: str | None) -> bool:
         or bool(re.fullmatch(r"/(users|home)/[^/]+/(downloads|desktop|documents|applications|projects)", n))
 
 
-def scan(api: str) -> dict:
+def scan(api: str, exports: list[str] | None = None) -> dict:
     sessions = []
     for s in find_sessions():
         path = Path(s["path"])
@@ -189,6 +312,8 @@ def scan(api: str) -> dict:
         title = s.get("name_hint") or said[:90] + ("…" if len(said) > 90 else "")
         sessions.append({**s, "title": title, "said": said[:400], "folder": folder, "started": started,
                          "ended": iso(path.stat().st_mtime), "size": size})
+    export_paths = find_exports(exports)
+    sessions += export_sessions(export_paths)
     known = set(call(api, "POST", "/api/sessions/known", {"ids": [s["id"] for s in sessions]}).get("known", []))
     for s in sessions:
         s["already_in"] = s["id"] in known
@@ -214,8 +339,9 @@ def scan(api: str) -> dict:
             group = groups.setdefault(key, {"key": key, "folder": key, "label": os.path.basename(key) or key, "sessions": []})
             group["sessions"].append(s)
             continue
-        # No project folder: decide session by session from what was said.
-        suggestion = suggest_by_content(f"{s['title']}\n{s['said']}")
+        # No project folder: decide session by session from what was said. Chats already in
+        # Wolf Leader are skipped on import, so they are not worth a match.
+        suggestion = {} if s["already_in"] else suggest_by_content(f"{s['title']}\n{s['said']}")
         if suggestion:
             key = f"project:{suggestion['project_id']}"
             group = groups.setdefault(key, {"key": key, "folder": None, "label": suggestion["project_name"],
@@ -286,6 +412,7 @@ def scan(api: str) -> dict:
         t["new"] += 0 if s["already_in"] else 1
     ordered = sorted(groups.values(), key=lambda g: (g["key"] == "loose", -g["new"], g["label"].lower()))
     return {"tools": sorted(tools.values(), key=lambda t: t["tool"]), "groups": ordered,
+            "exports": [str(p) for p in export_paths],
             "profile": profile_candidates(), "skills": local_skills()}
 
 
@@ -517,6 +644,77 @@ def adopt_skills(api: str, names: list[str]) -> dict:
     return {"added": added, "skipped": skipped}
 
 
+PROFILE_PROMPT = """Below is a summary of one person's work with AI tools: their projects and things they typed.
+Write a short profile of them that any AI assistant should read before helping them.
+
+Rules:
+- Return only a JSON array, nothing else. Each item: {"kind": K, "text": T}.
+- K is one of: about (who they are, what they make), preference (how they like to work),
+  style (how they like answers written), tools (devices, apps and services they use),
+  avoid (things an assistant should not do).
+- T is one short sentence in the first person ("I ..."), under 160 characters.
+- At most 15 items, about 1,500 characters in all. Only things that hold across projects,
+  not details of one task.
+- Leave out anything already listed under "Already in their profile".
+- Never include passwords, keys, addresses, phone numbers, money details, or other people's private details."""
+
+
+def find_ai_cli() -> tuple[str, str] | None:
+    """Claude Code or Codex on this computer, if either is installed."""
+    import shutil
+    extra = [HOME / ".local" / "bin", HOME / ".claude" / "local", Path("/opt/homebrew/bin"), Path("/usr/local/bin"),
+             HOME / ".npm-global" / "bin", HOME / ".bun" / "bin"]
+    path = os.pathsep.join([os.environ.get("PATH", "")] + [str(d) for d in extra])
+    for name in ("claude", "codex"):
+        found = shutil.which(name, path=path)
+        if found:
+            return name, found
+    return None
+
+
+def _json_items(text: str) -> list[dict]:
+    start, end = text.find("["), text.rfind("]")
+    if start < 0 or end <= start:
+        return []
+    try:
+        data = json.loads(text[start:end + 1])
+    except json.JSONDecodeError:
+        return []
+    kinds = {"about", "preference", "style", "tools", "avoid"}
+    return [{"kind": d["kind"] if d.get("kind") in kinds else "about", "text": " ".join(str(d["text"]).split())[:300]}
+            for d in data if isinstance(d, dict) and str(d.get("text") or "").strip()][:20]
+
+
+def draft_profile(api: str, person: str) -> dict:
+    """Draft a profile from what Wolf Leader already holds. Uses the person's own AI tool when
+    there is one; otherwise picks lines from their own words. Nothing is saved: they review it."""
+    import subprocess
+    import tempfile
+    who = urllib.parse.quote(person)
+    cli = find_ai_cli()
+    if cli:
+        digest = call(api, "GET", f"/api/people/{who}/profile/digest")
+        name, binary = cli
+        with tempfile.TemporaryDirectory() as tmp:
+            out_file = Path(tmp) / "answer.txt"
+            if name == "claude":
+                args = [binary, "-p", PROFILE_PROMPT]
+            else:
+                args = [binary, "exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only",
+                        "-o", str(out_file), PROFILE_PROMPT]
+            try:
+                run = subprocess.run(args, input=digest["text"], capture_output=True, text=True, cwd=tmp, timeout=600)
+                answer = out_file.read_text(encoding="utf-8") if out_file.is_file() else run.stdout
+            except (OSError, subprocess.TimeoutExpired):
+                answer = ""
+        items = _json_items(answer)
+        if items:
+            return {"by": name, "items": [{**i, "source": "ai"} for i in items],
+                    "looked_at": digest.get("messages", 0), "projects": digest.get("projects", 0)}
+    found = call(api, "GET", f"/api/people/{who}/profile/suggestions")
+    return {"by": "wolf", "items": found.get("items", []), "looked_at": found.get("looked_at", 0)}
+
+
 def run_import(api: str, plan: dict) -> int:
     helpers = load_session_helpers()
     projects = {p["id"]: p for p in call(api, "GET", "/api/projects?limit=1000").get("projects", [])}
@@ -546,7 +744,11 @@ def run_import(api: str, plan: dict) -> int:
     for group, session in todo:
         path = Path(session["path"])
         try:
-            messages = helpers.parse_transcript(path)
+            if session.get("export"):
+                conv = next((c for c in read_export(path) if c["id"] == session["id"]), None)
+                messages = [{"role": m["role"], "content": helpers.truncate(m["content"])} for m in (conv or {}).get("messages", [])]
+            else:
+                messages = helpers.parse_transcript(path)
             if not messages:
                 raise ValueError("no conversation in the file")
             body = {"session_id": session["id"], "title": session["title"], "messages": messages,
@@ -574,10 +776,12 @@ def run_import(api: str, plan: dict) -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("mode", choices=["scan", "import", "tools", "send", "skills", "push-skills", "remove-skills", "adopt-skills"])
+    ap.add_argument("mode", choices=["scan", "import", "tools", "send", "skills", "push-skills", "remove-skills",
+                                     "adopt-skills", "write-profile"])
     ap.add_argument("plan", nargs="?")
     ap.add_argument("--api", default=None)
     ap.add_argument("--person", default="")
+    ap.add_argument("--export", action="append", default=[], help="scan: a Claude.ai or ChatGPT export zip or folder")
     ap.add_argument("--to", default="", help="send: tools, comma separated (claude,codex,cursor)")
     ap.add_argument("--skills", default="", help="skill names, comma separated")
     ap.add_argument("--tool", default="", help="remove-skills: the tool to remove them from")
@@ -589,6 +793,9 @@ def main() -> int:
     split = lambda v: [x.strip() for x in (v or "").split(",") if x.strip()]  # noqa: E731
     if args.mode == "send":
         print(json.dumps(send_to_tools(api, args.person, split(args.to))))
+        return 0
+    if args.mode == "write-profile":
+        print(json.dumps(draft_profile(api, args.person)))
         return 0
     if args.mode == "skills":
         print(json.dumps(skill_overview(api)))
@@ -603,7 +810,7 @@ def main() -> int:
         print(json.dumps(adopt_skills(api, split(args.skills))))
         return 0
     if args.mode == "scan":
-        print(json.dumps(scan(api)))
+        print(json.dumps(scan(api, args.export)))
         return 0
     if not args.plan:
         ap.error("import needs the plan file")

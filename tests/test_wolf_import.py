@@ -78,3 +78,42 @@ def test_remove_skills_keeps_a_backup(tmp_path):
     assert m.remove_skills("codex", ["old", "../etc"])["removed"] == ["old"]
     assert not skill.exists()
     assert list(m.BACKUPS.rglob("SKILL.md"))
+
+
+def test_reads_claude_and_chatgpt_exports(tmp_path):
+    import json
+    import zipfile
+
+    m = load(tmp_path)
+    claude = [{"uuid": "c1", "name": "Mixing vocals", "created_at": "2026-01-02T10:00:00Z", "chat_messages": [
+        {"sender": "human", "text": "How do I mix vocals?", "created_at": "2026-01-02T10:00:00Z"},
+        {"sender": "assistant", "text": "", "content": [{"type": "text", "text": "Start with EQ."}]},
+    ]}]
+    chatgpt = [{"id": "g1", "title": "Trip", "create_time": 1767000000, "current_node": "b2", "mapping": {
+        "root": {"message": None, "parent": None},
+        "a1": {"message": {"author": {"role": "user"}, "content": {"parts": ["Plan a trip"]}}, "parent": "root"},
+        "a2": {"message": {"author": {"role": "assistant"}, "content": {"parts": ["Old answer"]}}, "parent": "a1"},
+        "b2": {"message": {"author": {"role": "assistant"}, "content": {"parts": ["Kept answer"]}}, "parent": "a1"},
+    }}]
+    with zipfile.ZipFile(tmp_path / "claude.zip", "w") as z:
+        z.writestr("conversations.json", json.dumps(claude))
+    unpacked = tmp_path / "chatgpt-export"
+    unpacked.mkdir()
+    (unpacked / "conversations.json").write_text(json.dumps(chatgpt), encoding="utf-8")
+    (tmp_path / "other.zip").write_bytes(b"not a zip")
+
+    found = m.find_exports([str(tmp_path / "claude.zip"), str(unpacked), str(tmp_path / "other.zip")])
+    assert found == [tmp_path / "claude.zip", unpacked]
+    sessions = {s["id"]: s for s in m.export_sessions(found)}
+    assert sessions["claude.ai-c1"]["title"] == "Mixing vocals"
+    assert sessions["chatgpt-g1"]["tool"] == "chatgpt"
+    convo = m.read_export(unpacked)[0]["messages"]
+    assert [x["content"] for x in convo] == ["Plan a trip", "Kept answer"]  # the edited-away branch is dropped
+    assert m.read_export(tmp_path / "claude.zip")[0]["messages"][1]["content"] == "Start with EQ."
+
+
+def test_ai_answer_is_read_as_profile_items(tmp_path):
+    m = load(tmp_path)
+    answer = 'Sure!\n[{"kind": "style", "text": "I like short answers."}, {"kind": "mood", "text": "I make music."}, {"text": ""}]'
+    assert m._json_items(answer) == [{"kind": "style", "text": "I like short answers."}, {"kind": "about", "text": "I make music."}]
+    assert m._json_items("no list here") == []

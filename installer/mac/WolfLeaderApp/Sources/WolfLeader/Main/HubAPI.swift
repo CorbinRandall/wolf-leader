@@ -1327,9 +1327,9 @@ extension HubClient {
         String(decoding: try await data(personPath(person) + "/profile.md"), as: UTF8.self)
     }
 
-    func addProfileItem(person: String, text: String, kind: String) async throws {
+    func addProfileItem(person: String, text: String, kind: String, source: String = "manual") async throws {
         _ = try await data(personPath(person) + "/profile", method: "POST",
-                           body: try JSONSerialization.data(withJSONObject: ["text": text, "kind": kind, "source": "manual"]))
+                           body: try JSONSerialization.data(withJSONObject: ["text": text, "kind": kind, "source": source]))
     }
 
     func updateProfileItem(id: Int, text: String? = nil, kind: String? = nil) async throws {

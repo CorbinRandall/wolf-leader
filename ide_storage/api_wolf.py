@@ -372,6 +372,22 @@ async def get_profile_markdown(name: str):
     return PlainTextResponse(_progress_call(as_markdown, name), media_type="text/markdown")
 
 
+@router.get("/people/{name}/profile/digest")
+async def get_profile_digest(name: str):
+    """A compact read of the person's history, for an AI tool to write their profile from."""
+    from ide_storage.profiles import history_digest
+
+    return _progress_call(history_digest, name)
+
+
+@router.get("/people/{name}/profile/suggestions")
+async def get_profile_suggestions(name: str):
+    """Profile lines found in the person's own words, no AI needed. Nothing is saved."""
+    from ide_storage.profiles import suggest_from_history
+
+    return _progress_call(suggest_from_history, name)
+
+
 @router.post("/people/{name}/profile")
 async def post_profile_item(name: str, body: ProfileItemBody):
     from ide_storage.profiles import add_item

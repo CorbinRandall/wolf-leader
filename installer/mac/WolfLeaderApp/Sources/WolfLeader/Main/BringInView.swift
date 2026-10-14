@@ -26,6 +26,9 @@ struct BringInView: View {
     }
 
     @State private var scanning = false
+    @State private var exports: [URL] = []
+    @State private var foundExports: [String] = []
+    @State private var exportTargeted = false
     @State private var groups: [Group] = []
     @State private var choices: [String: String] = [:]      // "p:<id>", "new", "loose", "skip"
     @State private var newNames: [String: String] = [:]
@@ -44,9 +47,13 @@ struct BringInView: View {
     @State private var error: String?
 
     var body: some View {
-        WLPageHeader(title: "Bring in", subtitle: "Add past chats from Claude Code, Codex and Cursor on this Mac.") {
-            Button(scanned ? "Look again" : "Look for history") { Task { await scan() } }
-                .buttonStyle(SecondaryButtonStyle()).disabled(scanning || running)
+        WLPageHeader(title: "Bring in", subtitle: "Add your past AI chats: Claude Code, Codex and Cursor on this Mac, plus Claude.ai and ChatGPT.") {
+            HStack(spacing: 8) {
+                Button(scanned ? "Look again" : "Review first") { Task { await scan() } }
+                    .buttonStyle(SecondaryButtonStyle()).disabled(scanning || running)
+                Button("Bring everything in") { Task { await scan(); if scanned && error == nil { await importNow() } } }
+                    .buttonStyle(PrimaryButtonStyle()).disabled(scanning || running)
+            }
         }
         if let result { WLStatusPill(text: result, kind: .good) }
         if let error { WLStatusPill(text: error, kind: .bad) }
@@ -61,11 +68,12 @@ struct BringInView: View {
                 Text(current).font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(1)
             }
         } else if !scanned {
-            MainNotice(symbol: "tray.and.arrow.down", title: "Nothing looked at yet",
-                       message: "Wolf Leader reads the chats your AI tools keep on this Mac. You choose where each batch goes before anything is added.")
+            MainNotice(symbol: "tray.and.arrow.down", title: "One button",
+                       message: "Bring everything in files each chat with the project it belongs to, and the rest in One-offs. Review first lets you choose.")
         } else {
             found
         }
+        if !scanning && !running { websites }
         Color.clear.frame(height: 0).task(id: store.config.hubURL) { await loadLists() }
     }
 
@@ -112,6 +120,53 @@ struct BringInView: View {
         }
     }
 
+    /// Chats on the Claude and ChatGPT websites are not on this Mac. Each site emails an export.
+    private var websites: some View {
+        WLGroup(title: "Claude.ai and ChatGPT", subtitle: "Their chats live on the website. Ask each site for an export, then drop the zip here.", icon: "globe") {
+            HStack(spacing: 8) {
+                Button("Open Claude export") { MainLinks.open(URL(string: "https://claude.ai/settings/data-privacy-controls")) }
+                    .buttonStyle(OutlineButtonStyle())
+                Button("Open ChatGPT export") { MainLinks.open(URL(string: "https://chatgpt.com/#settings/DataControls")) }
+                    .buttonStyle(OutlineButtonStyle())
+                Spacer()
+            }
+            Text("The email link arrives in a few minutes. Exports saved to Downloads are found by themselves.")
+                .font(DS.Font.micro).foregroundStyle(p.textMuted)
+            VStack(spacing: 4) {
+                Image(systemName: "doc.zipper").font(.system(size: 18)).foregroundStyle(exportTargeted ? p.accent : p.textMuted)
+                Text(exports.isEmpty ? "Drop an export zip here, or click to choose" : exports.map(\.lastPathComponent).joined(separator: ", "))
+                    .font(DS.Font.micro).foregroundStyle(p.textMuted)
+            }
+            .frame(maxWidth: .infinity).padding(.vertical, 14)
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(exportTargeted ? p.accent : p.border, style: StrokeStyle(lineWidth: 1.2, dash: [6, 4])))
+            .contentShape(Rectangle())
+            .onTapGesture { chooseExport() }
+            .onDrop(of: [.fileURL], isTargeted: $exportTargeted) { providers in
+                for provider in providers {
+                    _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                        if let url { Task { @MainActor in if !exports.contains(url) { exports.append(url) } } }
+                    }
+                }
+                return true
+            }
+            if !foundExports.isEmpty {
+                Text("Included: " + foundExports.map { URL(fileURLWithPath: $0).lastPathComponent }.joined(separator: ", "))
+                    .font(DS.Font.micro).foregroundStyle(p.textFaint)
+            }
+        }
+    }
+
+    private func chooseExport() {
+        let panel = NSOpenPanel()
+        panel.message = "Choose the export zip from Claude.ai or ChatGPT."
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+        guard panel.runModal() == .OK else { return }
+        exports += panel.urls.filter { !exports.contains($0) }
+    }
+
     private func row(_ group: Group) -> some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
@@ -137,7 +192,7 @@ struct BringInView: View {
     }
 
     private func toolName(_ tool: String) -> String {
-        ["claude": "Claude Code", "codex": "Codex", "cursor": "Cursor"][tool] ?? tool.capitalized
+        ["claude": "Claude Code", "codex": "Codex", "cursor": "Cursor", "claude.ai": "Claude.ai", "chatgpt": "ChatGPT"][tool] ?? tool.capitalized
     }
 
     private func loadLists() async {
@@ -152,7 +207,8 @@ struct BringInView: View {
         scanning = true; error = nil; result = nil
         defer { scanning = false }
         do {
-            let json = try await ToolBridge.json(["scan"], hubURL: store.config.hubURL)
+            let json = try await ToolBridge.json(["scan"] + exports.flatMap { ["--export", $0.path] }, hubURL: store.config.hubURL)
+            foundExports = (json["exports"] as? [String]) ?? []
             toolCounts = ((json["tools"] as? [[String: Any]]) ?? []).compactMap {
                 guard let tool = $0["tool"] as? String, let new = $0["new"] as? Int else { return nil }
                 return (tool, new)
@@ -313,7 +369,7 @@ struct MyToolsView: View {
     private var installed: [String] { tools.filter(\.installed).map(\.id) }
 
     private func toolName(_ tool: String) -> String {
-        ["claude": "Claude Code", "codex": "Codex", "cursor": "Cursor"][tool] ?? tool.capitalized
+        ["claude": "Claude Code", "codex": "Codex", "cursor": "Cursor", "claude.ai": "Claude.ai", "chatgpt": "ChatGPT"][tool] ?? tool.capitalized
     }
 
     private func load() async {
@@ -356,6 +412,10 @@ struct ProfileSheet: View {
     @State private var newKind = "about"
     @State private var editing: Int?
     @State private var editText = ""
+    @State private var drafting = false
+    @State private var draft: [HubProfileItem] = []
+    @State private var draftPicked: Set<Int> = []
+    @State private var draftNote = ""
     @State private var notice: String?
     @State private var error: String?
 
@@ -364,7 +424,7 @@ struct ProfileSheet: View {
             VStack(alignment: .leading, spacing: 4) {
                 WLEyebrow("Profile")
                 Text(person).font(DS.Font.page).foregroundStyle(p.text)
-                Text("What every AI tool should know about \(person). Bring in adds notes your tools already kept.")
+                Text("What every AI tool should know about \(person). Wolf Leader can write it from \(person)'s chats.")
                     .font(DS.Font.bodySmall).foregroundStyle(p.textMuted)
             }
             .padding(24)
@@ -373,8 +433,9 @@ struct ProfileSheet: View {
                 VStack(alignment: .leading, spacing: 18) {
                     if let notice { WLStatusPill(text: notice, kind: .good) }
                     if let error { WLStatusPill(text: error, kind: .bad) }
+                    draftBox
                     VStack(alignment: .leading, spacing: 8) {
-                        WLEyebrow("Add something about yourself")
+                        WLEyebrow("Add something yourself")
                         TextField("For example: I write music, and I'm new to coding", text: $newText, axis: .vertical)
                             .lineLimit(1...4).mainField()
                         HStack {
@@ -412,6 +473,75 @@ struct ProfileSheet: View {
         .task { await load() }
     }
 
+    /// Drafted lines wait here until the person keeps or drops them, like Hermes Agent's memory.
+    @ViewBuilder private var draftBox: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Write it for me").font(DS.Font.bodySmall.weight(.semibold))
+                    Text("Reads \(person)'s projects and chats in Wolf Leader and drafts a short profile. Nothing is saved until you choose.")
+                        .font(DS.Font.micro).foregroundStyle(p.textMuted)
+                }
+                Spacer()
+                if drafting { ProgressView().controlSize(.small) }
+                Button(draft.isEmpty ? "Write it" : "Write again") { Task { await writeDraft() } }
+                    .buttonStyle(PrimaryButtonStyle()).disabled(drafting)
+            }
+            if drafting {
+                Text("This takes a minute or two.").font(DS.Font.micro).foregroundStyle(p.textFaint)
+            }
+            if !draft.isEmpty {
+                Text(draftNote).font(DS.Font.micro).foregroundStyle(p.textFaint)
+                ForEach(draft) { item in
+                    Toggle(isOn: Binding(get: { draftPicked.contains(item.id) },
+                                         set: { if $0 { draftPicked.insert(item.id) } else { draftPicked.remove(item.id) } })) {
+                        HStack {
+                            Text(item.text).font(DS.Font.bodySmall)
+                            Spacer()
+                            Text(sections.first { $0.kind == item.kind }?.title ?? item.kind).font(DS.Font.micro).foregroundStyle(p.textFaint)
+                        }
+                    }
+                    .toggleStyle(.checkbox)
+                }
+                HStack {
+                    Button("Drop all") { draft = []; draftPicked = [] }.buttonStyle(OutlineButtonStyle())
+                    Spacer()
+                    Button(draftPicked.count == 1 ? "Keep 1 line" : "Keep \(draftPicked.count) lines") { keepDraft() }
+                        .buttonStyle(SecondaryButtonStyle()).disabled(draftPicked.isEmpty)
+                }
+            }
+        }
+        .padding(12)
+        .background(p.surface, in: RoundedRectangle(cornerRadius: DS.Radius.row))
+    }
+
+    private func writeDraft() async {
+        drafting = true; defer { drafting = false }
+        do {
+            let json = try await ToolBridge.json(["write-profile", "--person", person], hubURL: store.config.hubURL)
+            let items = (json["items"] as? [[String: Any]]) ?? []
+            draft = items.enumerated().map { index, item in
+                HubProfileItem(id: index, kind: item["kind"] as? String ?? "about", text: item["text"] as? String ?? "",
+                               source: item["source"] as? String ?? "ai")
+            }
+            draftPicked = Set(draft.map(\.id))
+            let by = ["claude": "Claude Code", "codex": "Codex"][json["by"] as? String ?? ""]
+            let looked = json["looked_at"] as? Int ?? 0
+            draftNote = draft.isEmpty ? "" : (by.map { "Written by \($0) on this Mac from \(looked) of your messages." }
+                ?? "Picked from \(looked) of your messages. Install Claude Code or Codex for a better draft.")
+            if draft.isEmpty { notice = "Nothing new to add from your chats yet." }
+            error = nil
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func keepDraft() {
+        let kept = draft.filter { draftPicked.contains($0.id) }
+        draft = []; draftPicked = []
+        run("Kept \(kept.count) line\(kept.count == 1 ? "" : "s").") { hub in
+            for item in kept { try await hub.addProfileItem(person: person, text: item.text, kind: item.kind, source: item.source) }
+        }
+    }
+
     @ViewBuilder private func itemRow(_ item: HubProfileItem) -> some View {
         if editing == item.id {
             VStack(alignment: .leading, spacing: 6) {
@@ -430,7 +560,10 @@ struct ProfileSheet: View {
             HStack(alignment: .top, spacing: 8) {
                 Text(item.text).font(DS.Font.bodySmall).textSelection(.enabled)
                 Spacer(minLength: 8)
-                if item.source != "manual" { MainTag(text: item.source.capitalized) }
+                if let label = ["ai": "Written by AI", "history": "From your chats", "claude": "From Claude",
+                                "codex": "From Codex", "cursor": "From Cursor", "chatgpt": "From ChatGPT"][item.source] {
+                    MainTag(text: label)
+                }
                 Button { editText = item.text; editing = item.id } label: { Image(systemName: "pencil") }
                     .buttonStyle(.borderless).help("Edit")
                 Button(role: .destructive) { remove(item) } label: { Image(systemName: "trash") }

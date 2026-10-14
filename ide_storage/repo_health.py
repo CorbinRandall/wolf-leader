@@ -67,13 +67,9 @@ def share_repo(slug: str | None) -> dict[str, Any]:
 
 
 def _is_home_folder(path: str) -> bool:
-    """A home directory or filesystem root: where someone happened to be, not a project's folder."""
-    import re
+    from ide_storage.paths import is_broad_folder
 
-    n = _norm(path)
-    return n in ("", "/", "/root", "/home") or bool(
-        re.fullmatch(r"/(users|home)/[^/]+", n) or re.fullmatch(r"[a-z]:(/users/[^/]+)?", n)
-    )
+    return is_broad_folder(path)
 
 
 def _holds_notes_repo(folder: str, notes: list[str]) -> bool:

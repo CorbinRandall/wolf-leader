@@ -79,7 +79,9 @@ def resolve_project(
                 if not val:
                     continue
                 vnorm = normalize_path(val)
-                if norm == vnorm or norm.startswith(vnorm + os.sep):
+                from .paths import is_broad_folder
+
+                if norm == vnorm or (norm.startswith(vnorm + os.sep) and not is_broad_folder(vnorm)):
                     if len(vnorm) > best_len:
                         best, best_len = {project["id"]: project}, len(vnorm)
                     elif len(vnorm) == best_len:
@@ -95,12 +97,20 @@ def create_project_for_path(
     device_name: Optional[str] = None,
     description: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Create a project for a workspace folder (idempotent: returns the match if one exists)."""
-    from .paths import register_project_path, to_hub_path
+    """Create a project for a workspace folder.
+
+    Returns the existing project only when that exact folder is already its own. A project that
+    merely sits in a parent folder does not count: a new folder is a new project.
+    """
+    from .paths import _norm, project_paths, register_project_path, to_hub_path, variants
 
     existing = resolve_project(path=path)
     if existing:
-        return {**existing, "created": False}
+        mine = {_norm(v) for v in variants(path)}
+        theirs = {_norm(p["path"]) for p in project_paths(int(existing["id"]))}
+        theirs |= {_norm(existing.get(k) or "") for k in ("path", "compose_path")}
+        if mine & theirs:
+            return {**existing, "created": False}
 
     base = re.split(r"[\\/]+", path.strip().rstrip("\\/"))[-1] or "project"
     name = (name or base.replace("_", " ").replace("-", " ").strip().title() or "Project")[:120]

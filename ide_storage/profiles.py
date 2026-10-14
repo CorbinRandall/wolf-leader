@@ -142,6 +142,12 @@ def as_markdown(name: str) -> str:
 # proposed, then kept or dropped by the person. Wolf Leader already holds their chats, so nobody
 # should have to type it up.
 
+# Without an AI, only clear statements about the person count: they start with one of these.
+_STATEMENT = re.compile(
+    r"^(?:i (?:really |always |usually )?(?:prefer|like|love|hate|don't like|do not like|care about|tend to|"
+    r"work best|usually)|i'd (?:rather|prefer)|please (?:don't|do not|never|always|keep)|"
+    r"(?:don't|never) (?:ever )?(?:use|add|change|delete|make|write|assume|push|deploy)|always (?:ask|use|keep|check)|"
+    r"i'm (?:a|an|new to|not a)\b|i am (?:a|an|new to|not a)\b)", re.I)
 _CUE = re.compile(
     r"\b(i prefer|i'd prefer|i like|i love|i hate|i don't like|i do not like|i want you to|i'd rather|"
     r"please don't|please do not|don't ever|never|always|i'm (?:a|an|not|new|trying)|i am (?:a|an|not|new)|"
@@ -236,7 +242,8 @@ def suggest_from_history(name: str, limit: int = 15) -> dict[str, Any]:
     seen: dict[str, dict[str, Any]] = {}
     for line in lines:
         for sentence in _sentences(line):
-            if not (20 <= len(sentence) <= 220) or not _CUE.search(sentence) or "http" in sentence or "/" in sentence:
+            sentence = re.sub(r"</?[a-z_]+>", "", sentence).strip()
+            if not (20 <= len(sentence) <= 180) or not _STATEMENT.match(sentence) or "http" in sentence or "/" in sentence:
                 continue
             key = re.sub(r"[^a-z ]", "", sentence.lower())[:80]
             entry = seen.setdefault(key, {"text": sentence[0].upper() + sentence[1:], "kind": guess_kind(sentence), "count": 0})
@@ -247,7 +254,8 @@ def suggest_from_history(name: str, limit: int = 15) -> dict[str, Any]:
     extra = []
     if tools:
         extra.append({"text": "I use " + ", ".join(tools[:10]) + ".", "kind": "tools"})
-    active = [p["name"] for p in projects if (p.get("status") or "") != "done"][:6]
+    active = [p["name"] for p in projects
+              if (p.get("status") or "") != "done" and "owner-folder" not in str(p.get("tags") or "")][:6]
     if active:
         extra.append({"text": "I'm working on " + ", ".join(active) + ".", "kind": "about"})
     items = [{"text": e["text"], "kind": e["kind"], "source": "history"} for e in extra + picked

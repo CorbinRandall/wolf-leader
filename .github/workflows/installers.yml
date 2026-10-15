@@ -89,6 +89,7 @@ jobs:
             | ~/.claude/hooks/wolf-leader-save.sh
           for i in $(seq 1 60); do [ -d ~/.claude/.wolf-leader-save.lock ] || break; sleep 2; done
           cat ~/.claude/wolf-leader-last-save-error.log 2>/dev/null || true
+          head -c 1500 ~/.claude/wolf-leader-last-save.json 2>/dev/null || true
           curl -fsS -X POST http://localhost:6971/api/sessions/known -H 'Content-Type: application/json' \
             -d '{"ids":["ci-linux-hook-test"]}' | grep -q ci-linux-hook-test
 

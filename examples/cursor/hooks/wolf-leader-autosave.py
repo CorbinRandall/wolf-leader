@@ -67,7 +67,10 @@ def main():
     if not meaningful(messages): print('{"continue":true}'); return
     title=title_for(messages); text="\n".join(m["content"] for m in messages)[:80000]
     match=call("POST","/api/projects/match",{"text":text,"messages":messages,"workspace_path":cwd})
-    best=match.get("best") or {}; slug="ide-storage" if is_wolf_leader_topic(text) else (best.get("slug") if best.get("confidence") in ("high","medium") else None)
+    best=match.get("best") or {}; slug=best.get("slug") if best.get("confidence") in ("high","medium") else None
+    # Work on Wolf Leader itself belongs to its project, on a hub that has one (most hubs do not).
+    if is_wolf_leader_topic(text) and any(p.get("slug")=="ide-storage" for p in call("GET","/api/projects?limit=1000").get("projects",[])):
+        slug="ide-storage"
     # No clear project: it goes to One-offs, the standard home for chats that belong to no
     # project, instead of a new project being made for every unmatched chat.
     body={"session_id":sid,"workspace_path":cwd,"title":title,

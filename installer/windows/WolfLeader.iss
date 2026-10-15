@@ -214,6 +214,9 @@ var
 begin
   Result := '';
   if not LoadStringFromFile(FileName, A) then Exit;
+  { Notepad and PowerShell start UTF-8 files with a byte-order mark: drop it before decoding. }
+  if (Length(A) >= 3) and (Ord(A[1]) = $EF) and (Ord(A[2]) = $BB) and (Ord(A[3]) = $BF) then
+    Delete(A, 1, 3);
   if (Length(A) >= 2) and (Ord(A[1]) = $FF) and (Ord(A[2]) = $FE) then
   begin
     i := 3;
@@ -224,7 +227,7 @@ begin
     end;
   end else
     Result := Utf8ToStr(A);
-  if (Length(Result) > 0) and (Result[1] = #$FEFF) then
+  while (Length(Result) > 0) and ((Result[1] = #$FEFF) or (Result[1] = #$FFFE)) do
     Result := Copy(Result, 2, Length(Result));
 end;
 

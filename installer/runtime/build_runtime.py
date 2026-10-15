@@ -119,6 +119,11 @@ def main() -> int:
         run([*prefix, py, "-c", f"from fastembed import TextEmbedding; TextEmbedding({MODEL!r}, cache_dir={str(models)!r})"],
             env=env)
 
+    # The model cache is written read-only; installers copy, replace and sign these files.
+    for path in models.rglob("*"):
+        if not path.is_symlink():
+            path.chmod(path.stat().st_mode | 0o200)
+
     print("==> Launcher")
     # run_hub.pyw: starts the hub from any working folder, with no console window on Windows.
     (app / "run_hub.pyw").write_text(

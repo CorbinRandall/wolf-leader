@@ -9,7 +9,7 @@
 #   dist/WolfLeader-<ver>.dmg       classic "drag Wolf Leader to Applications" image (skipped with --app-only)
 #
 # The app carries the whole hub for "Just this Mac" (Contents/Resources/hub: Python, packages and
-# search model for Apple silicon and Intel, built by installer/runtime/build_runtime.py and kept in
+# search model for Apple silicon, built by installer/runtime/build_runtime.py and kept in
 # dist/runtime). --no-hub leaves it out for a quick build.
 #
 # The app is ad-hoc signed only (no Apple Developer ID), so the first launch is blocked by Gatekeeper:
@@ -238,8 +238,8 @@ if [ "$NO_HUB" = 0 ]; then
   echo "==> Built-in hub"
   HUB="$RES/hub"
   mkdir -p "$HUB"
-  # Both processors by default; a test build can set WL_HUB_TARGETS=mac-arm64.
-  for t in ${WL_HUB_TARGETS:-mac-arm64 mac-x86_64}; do
+  # Apple silicon only: the app needs macOS 27, which does not run on Intel Macs.
+  for t in ${WL_HUB_TARGETS:-mac-arm64}; do
     RT="dist/runtime/$t"
     if [ ! -x "$RT/run-hub" ]; then
       python3 installer/runtime/build_runtime.py --target "$t" \
@@ -255,6 +255,7 @@ if [ "$NO_HUB" = 0 ]; then
   done
   first=$(printf '%s\n' ${WL_HUB_TARGETS:-mac-arm64} | head -1)
   rsync -a "dist/runtime/$first/models/" "$HUB/models/"
+  chmod -R u+w "$HUB"  # the search model's cache files are read-only; signing needs to touch them
   echo "  $(du -sh "$HUB" | cut -f1) in Contents/Resources/hub"
 fi
 

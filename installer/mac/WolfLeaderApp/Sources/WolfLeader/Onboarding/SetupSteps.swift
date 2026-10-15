@@ -75,7 +75,9 @@ struct SetupPathStep: View {
             if model.path == .newOnThisMac && !SetupSystem.builtInHub {
                 SetupNotice(
                     kind: .warn,
-                    text: "This copy of Wolf Leader was built without the hub inside it. Download Wolf Leader again, or pick another option."
+                    text: SetupSystem.isIntel
+                        ? "On a Mac with an Intel processor the hub runs in Docker instead. Install Docker Desktop and open it once before you press Install."
+                        : "This copy of Wolf Leader was built without the hub inside it, so the hub would run in Docker. Download Wolf Leader again, or install Docker Desktop first."
                 )
             }
             SetupChoiceCard(

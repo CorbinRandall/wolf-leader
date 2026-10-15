@@ -649,6 +649,14 @@ struct GitIdentity: Sendable {
 }
 
 enum SetupSystem {
+    static var isIntel: Bool {
+        #if arch(x86_64)
+        return true
+        #else
+        return false
+        #endif
+    }
+
     /// True when this app carries the hub for this Mac's processor (Resources/hub/<target>).
     static var builtInHub: Bool {
         #if arch(arm64)

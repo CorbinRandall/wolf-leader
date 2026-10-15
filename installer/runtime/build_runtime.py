@@ -126,13 +126,22 @@ def main() -> int:
 
     print("==> Launcher")
     # run_hub.pyw: starts the hub from any working folder, with no console window on Windows.
+    # Without a console a failed start would vanish, so it leaves hub-crash.log next to the runtime.
     (app / "run_hub.pyw").write_text(
-        'import os, sys\n'
+        'import os, sys, traceback\n'
         'here = os.path.dirname(os.path.abspath(__file__))\n'
         'sys.path.insert(0, here)\n'
         'os.environ.setdefault("WOLF_RUNTIME_MODELS", os.path.join(os.path.dirname(here), "models"))\n'
-        'from ide_storage.local import main\n'
-        'raise SystemExit(main(sys.argv[1:]))\n')
+        'try:\n'
+        '    from ide_storage.local import main\n'
+        '    code = main(sys.argv[1:])\n'
+        'except SystemExit:\n'
+        '    raise\n'
+        'except BaseException:\n'
+        '    with open(os.path.join(os.path.dirname(os.path.dirname(here)), "hub-crash.log"), "a", encoding="utf-8") as f:\n'
+        '        traceback.print_exc(file=f)\n'
+        '    raise\n'
+        'raise SystemExit(code)\n')
     if args.target.startswith("windows"):
         (out / "run-hub.cmd").write_text(
             '@echo off\r\nset "HERE=%~dp0"\r\nset "PYTHONPATH=%HERE%app"\r\nset "PYTHONNOUSERSITE=1"\r\n'

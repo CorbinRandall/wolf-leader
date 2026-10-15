@@ -264,6 +264,19 @@ jobs:
           try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http://127.0.0.1:6971/health | Out-Null; throw "hub still running" } catch { if ($_.Exception.Message -eq "hub still running") { throw } }
           if (Test-Path "$([Environment]::GetFolderPath('Startup'))\Wolf Leader hub.lnk") { throw "startup entry left behind" }
 
+      - name: Run the hub with a console, to see why it stopped
+        if: failure()
+        shell: powershell
+        run: |
+          $rt = "$env:LOCALAPPDATA\WolfLeader\runtime"
+          Get-Content "$env:LOCALAPPDATA\WolfLeader\hub-crash.log" -ErrorAction SilentlyContinue
+          $p = Start-Process -PassThru -NoNewWindow "$rt\python\python.exe" -ArgumentList "`"$rt\app\run_hub.pyw`" --data `"$env:RUNNER_TEMP\diag-hub`" --port 6981 --mcp-port 6982" -RedirectStandardOutput "$env:RUNNER_TEMP\diag.out" -RedirectStandardError "$env:RUNNER_TEMP\diag.err"
+          Start-Sleep 40
+          try { (Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 http://127.0.0.1:6981/health).Content } catch { "no answer: $($_.Exception.Message)" }
+          Get-Content "$env:RUNNER_TEMP\diag.out", "$env:RUNNER_TEMP\diag.err" -ErrorAction SilentlyContinue | Select-Object -Last 60
+          Get-Content "$env:RUNNER_TEMP\diag-hub\hub.log", "$env:RUNNER_TEMP\diag-hub\mcp.log" -ErrorAction SilentlyContinue | Select-Object -Last 40
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+
       - name: Show the logs
         if: failure()
         shell: powershell

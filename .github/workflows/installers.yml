@@ -218,11 +218,27 @@ jobs:
           Write-Output $r
           if (-not $r.StartsWith("OK")) { throw "answer file rejected: $r" }
 
+      - name: Start a stand-in hub that answers health checks
+        shell: powershell
+        run: |
+          $py = @'
+          import http.server, json
+          class H(http.server.BaseHTTPRequestHandler):
+              def do_GET(self):
+                  body = json.dumps({"status": "healthy", "service": "wolf-leader", "database": {"ok": True}}).encode()
+                  self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(body)
+              def log_message(self, *a): pass
+          http.server.HTTPServer(("127.0.0.1", 6971), H).serve_forever()
+          '@
+          ($py -split "`n" | ForEach-Object { $_ -replace '^          ', '' }) -join "`n" | Set-Content "$env:RUNNER_TEMP\hub.py"
+          Start-Process python -ArgumentList "$env:RUNNER_TEMP\hub.py" -WindowStyle Hidden
+          Start-Sleep 3
+          (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:6971/health).Content
+
       - name: Connect to a hub, as a new user would
         shell: powershell
         run: |
           $result = "$env:RUNNER_TEMP\result.ini"
-          # No hub runs on the test machine, so the final check warns; everything else must be ok.
           powershell -NoProfile -ExecutionPolicy Bypass -File installer\windows\install.ps1 `
             -Config "$env:RUNNER_TEMP\answer.ini" -Mode connect -Client -GitName CI -GitEmail ci@example.com -ResultFile $result
           Get-Content $result

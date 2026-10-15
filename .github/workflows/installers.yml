@@ -225,7 +225,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force "$HOME\.claude" | Out-Null
           $log = "$env:RUNNER_TEMP\setup.log"
-          $p = Start-Process -PassThru "dist\WolfLeaderSetup-0.0.0.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/CURRENTUSER", "/WLCHOICES=client", "/LOG=$log"
+          $p = Start-Process -PassThru "dist\WolfLeaderSetup-0.0.0.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/CURRENTUSER", "/WLCHOICES=client", "/WLGITNAME=CI", "/WLGITEMAIL=ci@example.com", "/LOG=$log"
           # Show progress while it runs, and stop with the log if it hangs.
           $shown = 0
           for ($i = 0; $i -lt 90 -and -not $p.HasExited; $i++) {

@@ -5,6 +5,10 @@
 ;
 ; Test hook (no wizard, nothing installed): WolfLeaderSetup.exe /CURRENTUSER /WLVALIDATE=<ini> /WLRESULT=<out>
 ; writes "OK" or "FAIL: <first bad line>" to <out> using the same validator as the paste page.
+;
+; Silent install: WolfLeaderSetup.exe /VERYSILENT /SUPPRESSMSGBOXES /CURRENTUSER
+;   [/WLCHOICES=client,shares,prereqs,obsidian,wiki] [/WLGITNAME=Name /WLGITEMAIL=me@example.com]
+;   [/WLINI=<answer file>]   (needed only when connecting to a hub; "Just this PC" answers itself)
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -786,6 +790,9 @@ begin
   if ExecAndCaptureOutput(ExpandConstant('{cmd}'), '/c git config --global user.email', '', SW_HIDE, ewWaitUntilTerminated, RC, GitOut) and
      (RC = 0) and (GetArrayLength(GitOut.StdOut) > 0) then
     GitPage.Values[1] := Trim(GitOut.StdOut[0]);
+  { /WLGITNAME= and /WLGITEMAIL= fill these in for a silent install. }
+  if ExpandConstant('{param:WLGITNAME|}') <> '' then GitPage.Values[0] := ExpandConstant('{param:WLGITNAME|}');
+  if ExpandConstant('{param:WLGITEMAIL|}') <> '' then GitPage.Values[1] := ExpandConstant('{param:WLGITEMAIL|}');
 end;
 
 procedure InitializeWizard;
@@ -871,6 +878,14 @@ begin
   Result := True;
   if CurPageID = AgentPage.ID then
   begin
+    { /WLINI=<answer file> gives a silent install its answers. }
+    if (Trim(ReplyMemo.Text) = '') and (ExpandConstant('{param:WLINI|}') <> '') then
+      ReplyMemo.Text := LoadTextFile(ExpandConstant('{param:WLINI|}'));
+    if WizardSilent and (Trim(ReplyMemo.Text) = '') then
+    begin
+      Log('Silent install without answers: pass /WLINI=<file>, or pick "Just this PC".');
+      Abort;
+    end;
     if Trim(ReplyMemo.Text) = '' then
     begin
       MsgBox('Paste your agent''s reply into the box (or use Load file...) first.', mbError, MB_OK);
@@ -901,7 +916,10 @@ begin
   else if CurPageID = GitPage.ID then
   begin
     S := Trim(GitPage.Values[1]);
-    if (Trim(GitPage.Values[0]) = '') or (S = '') then
+    { A silent install never stops to ask: without a name and email, git config is just skipped. }
+    if WizardSilent and (Trim(GitPage.Values[0]) = '') and (S = '') then
+      Result := True
+    else if (Trim(GitPage.Values[0]) = '') or (S = '') then
     begin
       MsgBox('Both name and email are needed. Made-up is fine, e.g. Me / me@example.com.', mbError, MB_OK);
       Result := False;

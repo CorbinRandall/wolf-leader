@@ -58,6 +58,9 @@ def sqlite_path() -> str:
         path = path[2:]
     elif path.startswith("//"):
         path = path[2:]
+    # sqlite:///C:/Users/... on Windows: no slash before the drive letter.
+    if re.match(r"^/[A-Za-z]:[/\\]", path):
+        path = path[1:]
     return os.path.expanduser(path)
 
 

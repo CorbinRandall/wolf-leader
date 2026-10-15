@@ -26,3 +26,12 @@ def test_health_names_the_database():
     database = TestClient(app).get("/health").json()["database"]
     assert database["ok"] is True
     assert database["engine"] == ("sqlite" if is_sqlite() else "postgres")
+
+
+def test_sqlite_path_on_windows_and_unix(monkeypatch):
+    from ide_storage.db import sqlite_path
+
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///D:/a/data/wolf-leader.db")
+    assert sqlite_path() == "D:/a/data/wolf-leader.db"
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///" + "srv/x/wolf-leader.db")
+    assert sqlite_path() == "/srv/x/wolf-leader.db"

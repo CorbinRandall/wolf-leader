@@ -1,7 +1,9 @@
 name: Installers
 
-# Runs each installer on a fresh Mac, Windows and Linux machine, the way a new user would, and
-# checks what it set up. On a release tag it also attaches the Linux download to the release.
+# Runs each installer on a fresh Mac, Windows and Linux machine the way a new user would, choosing
+# "just this computer": the hub built into the installer, no Docker, no server. Then checks the hub
+# answers, the AI tools are connected and a chat saves. On a release tag it also attaches the Linux
+# download to the release.
 
 on:
   push:
@@ -10,11 +12,15 @@ on:
     paths:
       - "installer/**"
       - "examples/**"
+      - "ide_storage/**"
+      - "requirements*.txt"
       - ".github/workflows/installers.yml"
   pull_request:
     paths:
       - "installer/**"
       - "examples/**"
+      - "ide_storage/**"
+      - "requirements*.txt"
       - ".github/workflows/installers.yml"
   workflow_dispatch:
 
@@ -27,57 +33,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/cache@v4
+        with:
+          path: dist/runtime-cache
+          key: runtime-cache-linux-${{ hashFiles('installer/runtime/build_runtime.py') }}
+
+      - name: Build the built-in hub
+        run: python3 installer/runtime/build_runtime.py --target linux-x86_64
+
       - name: Build the Linux download
         run: |
           if [ "$GITHUB_REF_TYPE" = tag ]; then v="${GITHUB_REF_NAME#v}"; else v=0.0.0; fi
           bash installer/linux/build-linux.sh "$v"
+          ls -la dist/WolfLeader-linux-*.tar.gz
 
-      - name: Set up a new hub on this machine, as a new user would
+      - name: Set up "just this computer", as a new user would
         run: |
           set -e
           cd "$RUNNER_TEMP"
           tar xzf "$GITHUB_WORKSPACE"/dist/WolfLeader-linux-*.tar.gz
-          cat > answer.ini <<'INI'
-          [wolf]
-          format=1
-          os=linux
-          hub_url=http://localhost:6971
-          mcp_url=http://localhost:6972/mcp
-          timezone=America/Chicago
-          device_name=ci-linux
-          [detected]
-          git=yes
-          python=yes
-          python_version=3.12.3
-          docker=yes
-          obsidian=no
-          cursor=yes
-          claude_code=yes
-          wolf_client=no
-          [backup]
-          done=no
-          path=NONE
-          files=0
-          [original]
-          found=no
-          where=NONE
-          folder=NONE
-          ssh_target=NONE
-          ssh_port=NONE
-          ssh_key=NONE
-          INI
-          sed -i 's/^ *//' answer.ini
-          ./wolf-leader/wolf-leader-setup --ini answer.ini --mode new --toggles client,prereqs,wiki \
+          mkdir -p ~/.claude
+          ./wolf-leader/wolf-leader-setup --mode new --ini auto --toggles client \
             --git-name "CI" --git-email ci@example.com --yes
 
       - name: Check the hub and the AI tool setup
         run: |
           set -e
-          curl -fsS http://localhost:6971/health | grep -q '"healthy"'
-          test -f ~/.cursor/mcp.json && grep -q wolf-leader ~/.cursor/mcp.json
+          curl -fsS http://127.0.0.1:6971/health | tee /dev/stderr | grep -q '"engine":"sqlite"'
+          grep -q wolf-leader ~/.cursor/mcp.json
           test -f ~/.claude/skills/wolfhowl/SKILL.md
           grep -q wolf-leader-save.sh ~/.claude/settings.json
-          test -f ~/.local/share/applications/wolf-leader.desktop
 
       - name: A Claude Code chat saves itself through the hook
         run: |
@@ -85,21 +70,27 @@ jobs:
           mkdir -p "$RUNNER_TEMP/chat"
           T="$RUNNER_TEMP/chat/ci-chat.jsonl"
           printf '%s\n' \
-            '{"type":"user","message":{"role":"user","content":"Testing the Linux install: does this chat reach Wolf Leader by itself?"},"timestamp":"2026-10-15T04:00:00Z"}' \
+            '{"type":"user","message":{"role":"user","content":"Testing the Linux install: does this chat reach the hub by itself?"},"timestamp":"2026-10-15T04:00:00Z"}' \
             '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Yes, the save hook sends it."}]}}' >"$T"
           printf '{"session_id":"ci-linux-hook-test","transcript_path":"%s","cwd":"%s","hook_event_name":"Stop"}' "$T" "$RUNNER_TEMP" \
             | ~/.claude/hooks/wolf-leader-save.sh
           for i in $(seq 1 60); do [ -d ~/.claude/.wolf-leader-save.lock ] || break; sleep 2; done
           cat ~/.claude/wolf-leader-last-save-error.log 2>/dev/null || true
-          head -c 1500 ~/.claude/wolf-leader-last-save.json 2>/dev/null || true
-          curl -fsS -X POST http://localhost:6971/api/sessions/known -H 'Content-Type: application/json' \
+          curl -fsS -X POST http://127.0.0.1:6971/api/sessions/known -H 'Content-Type: application/json' \
             -d '{"ids":["ci-linux-hook-test"]}' | grep -q ci-linux-hook-test
 
-      - name: Running setup again changes nothing it should not
+      - name: Updating keeps the data and restarts the hub
         run: |
+          set -e
           cd "$RUNNER_TEMP"
-          ./wolf-leader/wolf-leader-setup --ini answer.ini --mode update --toggles client --yes
+          ./wolf-leader/wolf-leader-setup --mode update --ini auto --toggles client --yes
+          curl -fsS -X POST http://127.0.0.1:6971/api/sessions/known -H 'Content-Type: application/json' \
+            -d '{"ids":["ci-linux-hook-test"]}' | grep -q ci-linux-hook-test
           test "$(grep -c wolf-leader-save.sh ~/.claude/settings.json)" = 2
+
+      - name: Show the hub log
+        if: failure()
+        run: cat ~/.local/state/wolf-leader/*.log 2>/dev/null | tail -60 || true
 
       - name: Attach the Linux download to the release
         if: startsWith(github.ref, 'refs/tags/v')
@@ -112,8 +103,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/cache@v4
+        with:
+          path: dist/runtime-cache
+          key: runtime-cache-mac-${{ hashFiles('installer/runtime/build_runtime.py') }}
+
+      - name: Build the built-in hub
+        run: python3 installer/runtime/build_runtime.py --target mac-arm64
+
       - name: Build the app
-        run: bash installer/mac/build-app.sh 0.0.0 --app-only
+        run: WL_HUB_TARGETS=mac-arm64 bash installer/mac/build-app.sh 0.0.0 --app-only
 
       - name: The app starts and keeps running
         run: |
@@ -124,55 +123,59 @@ jobs:
           kill -0 "$PID"
           kill "$PID"
 
-      - name: Connect to a hub, as a new user would
+      - name: Set up "just this Mac", as the app does
         run: |
           set -e
-          export HOME="$RUNNER_TEMP/home"; mkdir -p "$HOME"
-          cat > "$RUNNER_TEMP/answer.ini" <<'INI'
-          [wolf]
-          format=1
-          os=mac
-          hub_url=http://127.0.0.1:6971
-          mcp_url=http://127.0.0.1:6972/mcp
-          timezone=America/Chicago
-          device_name=ci-mac
-          [detected]
-          git=yes
-          python=yes
-          python_version=3.12.0
-          docker=no
-          obsidian=no
-          cursor=yes
-          claude_code=yes
-          wolf_client=no
-          [backup]
-          done=no
-          path=NONE
-          files=0
-          [original]
-          found=no
-          where=NONE
-          folder=NONE
-          ssh_target=NONE
-          ssh_port=NONE
-          ssh_key=NONE
-          INI
-          sed -i '' 's/^ *//' "$RUNNER_TEMP/answer.ini"
-          # No hub runs on the test machine, so the final check warns; everything else must be ok.
+          export HOME="$RUNNER_TEMP/home"; mkdir -p "$HOME/.claude"
           bash "dist/Wolf Leader.app/Contents/Resources/payload/installer/mac/install.sh" \
-            --ini "$RUNNER_TEMP/answer.ini" --mode connect --toggles client \
+            --ini auto --mode new --toggles client \
             --git-name CI --git-email ci@example.com --result "$RUNNER_TEMP/result.ini"
           cat "$RUNNER_TEMP/result.ini"
           grep -q '^status=ok' "$RUNNER_TEMP/result.ini"
+          grep -q '^health=ok' "$RUNNER_TEMP/result.ini"
+          curl -fsS http://127.0.0.1:6971/health | grep -q '"engine":"sqlite"'
           grep -q wolf-leader "$HOME/.cursor/mcp.json"
           grep -q wolf-leader-save.sh "$HOME/.claude/settings.json"
+
+      - name: A Claude Code chat saves itself through the hook
+        run: |
+          set -e
+          export HOME="$RUNNER_TEMP/home"
+          T="$RUNNER_TEMP/ci-chat.jsonl"
+          printf '%s\n' \
+            '{"type":"user","message":{"role":"user","content":"Testing the Mac install: does this chat reach the hub by itself?"},"timestamp":"2026-10-15T04:00:00Z"}' \
+            '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Yes, the save hook sends it."}]}}' >"$T"
+          printf '{"session_id":"ci-mac-hook-test","transcript_path":"%s","cwd":"%s","hook_event_name":"Stop"}' "$T" "$RUNNER_TEMP" \
+            | "$HOME/.claude/hooks/wolf-leader-save.sh"
+          for i in $(seq 1 60); do [ -d "$HOME/.claude/.wolf-leader-save.lock" ] || break; sleep 2; done
+          curl -fsS -X POST http://127.0.0.1:6971/api/sessions/known -H 'Content-Type: application/json' \
+            -d '{"ids":["ci-mac-hook-test"]}' | grep -q ci-mac-hook-test
+
+      - name: Undo puts things back and stops the hub
+        run: |
+          export HOME="$RUNNER_TEMP/home"
           bash "$(ls -d "$HOME/Library/Application Support/WolfLeader"/backup-*)/restore.sh" -y
           test ! -e "$HOME/.cursor/mcp.json"
+          sleep 3
+          ! curl -fsS -m 3 http://127.0.0.1:6971/health
+
+      - name: Show the hub log
+        if: failure()
+        run: tail -60 "$RUNNER_TEMP/home/Library/Logs/WolfLeader/hub.log" 2>/dev/null || true
 
   windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: dist/runtime-cache
+          key: runtime-cache-windows-${{ hashFiles('installer/runtime/build_runtime.py') }}
+
+      - name: Build the built-in hub
+        shell: powershell
+        run: python installer\runtime\build_runtime.py --target windows-x86_64
 
       - name: Install Inno Setup
         shell: powershell
@@ -183,8 +186,9 @@ jobs:
         run: |
           cmd /c installer\windows\build.bat 0.0.0
           if (-not (Test-Path "dist\WolfLeaderSetup-0.0.0.exe")) { throw "installer was not built" }
+          Get-Item "dist\WolfLeaderSetup-0.0.0.exe" | Select-Object Name, Length
 
-      - name: Write a test answer file
+      - name: The installer accepts an answer file saved by Notepad
         shell: powershell
         run: |
           $ini = @"
@@ -210,39 +214,49 @@ jobs:
           files=0
           "@
           ($ini -split "`n" | ForEach-Object { $_.Trim() }) -join "`r`n" | Set-Content "$env:RUNNER_TEMP\answer.ini" -Encoding UTF8
-
-      - name: The installer accepts the answer file
-        shell: powershell
-        run: |
           $out = "$env:RUNNER_TEMP\validate.txt"
           Start-Process -Wait "dist\WolfLeaderSetup-0.0.0.exe" -ArgumentList "/CURRENTUSER", "/WLVALIDATE=$env:RUNNER_TEMP\answer.ini", "/WLRESULT=$out"
           $r = Get-Content $out -Raw
           Write-Output $r
           if (-not $r.StartsWith("OK")) { throw "answer file rejected: $r" }
 
-      - name: Start a stand-in hub that answers health checks
+      - name: Install "just this PC" with the real setup program, silently
         shell: powershell
         run: |
-          $py = @'
-          import http.server, json
-          class H(http.server.BaseHTTPRequestHandler):
-              def do_GET(self):
-                  body = json.dumps({"status": "healthy", "service": "wolf-leader", "database": {"ok": True}}).encode()
-                  self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(body)
-              def log_message(self, *a): pass
-          http.server.HTTPServer(("127.0.0.1", 6971), H).serve_forever()
-          '@
-          ($py -split "`n" | ForEach-Object { $_ -replace '^          ', '' }) -join "`n" | Set-Content "$env:RUNNER_TEMP\hub.py"
-          Start-Process python -ArgumentList "$env:RUNNER_TEMP\hub.py" -WindowStyle Hidden
-          Start-Sleep 3
-          (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:6971/health).Content
-
-      - name: Connect to a hub, as a new user would
-        shell: powershell
-        run: |
-          $result = "$env:RUNNER_TEMP\result.ini"
-          powershell -NoProfile -ExecutionPolicy Bypass -File installer\windows\install.ps1 `
-            -Config "$env:RUNNER_TEMP\answer.ini" -Mode connect -Client -GitName CI -GitEmail ci@example.com -ResultFile $result
-          Get-Content $result
-          if (-not (Select-String -Path $result -Pattern '^ok=1' -Quiet)) { throw "install reported errors" }
+          New-Item -ItemType Directory -Force "$HOME\.claude" | Out-Null
+          $log = "$env:RUNNER_TEMP\setup.log"
+          Start-Process -Wait "dist\WolfLeaderSetup-0.0.0.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/CURRENTUSER", "/WLCHOICES=client", "/LOG=$log"
+          Get-Content "$env:LOCALAPPDATA\WolfLeader\install-result.ini"
+          if (-not (Select-String -Path "$env:LOCALAPPDATA\WolfLeader\install-result.ini" -Pattern '^ok=1' -Quiet)) { throw "install reported errors" }
+          if (-not (Test-Path "$([Environment]::GetFolderPath('Startup'))\Wolf Leader hub.lnk")) { throw "the hub does not start at sign-in" }
           if (-not (Select-String -Path "$HOME\.cursor\mcp.json" -Pattern 'wolf-leader' -Quiet)) { throw "Cursor was not connected" }
+
+      - name: The hub answers and saves a chat
+        shell: powershell
+        run: |
+          $health = (Invoke-WebRequest -UseBasicParsing http://127.0.0.1:6971/health).Content
+          Write-Output $health
+          if ($health -notmatch '"engine":"sqlite"') { throw "not the built-in hub" }
+          $body = @{ session_id = "ci-windows-save"; title = "Windows test"; messages = @(
+              @{ role = "user"; content = "Testing the Windows install: does a chat save to the hub on this PC?" },
+              @{ role = "assistant"; content = "Yes." }) } | ConvertTo-Json -Depth 5
+          $r = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:6971/api/save-project -ContentType 'application/json' -Body $body
+          if (-not $r.ok) { throw "save failed: $($r | ConvertTo-Json -Depth 5)" }
+
+      - name: Uninstall stops the hub
+        shell: powershell
+        run: |
+          $un = Get-ChildItem "$env:LOCALAPPDATA\WolfLeader" -Filter "unins*.exe" | Select-Object -First 1
+          Start-Process -Wait $un.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES"
+          Start-Sleep 3
+          try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http://127.0.0.1:6971/health | Out-Null; throw "hub still running" } catch { if ($_.Exception.Message -eq "hub still running") { throw } }
+          if (Test-Path "$([Environment]::GetFolderPath('Startup'))\Wolf Leader hub.lnk") { throw "startup entry left behind" }
+
+      - name: Show the logs
+        if: failure()
+        shell: powershell
+        run: |
+          Get-Content "$env:LOCALAPPDATA\WolfLeader\install.log" -Tail 60 -ErrorAction SilentlyContinue
+          Get-Content "$env:LOCALAPPDATA\WolfLeader\hub\hub.log" -Tail 60 -ErrorAction SilentlyContinue
+          Get-Content "$env:LOCALAPPDATA\WolfLeader\hub\mcp.log" -Tail 30 -ErrorAction SilentlyContinue
+          Get-Content "$env:RUNNER_TEMP\setup.log" -Tail 40 -ErrorAction SilentlyContinue

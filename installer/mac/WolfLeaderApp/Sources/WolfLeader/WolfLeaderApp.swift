@@ -36,5 +36,6 @@ struct RootView: View {
         .environment(\.palette, p)
         .preferredColorScheme(themes.themeID == .system ? nil : p.scheme)
         .tint(p.accent)
+        .task { await BuiltInHub.refreshIfNeeded(config: store.config) }
     }
 }

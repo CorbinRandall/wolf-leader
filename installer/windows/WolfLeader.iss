@@ -71,7 +71,14 @@ Source: "..\PROMPT.md"; DestDir: "{app}\installer"; Flags: ignoreversion
 Source: "{#RepoDir}examples\*"; DestDir: "{app}\examples"; Excludes: "__pycache__,*.pyc"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#RepoDir}scripts\*"; DestDir: "{app}\scripts"; Excludes: "__pycache__,*.pyc"; Flags: ignoreversion recursesubdirs createallsubdirs
 
-; Hub sources (mode=new, or update on a PC that already runs a hub)
+; The built-in hub ("Just this PC"): Python, packages and search model, built by
+; installer/runtime/build_runtime.py --target windows-x86_64 before this script is compiled.
+#if DirExists(RepoDir + "dist\runtime\windows-x86_64")
+  #define BuiltInHub
+Source: "{#RepoDir}dist\runtime\windows-x86_64\*"; DestDir: "{app}\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: NeedBuiltInHub
+#endif
+
+; Hub sources for Docker (mode=new without the built-in hub, or update on a PC that runs one)
 Source: "{#RepoDir}ide_storage\*"; DestDir: "{app}\ide_storage"; Excludes: "__pycache__,*.pyc"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: NeedHubFiles
 Source: "{#RepoDir}wiki\*"; DestDir: "{app}\wiki"; Excludes: "node_modules,\.next,\out,\.source,\next-env.d.ts,*.tsbuildinfo"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: NeedHubFiles
 Source: "{#RepoDir}Dockerfile"; DestDir: "{app}"; Flags: ignoreversion; Check: NeedHubFiles
@@ -86,6 +93,8 @@ Filename: "{code:GetLogPath}"; Description: "Open the install log"; Flags: shell
 
 [UninstallDelete]
 Type: files; Name: "{app}\install-result.ini"
+Type: files; Name: "{userstartup}\Wolf Leader hub.lnk"
+Type: filesandordirs; Name: "{app}\runtime"
 
 [Code]
 const
@@ -135,9 +144,53 @@ function PrereqsOn: Boolean;  begin Result := ChoicesPage.Values[2]; end;
 function ObsidianOn: Boolean; begin Result := ChoicesPage.Values[3]; end;
 function WikiOn: Boolean;     begin Result := (GetMode = 'new') and ChoicesPage.Values[4]; end;
 
+function HasBuiltIn: Boolean;
+begin
+#ifdef BuiltInHub
+  Result := True;
+#else
+  Result := False;
+#endif
+end;
+
+{ Just this PC: the hub runs here from the built-in copy; setup answers for itself. }
+function LocalMode: Boolean;
+begin
+  Result := (GetMode = 'new') and HasBuiltIn;
+end;
+
+function NeedBuiltInHub: Boolean;
+begin
+  Result := LocalMode or ((GetMode = 'update') and DirExists(ExpandConstant('{app}\runtime')));
+end;
+
 function NeedHubFiles: Boolean;
 begin
-  Result := (GetMode = 'new') or ((GetMode = 'update') and FileExists(ExpandConstant('{app}\.env')));
+  Result := ((GetMode = 'new') and not HasBuiltIn) or ((GetMode = 'update') and FileExists(ExpandConstant('{app}\.env')));
+end;
+
+{ Stop the built-in hub so its files can be replaced or removed. }
+procedure StopBuiltInHub;
+var
+  RC: Integer;
+begin
+  if DirExists(ExpandConstant('{app}\runtime')) then
+    Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -like ''' +
+      ExpandConstant('{app}') + '\runtime\*'' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"',
+      '', SW_HIDE, ewWaitUntilTerminated, RC);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  StopBuiltInHub;
+  Result := '';
+end;
+
+function InitializeUninstall: Boolean;
+begin
+  StopBuiltInHub;
+  Result := True;
 end;
 
 function GetLogPath(Param: String): String;
@@ -582,21 +635,37 @@ begin
   ModePage := CreateCustomPage(WhatsNewPage.ID, 'Do you already have Wolf Leader?',
     'Pick what this PC should be. One machine runs the hub; every other PC connects to it.');
   Y := 0;
-  RadioConnect := NewRadio(ModePage, 'Connect this PC to an existing hub (recommended if you already have a hub)', Y);
-  Y := Y + ScaleY(28);
-  RadioNew := NewRadio(ModePage, 'New hub on this computer ' + #$2014 + ' Docker (experimental)', Y);
-  Y := Y + ScaleY(20);
-  Note := NewLabel(ModePage, 'The hub runs in Docker. An always-on box (NAS, Proxmox LXC, Linux server) is the tested setup; ' +
-                   'a hub on your desktop works but is experimental.', Y, ScaleX(18), ModePage.SurfaceWidth - ScaleX(18), ScaleY(42));
-  Note.Font.Color := clGrayText;
-  Y := Y + ScaleY(50);
-  RadioUpdate := NewRadio(ModePage, 'Update Wolf Leader files on this PC (already installed)', Y);
-  RadioConnect.Checked := True;
+  if HasBuiltIn then
+  begin
+    RadioNew := NewRadio(ModePage, 'Just this PC ' + #$2014 + ' everything runs inside Wolf Leader (most people pick this)', Y);
+    Y := Y + ScaleY(20);
+    Note := NewLabel(ModePage, 'No server and no Docker. Your AI tools save to this PC, and nothing is reachable from other computers.',
+                     Y, ScaleX(18), ModePage.SurfaceWidth - ScaleX(18), ScaleY(30));
+    Note.Font.Color := clGrayText;
+    Y := Y + ScaleY(38);
+    RadioConnect := NewRadio(ModePage, 'Connect this PC to Wolf Leader on another computer', Y);
+    Y := Y + ScaleY(28);
+    RadioUpdate := NewRadio(ModePage, 'Update Wolf Leader on this PC (already installed)', Y);
+    RadioNew.Checked := True;
+  end else
+  begin
+    RadioConnect := NewRadio(ModePage, 'Connect this PC to an existing hub (recommended if you already have a hub)', Y);
+    Y := Y + ScaleY(28);
+    RadioNew := NewRadio(ModePage, 'New hub on this computer ' + #$2014 + ' Docker (experimental)', Y);
+    Y := Y + ScaleY(20);
+    Note := NewLabel(ModePage, 'The hub runs in Docker. An always-on box (NAS, Proxmox LXC, Linux server) is the tested setup; ' +
+                     'a hub on your desktop works but is experimental.', Y, ScaleX(18), ModePage.SurfaceWidth - ScaleX(18), ScaleY(42));
+    Note.Font.Color := clGrayText;
+    Y := Y + ScaleY(50);
+    RadioUpdate := NewRadio(ModePage, 'Update Wolf Leader files on this PC (already installed)', Y);
+    RadioConnect.Checked := True;
+  end;
 end;
 
 procedure CreateChoicesPage;
 var
   i: Integer;
+  Picked: String;
 begin
   ChoicesPage := CreateInputOptionPage(ModePage.ID, 'What do you want?', 'Tick what setup should do on this PC.',
     'You can run setup again later to add anything you skip.', False, False);
@@ -606,6 +675,17 @@ begin
   ChoicesPage.Add('Install Obsidian ' + #$2014 + ' recommended');
   ChoicesPage.Add('Build the wiki ' + #$2014 + ' highly recommended (new hub only)');
   for i := 0 to 4 do ChoicesPage.Values[i] := True;
+  { /WLCHOICES=client,shares,prereqs,obsidian,wiki picks them for a silent install (tests, admins). }
+  Picked := LowerCase(ExpandConstant('{param:WLCHOICES|}'));
+  if Picked <> '' then
+  begin
+    Picked := ',' + Picked + ',';
+    ChoicesPage.Values[0] := Pos(',client,', Picked) > 0;
+    ChoicesPage.Values[1] := Pos(',shares,', Picked) > 0;
+    ChoicesPage.Values[2] := Pos(',prereqs,', Picked) > 0;
+    ChoicesPage.Values[3] := Pos(',obsidian,', Picked) > 0;
+    ChoicesPage.Values[4] := Pos(',wiki,', Picked) > 0;
+  end;
   WikiWasEnabled := True;
 end;
 
@@ -735,7 +815,7 @@ var
 begin
   if CurPageID = ChoicesPage.ID then
   begin
-    if GetMode = 'new' then
+    if (GetMode = 'new') and not HasBuiltIn then
     begin
       if not WikiWasEnabled then ChoicesPage.Values[4] := True;
       ChoicesPage.CheckListBox.ItemEnabled[4] := True;
@@ -744,7 +824,7 @@ begin
       ChoicesPage.Values[4] := False;
       ChoicesPage.CheckListBox.ItemEnabled[4] := False;
     end;
-    WikiWasEnabled := GetMode = 'new';
+    WikiWasEnabled := (GetMode = 'new') and not HasBuiltIn;
   end
   else if CurPageID = AgentPage.ID then
     PromptMemo.Text := FilledPrompt
@@ -778,7 +858,9 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
-  if PageID = PwPage.ID then Result := not (SharesOn and AnyAsk);
+  if PageID = PwPage.ID then Result := LocalMode or not (SharesOn and AnyAsk);
+  { Just this PC: nothing to ask an AI agent; setup knows the answers. }
+  if PageID = AgentPage.ID then Result := LocalMode;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -844,7 +926,15 @@ var
   i: Integer;
 begin
   BackupDir := ExpandConstant('{localappdata}\WolfLeader\backup-') + GetDateTimeString('yyyymmdd-hhnn', #0, #0);
-  if GetMode = 'new' then M := 'New hub on this computer (Docker, experimental)'
+  if LocalMode then
+  begin
+    M := 'Just this PC (Wolf Leader runs here, built in)';
+    HubUrl := 'http://127.0.0.1:6971';
+    McpUrl := 'http://127.0.0.1:6972/mcp';
+    DeviceName := GetComputerNameString;
+    TimeZone := 'this PC''s';
+  end
+  else if GetMode = 'new' then M := 'New hub on this computer (Docker, experimental)'
   else if GetMode = 'update' then M := 'Update Wolf Leader files on this PC'
   else M := 'Connect this PC to an existing hub';
   S := 'Mode:' + NewLine + Space + M + NewLine + NewLine;
@@ -855,7 +945,9 @@ begin
        Space + YesNo(SharesOn) + 'Map network shares' + NewLine +
        Space + YesNo(PrereqsOn) + 'Install Git + Python if missing' + NewLine +
        Space + YesNo(ObsidianOn) + 'Install Obsidian' + NewLine;
-  if GetMode = 'new' then
+  if LocalMode then
+    S := S + Space + '[x] Start the Wolf Leader hub on this PC (and at every sign-in)' + NewLine
+  else if GetMode = 'new' then
     S := S + Space + YesNo(WikiOn) + 'Build the wiki' + NewLine + Space + '[x] Start the hub with Docker' + NewLine;
   S := S + Space + '[x] Set your git identity and check the hub' + NewLine + NewLine;
   if SharesOn then
@@ -925,7 +1017,9 @@ begin
       SetEnvironmentVariable('WL_SHARE' + IntToStr(i + 1) + '_PASSWORD', PwEdits[i].Text);
 
   Params := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\installer\windows\install.ps1') + '"' +
-            ' -Config "' + AnswerIni + '" -Mode ' + GetMode;
+            ' -Mode ' + GetMode;
+  if LocalMode then Params := Params + ' -Config auto'
+  else Params := Params + ' -Config "' + AnswerIni + '"';
   if ClientOn then Params := Params + ' -Client';
   if SharesOn then Params := Params + ' -Shares';
   if PrereqsOn then Params := Params + ' -Prereqs';

@@ -49,8 +49,19 @@ def local_env(data: Path, port: int, mcp_port: int) -> dict[str, str]:
         "IDE_STORAGE_MCP_URL": f"http://127.0.0.1:{mcp_port}/mcp",
         "IDE_STORAGE_HOST_LABEL": socket.gethostname().split(".")[0] or "this-computer",
         "WOLF_LOCAL_HUB": "1",
+        "WOLF_WIKI_ENABLED": "0",
     }
     return {k: os.environ.get(k) or v for k, v in values.items()}
+
+
+def seed_models(dest: Path) -> None:
+    """Copy the search model that came with the installer, so search works offline at once."""
+    source = os.environ.get("WOLF_RUNTIME_MODELS")
+    if not source or not Path(source).is_dir() or (dest.is_dir() and any(dest.iterdir())):
+        return
+    import shutil
+
+    shutil.copytree(source, dest, dirs_exist_ok=True)
 
 
 def port_in_use(port: int) -> bool:
@@ -78,10 +89,17 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Port {port} is already in use: is a Wolf Leader hub already running?", file=sys.stderr)
             return 3
     data.mkdir(parents=True, exist_ok=True)
+    if sys.stdout is None or sys.stderr is None:  # pythonw on Windows has no console to write to
+        log = open(data / "hub.log", "a", buffering=1, encoding="utf-8")
+        sys.stdout = sys.stdout or log
+        sys.stderr = sys.stderr or log
+    seed_models(Path(env["FASTEMBED_CACHE_PATH"]))
     os.environ.update(env)
 
     # The MCP server runs beside the API as its own process, as in the server image.
-    mcp = subprocess.Popen([sys.executable, "-m", "ide_storage.mcp_standalone"], env=dict(os.environ))
+    mcp_log = open(data / "mcp.log", "a", encoding="utf-8")
+    mcp = subprocess.Popen([sys.executable, "-m", "ide_storage.mcp_standalone"], env=dict(os.environ),
+                           stdout=mcp_log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
 
     def stop(*_):
         mcp.terminate()

@@ -2,11 +2,15 @@
 # Build the Wolf Leader Mac app and its drag-to-install disk image. Run on a Mac with Xcode or the
 # Command Line Tools, from anywhere:
 #
-#   bash installer/mac/build-app.sh [version] [--app-only]
+#   bash installer/mac/build-app.sh [version] [--app-only] [--no-hub]
 #
 # Produces:
 #   dist/Wolf Leader.app            SwiftUI app (universal when possible) with the setup payload
 #   dist/WolfLeader-<ver>.dmg       classic "drag Wolf Leader to Applications" image (skipped with --app-only)
+#
+# The app carries the whole hub for "Just this Mac" (Contents/Resources/hub: Python, packages and
+# search model for Apple silicon and Intel, built by installer/runtime/build_runtime.py and kept in
+# dist/runtime). --no-hub leaves it out for a quick build.
 #
 # The app is ad-hoc signed only (no Apple Developer ID), so the first launch is blocked by Gatekeeper:
 #   macOS 14: right-click the app > Open > Open.
@@ -28,10 +32,12 @@ fi
 VERSION=""
 APP_ONLY=0
 DEV=0
+NO_HUB=0
 for arg in "$@"; do
   case "$arg" in
     --app-only) APP_ONLY=1 ;;
     --dev) DEV=1 ;;
+    --no-hub) NO_HUB=1 ;;
     -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "Unknown option: $arg" >&2; exit 2 ;;
     *) VERSION=$arg ;;
@@ -226,6 +232,31 @@ done
 find "$PAY" -type f \( -name '*.sh' -o -name '*.py' -o -name '*.command' \) -print0 | xargs -0 perl -pi -e 's/\r$//'
 find "$PAY" -type f -name '*.sh' -print0 | xargs -0 chmod +x
 echo "  $(du -sh "$PAY" | cut -f1) in Contents/Resources/payload"
+
+# --- 4b. the built-in hub ("Just this Mac") ------------------------------------------------------
+if [ "$NO_HUB" = 0 ]; then
+  echo "==> Built-in hub"
+  HUB="$RES/hub"
+  mkdir -p "$HUB"
+  # Both processors by default; a test build can set WL_HUB_TARGETS=mac-arm64.
+  for t in ${WL_HUB_TARGETS:-mac-arm64 mac-x86_64}; do
+    RT="dist/runtime/$t"
+    if [ ! -x "$RT/run-hub" ]; then
+      python3 installer/runtime/build_runtime.py --target "$t" \
+        $( [ -d dist/runtime/mac-arm64/models ] && printf -- '--models-from dist/runtime/mac-arm64/models' )
+    fi
+    rsync -a --exclude models --exclude app "$RT/" "$HUB/$t/"
+    # The hub's own code always comes from this checkout, so the app and hub match.
+    mkdir -p "$HUB/$t/app"
+    rsync -a "${EXCL[@]}" ide_storage "$HUB/$t/app/"
+    mkdir -p "$HUB/$t/app/examples/shared"
+    rsync -a "${EXCL[@]}" examples/shared/skills "$HUB/$t/app/examples/shared/"
+    printf '%s\n' "$VERSION" >"$HUB/$t/VERSION"
+  done
+  first=$(printf '%s\n' ${WL_HUB_TARGETS:-mac-arm64} | head -1)
+  rsync -a "dist/runtime/$first/models/" "$HUB/models/"
+  echo "  $(du -sh "$HUB" | cut -f1) in Contents/Resources/hub"
+fi
 
 # --- 5. sign (ad-hoc) ---------------------------------------------------------------------------
 echo "==> Signing (ad-hoc)"

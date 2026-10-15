@@ -163,7 +163,8 @@ final class OnboardingModel: ObservableObject {
     var steps: [SetupStep] {
         var s: [SetupStep] = [.welcome, .path]
         if path == .newOnServer { s.append(.server) }
-        s += [.toggles, .askAI]
+        // Just this Mac: setup knows everything the AI would report, so it answers for itself.
+        s += path == .newOnThisMac ? [.toggles] : [.toggles, .askAI]
         if original != nil { s.append(.upgrade) }
         s += [.passwords, .git, .review, .install]
         return s
@@ -199,7 +200,7 @@ final class OnboardingModel: ObservableObject {
     var askShares: [SetupShare] { shares.filter { $0.askPassword && !$0.isGuest } }
 
     func isSkipped(_ s: SetupStep) -> Bool {
-        s == .passwords && isIniValid && askShares.isEmpty
+        s == .passwords && (path == .newOnThisMac || (isIniValid && askShares.isEmpty))
     }
 
     var isIniValid: Bool {
@@ -271,7 +272,6 @@ final class OnboardingModel: ObservableObject {
         if toggles.shares { t.append("shares") }
         if toggles.prereqs { t.append("prereqs") }
         if toggles.obsidian { t.append("obsidian") }
-        if toggles.wiki && path == .newOnThisMac { t.append("wiki") }
         return t.joined(separator: ",")
     }
 
@@ -432,6 +432,13 @@ final class OnboardingModel: ObservableObject {
         let ini = dir.appendingPathComponent("wolf-leader-setup.ini")
         let result = dir.appendingPathComponent("result.txt")
         resultFile = result
+        if path == .newOnThisMac, let store {
+            // The hub this Mac will run. install.sh writes the matching answers itself (--ini auto).
+            store.config.setupPath = .newOnThisMac
+            store.config.hubURL = "http://127.0.0.1:6971"
+            store.config.mcpURL = "http://127.0.0.1:6972/mcp"
+            store.config.shares = []
+        }
         let normalized = iniText.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
         guard fm.createFile(atPath: ini.path, contents: Data(normalized.utf8), attributes: [.posixPermissions: 0o600]),
               fm.createFile(atPath: result.path, contents: Data(), attributes: [.posixPermissions: 0o600])
@@ -458,7 +465,7 @@ final class OnboardingModel: ObservableObject {
         }
 
         let args = [
-            "--ini", ini.path,
+            "--ini", path == .newOnThisMac ? "auto" : ini.path,
             "--mode", mode,
             "--toggles", togglesCSV,
             "--git-name", gitName.trimmingCharacters(in: .whitespaces),
@@ -642,6 +649,17 @@ struct GitIdentity: Sendable {
 }
 
 enum SetupSystem {
+    /// True when this app carries the hub for this Mac's processor (Resources/hub/<target>).
+    static var builtInHub: Bool {
+        #if arch(arm64)
+        let target = "mac-arm64"
+        #else
+        let target = "mac-x86_64"
+        #endif
+        guard let res = Bundle.main.resourceURL else { return false }
+        return FileManager.default.isExecutableFile(atPath: res.appendingPathComponent("hub/\(target)/run-hub").path)
+    }
+
     static var dockerFound: Bool {
         let fm = FileManager.default
         let home = NSHomeDirectory()

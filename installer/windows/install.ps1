@@ -19,6 +19,7 @@
 #>
 [CmdletBinding()]
 param(
+    # A file path, or "auto": setup answers for itself (a hub on this PC needs no AI agent).
     [Parameter(Mandatory = $true)][string]$Config,
     [ValidateSet('new', 'connect', 'update')][string]$Mode = 'connect',
     [switch]$Client,
@@ -356,6 +357,7 @@ function Get-PlannedTargets($Answer) {
         }
     }
     $t.Add((Join-Path $env:USERPROFILE '.gitconfig'))
+    $t.Add((Join-Path ([Environment]::GetFolderPath('Startup')) 'Wolf Leader hub.lnk'))
     if ($Mode -eq 'new' -or $Mode -eq 'update') { $t.Add((Join-Path $Root '.env')) }
     return @($t | Sort-Object -Unique)
 }
@@ -678,6 +680,80 @@ function Invoke-NewHub($Answer) {
     return (Invoke-Compose)
 }
 
+# ---------------------------------------------------------------------------------------------
+# Built-in hub: the whole hub (Python, packages, search model) installed in {app}\runtime
+# ---------------------------------------------------------------------------------------------
+
+$RuntimeDir = Join-Path $Root 'runtime'
+$HubLauncher = Join-Path $RuntimeDir 'app\run_hub.pyw'
+$HubData = Join-Path $DataDir 'hub'
+$HubShortcut = Join-Path ([Environment]::GetFolderPath('Startup')) 'Wolf Leader hub.lnk'
+
+function Test-BuiltInHub { return (Test-Path -LiteralPath $HubLauncher) }
+
+function Stop-BuiltInHub {
+    $prefix = $RuntimeDir.TrimEnd('\') + '\'
+    foreach ($p in @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) })) {
+        try { Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop } catch { }
+    }
+}
+
+function Invoke-LocalHub {
+    Step 70 'Starting the Wolf Leader hub on this PC'
+    $pythonw = Join-Path $RuntimeDir 'python\pythonw.exe'
+    if (-not (Test-Path -LiteralPath $pythonw)) { Fail "the built-in hub is incomplete ($pythonw is missing); run setup again"; return $false }
+    $hubArgs = "`"$HubLauncher`" --data `"$HubData`""
+    if ($DryRun) { Plan "startup shortcut $HubShortcut -> $pythonw $hubArgs"; Plan "start $pythonw $hubArgs"; return $true }
+    Stop-BuiltInHub
+    New-Item -ItemType Directory -Force -Path $HubData | Out-Null
+    # Starts again at every sign-in, with no window.
+    $shell = New-Object -ComObject WScript.Shell
+    $lnk = $shell.CreateShortcut($HubShortcut)
+    $lnk.TargetPath = $pythonw
+    $lnk.Arguments = $hubArgs
+    $lnk.WorkingDirectory = $RuntimeDir
+    $lnk.WindowStyle = 7
+    $lnk.Description = 'Wolf Leader hub (this PC)'
+    $lnk.Save()
+    Ok "the hub starts at sign-in ($HubShortcut)"
+    Start-Process -FilePath $pythonw -ArgumentList $hubArgs -WorkingDirectory $RuntimeDir -WindowStyle Hidden
+    Ok "hub started; your data is in $HubData (reachable only from this PC)"
+    return $true
+}
+
+function New-AutoAnswers {
+    $zones = @{
+        'Eastern Standard Time' = 'America/New_York'; 'Central Standard Time' = 'America/Chicago'
+        'Mountain Standard Time' = 'America/Denver'; 'US Mountain Standard Time' = 'America/Phoenix'
+        'Pacific Standard Time' = 'America/Los_Angeles'; 'Alaskan Standard Time' = 'America/Anchorage'
+        'Hawaiian Standard Time' = 'Pacific/Honolulu'; 'GMT Standard Time' = 'Europe/London'
+        'W. Europe Standard Time' = 'Europe/Berlin'; 'Romance Standard Time' = 'Europe/Paris'
+        'Central Europe Standard Time' = 'Europe/Budapest'; 'AUS Eastern Standard Time' = 'Australia/Sydney'
+        'Tokyo Standard Time' = 'Asia/Tokyo'; 'India Standard Time' = 'Asia/Kolkata'; 'UTC' = 'UTC'
+    }
+    $tz = $zones[[TimeZoneInfo]::Local.Id]
+    if (-not $tz) { $tz = 'UTC' }
+    $device = ($env:COMPUTERNAME -replace '[^A-Za-z0-9-]', '-')
+    if ($device.Length -gt 32) { $device = $device.Substring(0, 32) }
+    if (-not $device) { $device = 'this-pc' }
+    function yn([bool]$b) { if ($b) { 'yes' } else { 'no' } }
+    $cursor = (Test-Path (Join-Path $env:USERPROFILE '.cursor')) -or (Test-Path (Join-Path $env:LOCALAPPDATA 'Programs\cursor'))
+    $claude = (Test-Path (Join-Path $env:USERPROFILE '.claude')) -or (Test-Command 'claude')
+    $wolfClient = (Test-Path (Join-Path $env:USERPROFILE '.cursor\skills\wolfhowl')) -or (Test-Path (Join-Path $env:USERPROFILE '.cursor\rules\wolf-leader-hub.mdc'))
+    $text = @(
+        '[wolf]', 'format=1', 'os=windows', 'hub_url=http://127.0.0.1:6971', 'mcp_url=http://127.0.0.1:6972/mcp',
+        "timezone=$tz", "device_name=$device",
+        '[detected]', "git=$(yn (Test-Command 'git'))", "python=$(yn ((Test-Command 'python') -or (Test-Command 'py')))",
+        'python_version=NONE', "docker=$(yn (Test-Command 'docker'))", "obsidian=$(yn ([bool](Find-Obsidian)))",
+        "cursor=$(yn $cursor)", "claude_code=$(yn $claude)", "wolf_client=$(yn $wolfClient)",
+        '[backup]', 'done=no', 'path=NONE', 'files=0'
+    ) -join "`r`n"
+    $path = Join-Path $DataDir 'auto-answers.ini'
+    New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
+    [IO.File]::WriteAllText($path, $text + "`r`n", (New-Object Text.UTF8Encoding($false)))
+    return $path
+}
+
 function Invoke-UpdateHub {
     if (-not (Test-Path -LiteralPath (Join-Path $Root '.env'))) { return $false }
     Step 70 'Rebuilding the hub on this PC with the updated files'
@@ -752,6 +828,10 @@ Say "  log=$LogFile"
 Step 2 'Reading the answer file'
 
 try {
+    if ($Config -eq 'auto') {
+        $Config = New-AutoAnswers
+        Ok 'answers filled in by setup (hub on this PC)'
+    }
     $answer = Read-AnswerFile $Config
     Test-AnswerFile $answer
 } catch {
@@ -780,8 +860,12 @@ try {
     if ($Client) { Invoke-Client $answer } else { Skip 'Cursor / Claude Code client (not selected)' }
     if ($Obsidian) { Invoke-Obsidian $answer } else { Skip 'Obsidian (not selected)' }
 
-    if ($Mode -eq 'new') {
+    if ($Mode -eq 'new' -and (Test-BuiltInHub)) {
+        if (Invoke-LocalHub) { $hubWait = 180 }
+    } elseif ($Mode -eq 'new') {
         if (Invoke-NewHub $answer) { $hubWait = 600 }
+    } elseif ($Mode -eq 'update' -and (Test-BuiltInHub) -and (Test-Path -LiteralPath $HubShortcut)) {
+        if (Invoke-LocalHub) { $hubWait = 180 }
     } elseif ($Mode -eq 'update') {
         if (Invoke-UpdateHub) { $hubWait = 600 }
     }

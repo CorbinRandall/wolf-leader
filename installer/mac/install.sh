@@ -1,6 +1,7 @@
 #!/bin/bash
-# Wolf Leader for macOS: does the actual install. The Wolf Leader app's first-launch setup collects
-# the answers and calls this; it can also be run by hand. Contract: installer/CONFIG.md.
+# Wolf Leader for macOS and Linux: does the actual install. The Wolf Leader app's first-launch
+# setup (Mac) or installer/linux/wolf-leader-setup.sh (Linux) collects the answers and calls this;
+# it can also be run by hand. Contract: installer/CONFIG.md.
 # Each phase starts with a "==> <Step name>" line; the app turns those into its live checklist.
 #
 #   install.sh --ini wolf-leader-setup.ini --mode new|connect|update \
@@ -62,18 +63,32 @@ case "$MODE" in new|connect|update) ;; *) echo "--mode must be new, connect or u
 [ -n "$INI" ] && [ -f "$INI" ] || { echo "--ini FILE is required (wolf-leader-setup.ini)" >&2; exit 2; }
 
 IS_MAC=0
-[ "$(uname -s)" = Darwin ] && IS_MAC=1
-if [ "$IS_MAC" = 0 ] && [ "$DRY" = 0 ]; then
-  echo "This installer is for macOS. Use --dry-run to preview the steps on another system." >&2
+IS_LINUX=0
+case "$(uname -s)" in
+  Darwin) IS_MAC=1; PLATFORM=mac; OS_NAME=macOS; THIS="this Mac" ;;
+  Linux) IS_LINUX=1; PLATFORM=linux; OS_NAME=Linux; THIS="this computer" ;;
+  *) PLATFORM=mac; OS_NAME=macOS; THIS="this computer" ;;
+esac
+if [ "$IS_MAC" = 0 ] && [ "$IS_LINUX" = 0 ] && [ "$DRY" = 0 ]; then
+  echo "This installer is for macOS and Linux. Use --dry-run to preview the steps on another system." >&2
   exit 2
 fi
+
+# Open a URL or file the way this desktop does.
+open_url() { if [ "$IS_LINUX" = 1 ]; then xdg-open "$1" >/dev/null 2>&1; else open "$1"; fi; }
 
 # Apps launched from Finder get a bare PATH; Homebrew and Docker Desktop live outside it.
 PATH="/opt/homebrew/bin:/usr/local/bin:/Applications/Docker.app/Contents/Resources/bin:$PATH"
 export PATH
 export HOMEBREW_NO_ENV_HINTS=1 NONINTERACTIVE=1
 
-LOG_DIR="$HOME/Library/Logs/WolfLeader"
+if [ "$IS_LINUX" = 1 ]; then
+  LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/wolf-leader"
+  DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}/wolf-leader"
+else
+  LOG_DIR="$HOME/Library/Logs/WolfLeader"
+  DATA_HOME="$HOME/Library/Application Support/WolfLeader"
+fi
 LOG="$LOG_DIR/install.log"
 mkdir -p "$LOG_DIR"
 exec > >(tee -a "$LOG") 2>&1
@@ -197,14 +212,14 @@ has_toggle() {
 }
 
 # --- read the answer file -------------------------------------------------------------------
-say "Wolf Leader macOS install  $(date '+%H:%M %m/%d/%Y')$( [ "$DRY" = 1 ] && printf '  (DRY RUN: nothing is changed)')"
+say "Wolf Leader $OS_NAME install  $(date '+%H:%M %m/%d/%Y')$( [ "$DRY" = 1 ] && printf '  (DRY RUN: nothing is changed)')"
 say "  source:  $ROOT"
 say "  mode:    $MODE"
 say "  toggles: ${TOGGLES:-none}"
 say "  log:     $LOG"
 
 wl_ini_extract "$INI" >"$WORK/answers.ini"
-if ! wl_ini_parse "$WORK/answers.ini" mac >"$WORK/cfg"; then
+if ! wl_ini_parse "$WORK/answers.ini" "$PLATFORM" >"$WORK/cfg"; then
   say ""
   say "The answer file is not valid:"
   sed 's/^/  /' "$WORK/cfg"
@@ -268,7 +283,9 @@ snapshot_targets() {
   local d f
   for f in .cursor/mcp.json .cursor/AGENTS.md .cursor/wolf-leader.env .cursor/skills/save-new \
     .cursor/skills/save .cursor/skills/new .claude/skills/save-new .claude/skills/save \
-    .claude/skills/new .gitconfig; do
+    .claude/skills/new .claude/settings.json .claude/hooks/wolf-leader-save.sh \
+    .claude/hooks/wolf-leader-autosave.py .claude/wolf-leader.env .gitconfig \
+    .local/share/applications/wolf-leader.desktop; do
     printf '%s\n' "$HOME/$f"
   done
   for f in "$ROOT"/examples/cursor/rules/*.mdc; do
@@ -282,7 +299,7 @@ snapshot_targets() {
 }
 
 if [ -z "$BACKUP_DIR" ]; then
-  BACKUP_DIR="$HOME/Library/Application Support/WolfLeader/backup-$(date +%Y%m%d-%H%M)"
+  BACKUP_DIR="$DATA_HOME/backup-$(date +%Y%m%d-%H%M)"
   _n=2
   _base=$BACKUP_DIR
   while [ -e "$BACKUP_DIR" ]; do BACKUP_DIR="$_base-$_n"; _n=$((_n + 1)); done
@@ -337,7 +354,7 @@ case "$AGENT_BACKUP" in "~/"*) AGENT_BACKUP="$HOME/${AGENT_BACKUP#\~/}" ;; esac
 if [ "$(wl_cfg backup done)" != yes ]; then
   note "Your agent did not make its own backup (done=no); the installer's undo point above covers the files Setup changes."
 elif [ ! -d "$AGENT_BACKUP" ]; then
-  note "Your agent reported a backup at $AGENT_BACKUP but that folder was not found on this Mac."
+  note "Your agent reported a backup at $AGENT_BACKUP but that folder was not found on $THIS."
 else
   ok "agent backup found: $AGENT_BACKUP ($(wl_cfg backup files) files)"
 fi
@@ -346,6 +363,11 @@ fi
 COMPOSE=""
 if [ "$MODE" = new ]; then
   step "Docker (required for a new hub)"
+  if [ "$IS_LINUX" = 1 ] && ! has docker; then
+    fatal "Docker is not installed. Install Docker Engine (https://docs.docker.com/engine/install/), then run Wolf Leader setup again."
+  elif [ "$IS_LINUX" = 1 ] && [ "$DRY" = 0 ] && ! docker info >/dev/null 2>&1; then
+    fatal "Docker is installed but this user can't use it. Start it (sudo systemctl start docker) and add yourself to the docker group (sudo usermod -aG docker \$USER, then log out and back in), then run Wolf Leader setup again."
+  fi
   if ! has docker && [ -d /Applications/Docker.app ]; then
     run open -a Docker
     [ "$DRY" = 1 ] || for _ in $(seq 1 30); do has docker && break; sleep 2; done
@@ -377,12 +399,39 @@ if [ "$MODE" = new ]; then
   [ -n "$COMPOSE" ] || COMPOSE="docker compose"
 fi
 
+# Linux: install git and python3 with the system's package manager. sudo asks for the password in
+# the terminal; without a terminal, the exact command is printed instead.
+linux_prereqs() {
+  local need="" pm=""
+  if git_usable; then ok "git: $(git --version 2>/dev/null)"; else need="git"; fi
+  if PY=$(real_python); then ok "python: $("$PY" --version 2>&1)"; else need="$need python3"; fi
+  [ -n "$need" ] || return 0
+  if has apt-get; then pm="apt-get install -y"
+  elif has dnf; then pm="dnf install -y"
+  elif has pacman; then pm="pacman -S --noconfirm"
+  elif has zypper; then pm="zypper install -y"
+  fi
+  if [ -z "$pm" ]; then
+    warn "install $need with your package manager, then run Wolf Leader setup again"
+  elif [ "$(id -u)" = 0 ]; then
+    # shellcheck disable=SC2086
+    run $pm $need || warn "could not install $need"
+  elif sudo -n true 2>/dev/null || [ -t 0 ]; then
+    # shellcheck disable=SC2086
+    run sudo $pm $need || warn "could not install $need; run: sudo $pm $need"
+  else
+    warn "git or python3 is missing. Run: sudo $pm $need"
+  fi
+}
+
 # --- prereqs: git (Command Line Tools) + python ----------------------------------------------
 if has_toggle prereqs; then
   step "Git and Python"
-  if git_usable; then
+  if [ "$IS_LINUX" = 1 ]; then
+    linux_prereqs
+  elif git_usable; then
     ok "git: $(git --version 2>/dev/null)"
-  elif [ "$IS_MAC" = 1 ] && ! clt_ok || [ "$IS_MAC" = 0 ]; then
+  elif ! clt_ok; then
     run xcode-select --install || true
     warn "Apple's Command Line Tools installer was opened (it provides git). Click Install, wait for it to finish, then run Wolf Leader setup again so git steps complete."
   elif has brew; then
@@ -390,12 +439,14 @@ if has_toggle prereqs; then
   else
     warn "git is missing and could not be installed automatically"
   fi
-  if PY=$(real_python); then
+  if [ "$IS_LINUX" = 1 ]; then
+    :
+  elif PY=$(real_python); then
     ok "python: $("$PY" --version 2>&1)"
   elif has brew; then
     run brew install python@3.13 || warn "brew install python@3.13 failed; install Python from https://www.python.org/downloads/macos/"
   else
-    run open "https://www.python.org/downloads/macos/" || true
+    run open_url "https://www.python.org/downloads/macos/" || true
     warn "Python 3 is missing. The python.org download page was opened: install it, then the Wolf Leader skills can upload full transcripts."
   fi
 else
@@ -488,8 +539,63 @@ AS
   fi
 }
 
+gvfs_mount_point() {
+  local host share d
+  host=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
+  share=$(printf '%s' "$2" | tr 'A-Z' 'a-z')
+  for d in "/run/user/$(id -u)/gvfs"/smb-share:*; do
+    [ -d "$d" ] || continue
+    case "$(basename "$d" | tr 'A-Z' 'a-z')" in *"server=$host"*"share=$share"*) printf '%s' "$d"; return 0 ;; esac
+  done
+  return 1
+}
+
+linux_shares() {
+  local s url user role rest host share mp pwvar autostart
+  if ! has gio; then
+    warn "network shares need GNOME's gio (package gvfs-backends or gvfs-smb). Or mount them yourself and point Wolf Leader at the folder."
+    return 0
+  fi
+  autostart="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
+  for s in $SHARES; do
+    url=$(wl_cfg "$s" smb_url); user=$(wl_cfg "$s" user); role=$(wl_cfg "$s" role)
+    rest=${url#smb://}; host=${rest%%/*}; host=${host#*@}; share=${rest#*/}; share=${share%/}
+    share=$(printf '%s' "$share" | sed 's/%20/ /g')
+    say "  [$s] smb://$host/$share  user=$user  role=$role"
+    mp=$(gvfs_mount_point "$host" "$share" || true)
+    if [ -n "$mp" ]; then
+      ok "already mounted at $mp"
+    elif [ "$DRY" = 1 ]; then
+      say "  [dry-run] gio mount smb://$host/$share (password sent on stdin, never shown)"
+      mp="/run/user/$(id -u)/gvfs/smb-share:server=$host,share=$share"
+    else
+      pwvar="SECRET_$s"
+      # gio asks for user, domain and password; answer on stdin so nothing lands in argv or the log.
+      if [ "$user" = NONE ]; then
+        printf '\n\n\n' | gio mount -a "smb://$host/$share" >/dev/null 2>&1 || true
+      else
+        printf '%s\nWORKGROUP\n%s\n' "$user" "${!pwvar-}" | gio mount "smb://$host/$share" >/dev/null 2>&1 || true
+      fi
+      unset "$pwvar"
+      mp=$(gvfs_mount_point "$host" "$share" || true)
+      if [ -n "$mp" ]; then ok "mounted at $mp"; else warn "smb://$host/$share did not mount. Open it once in your file manager and tick 'Remember password'."; fi
+    fi
+    write_file "$autostart/wolf-leader-$s.desktop" 644 <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=Wolf Leader share $s
+Exec=gio mount smb://$host/$share
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+DESKTOP
+    if [ -n "$mp" ] && [ "$role" = wolf ]; then WOLF_MOUNT=$mp; fi
+  done
+}
+
 step "Network shares"
-if ! has_toggle shares; then
+if [ "$IS_LINUX" = 1 ] && has_toggle shares && [ -n "$SHARES" ]; then
+  linux_shares
+elif ! has_toggle shares; then
   skip "not selected"
 elif [ -z "$SHARES" ]; then
   skip "the answer file lists no shares"
@@ -529,7 +635,7 @@ else
     if [ -n "$mp" ]; then
       ok "already mounted at $mp"
     else
-      run open "$mount_url" || warn "could not open $mount_url"
+      run open_url "$mount_url" || warn "could not open $mount_url"
       if [ "$DRY" = 1 ]; then
         mp="/Volumes/$share_plain"
       else
@@ -623,6 +729,50 @@ install_skills() {
   done
 }
 
+# Claude Code saves every chat to the hub when a turn ends, in the background (never blocks).
+install_claude_hook() {
+  local dir="$HOME/.claude" py
+  run mkdir -p "$dir/hooks"
+  run cp "$ROOT/examples/cursor/hooks/wolf-leader-save.sh" "$ROOT/examples/cursor/hooks/wolf-leader-autosave.py" "$dir/hooks/"
+  run chmod +x "$dir/hooks/wolf-leader-save.sh" "$dir/hooks/wolf-leader-autosave.py"
+  write_file "$dir/wolf-leader.env" 644 <<ENV
+# Wolf Leader hub URLs (written by Wolf Leader Setup). Edit if your hub moves.
+WOLF_LEADER_API=$HUB_URL
+WOLF_LEADER_MCP=$MCP_URL
+ENV
+  if [ "$DRY" = 1 ]; then
+    say "  [dry-run] add Stop and SessionEnd hooks ($dir/hooks/wolf-leader-save.sh) to $dir/settings.json"
+    return 0
+  fi
+  if ! py=$(real_python); then
+    warn "Python is needed to add the Claude Code save hook; run setup again after installing it"
+    return 0
+  fi
+  if WL_HOOK="$dir/hooks/wolf-leader-save.sh" "$py" - "$dir/settings.json" <<'PY'
+import json, os, sys
+path, cmd = sys.argv[1], os.environ["WL_HOOK"]
+data = {}
+if os.path.exists(path):
+    text = open(path, encoding="utf-8").read()
+    data = json.loads(text) if text.strip() else {}
+hooks = data.setdefault("hooks", {})
+for event in ("Stop", "SessionEnd"):
+    entries = hooks.setdefault(event, [])
+    if not any(h.get("command") == cmd for e in entries for h in e.get("hooks", [])):
+        entries.append({"hooks": [{"type": "command", "command": cmd, "timeout": 10}]})
+tmp = path + ".wolf-tmp"
+with open(tmp, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+os.replace(tmp, path)
+PY
+  then
+    ok "Claude Code saves each chat to Wolf Leader in the background"
+  else
+    warn "$dir/settings.json is not plain JSON, so the save hook was not added"
+  fi
+}
+
 step "Cursor / Claude Code client"
 if ! has_toggle client; then
   skip "not selected"
@@ -643,6 +793,7 @@ else
     fi
     if [ "$(wl_cfg detected claude_code)" = yes ]; then
       install_skills "$SKILLS_SRC" "$HOME/.claude/skills"
+      install_claude_hook
     else
       skip "Claude Code skills (answer file says claude_code=no)"
     fi
@@ -652,7 +803,24 @@ WOLF_LEADER_API=$HUB_URL
 WOLF_LEADER_MCP=$MCP_URL
 EOF
     merge_mcp_json "$CURSOR_DIR/mcp.json" "$MCP_URL" || true
-    skip "hooks (not installed: the rule + MCP do the saving)"
+    if [ "$IS_LINUX" = 1 ]; then
+      APPS="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+      ICONS="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/256x256/apps"
+      if [ -f "$ROOT/installer/assets/app-icon.png" ]; then
+        run mkdir -p "$ICONS"
+        run cp "$ROOT/installer/assets/app-icon.png" "$ICONS/wolf-leader.png"
+      fi
+      write_file "$APPS/wolf-leader.desktop" 644 <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=Wolf Leader
+Comment=Your projects and AI history
+Exec=xdg-open $HUB_URL
+Icon=wolf-leader
+Terminal=false
+Categories=Development;Office;
+DESKTOP
+    fi
     note "Restart Cursor (and Claude Code) so the Wolf Leader rule, skills and MCP server load."
   fi
 fi
@@ -669,12 +837,20 @@ fi
 if ! has_toggle obsidian; then
   skip "not selected"
 else
-  if [ -d /Applications/Obsidian.app ] || [ -d "$HOME/Applications/Obsidian.app" ]; then
+  if [ "$IS_LINUX" = 1 ]; then
+    if has obsidian || { has flatpak && flatpak info md.obsidian.Obsidian >/dev/null 2>&1; }; then
+      ok "Obsidian is already installed"
+    elif has flatpak; then
+      run flatpak install -y --user flathub md.obsidian.Obsidian || warn "Flatpak could not install Obsidian; get it from https://obsidian.md/download"
+    else
+      note "Get Obsidian for Linux from https://obsidian.md/download (AppImage, deb, or Flatpak)."
+    fi
+  elif [ -d /Applications/Obsidian.app ] || [ -d "$HOME/Applications/Obsidian.app" ]; then
     ok "Obsidian is already installed"
   elif has brew; then
     run brew install --cask obsidian || warn "brew could not install Obsidian; get it from https://obsidian.md/download"
   else
-    run open "https://obsidian.md/download" || true
+    run open_url "https://obsidian.md/download" || true
     note "The Obsidian download page was opened; drag Obsidian into Applications."
   fi
   note "In Obsidian choose 'Open folder as vault' and pick: $VAULT"
@@ -771,7 +947,7 @@ elif BODY=$(curl -fsS --max-time 10 "$HEALTH_URL" 2>&1); then
   result health ok
   result health_body "$BODY"
 else
-  warn "$HEALTH_URL did not answer ($BODY). Is the hub running and is this Mac on the same network?"
+  warn "$HEALTH_URL did not answer ($BODY). Is the hub running and is $THIS on the same network?"
   result health fail
   result health_body "$BODY"
 fi

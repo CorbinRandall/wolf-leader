@@ -398,8 +398,10 @@ def progress_overview() -> dict[str, Any]:
     out: list[dict[str, Any]] = []
     with db_conn() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT DISTINCT ON (project_id) project_id, body FROM north_stars ORDER BY project_id, created_at DESC, id DESC")
-        stars = {int(r["project_id"]): r["body"] for r in cur.fetchall() if (r["body"] or "").strip()}
+        # Oldest first, so each project's newest North Star is the one left (works on SQLite too).
+        cur.execute("SELECT project_id, body FROM north_stars ORDER BY project_id, created_at, id")
+        newest = {int(r["project_id"]): r["body"] for r in cur.fetchall()}
+        stars = {pid: body for pid, body in newest.items() if (body or "").strip()}
         cur.execute(
             """
             SELECT r.id, r.slug, r.name, r.description, r.status, r.left_off, r.updated_at,

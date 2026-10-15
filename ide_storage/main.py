@@ -33,7 +33,7 @@ from .context import (
     format_project_context_text,
     get_service_config,
 )
-from .db import MEMORY_TYPES, init_db, db_conn
+from .db import MEMORY_TYPES, init_db, db_conn, is_sqlite
 from .markdown_sync import (
     agent_brief_mtime,
     ensure_project_md_from_db,
@@ -2068,7 +2068,8 @@ async def health():
         "status": "healthy" if db_ok else "degraded",
         "service": SERVICE_ID,
         "product": PRODUCT_NAME,
-        "database": {"ok": db_ok, "pgvector": vector_available() if db_ok else False, "error": db_error},
+        "database": {"ok": db_ok, "engine": "sqlite" if is_sqlite() else "postgres",
+                     "pgvector": (vector_available() if db_ok else False) and not is_sqlite(), "error": db_error},
         "embeddings": embeddings_status(),
     }
 

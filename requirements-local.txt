@@ -1,0 +1,9 @@
+# Local mode (python -m ide_storage.local): the hub on one computer with a SQLite file.
+# Same as requirements-core.txt without the Postgres client.
+fastapi>=0.104.0,<0.129.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
+httpx>=0.28.0
+fastmcp>=2.11.2
+starlette>=0.40.0,<0.51.0
+pyyaml>=6.0

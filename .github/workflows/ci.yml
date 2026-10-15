@@ -45,5 +45,11 @@ jobs:
           TEST_DATABASE_URL: postgresql://wolf:wolf@127.0.0.1:5432/wolf_leader
         run: pytest -q
 
+      - name: Run tests in local mode (SQLite, no server)
+        env:
+          PYTHONPATH: .
+          TEST_DATABASE_URL: "sqlite:"
+        run: pytest -q
+
       - name: Check public repository hygiene
         run: bash scripts/check-public-hygiene.sh

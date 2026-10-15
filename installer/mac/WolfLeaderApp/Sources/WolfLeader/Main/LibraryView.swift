@@ -3,7 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 private enum LibraryTab: String, Hashable {
-    case skills, people, repos, cleanup, snippets
+    case skills, people, bringin, tools, repos, cleanup, snippets
 }
 
 /// Client-first management tools. The hub keeps a compact fallback UI; day-to-day organization
@@ -20,6 +20,8 @@ struct LibraryView: View {
         [
             WLTab(id: .skills, title: "Skills", icon: "shippingbox"),
             WLTab(id: .people, title: "People", icon: "person.2"),
+            WLTab(id: .bringin, title: "Bring in", icon: "tray.and.arrow.down"),
+            WLTab(id: .tools, title: "My tools", icon: "laptopcomputer"),
             WLTab(id: .repos, title: "Backups", icon: "externaldrive.badge.checkmark"),
             WLTab(id: .cleanup, title: "Cleanup", icon: "arrow.triangle.merge"),
             WLTab(id: .snippets, title: "Snippets", icon: "chevron.left.forwardslash.chevron.right"),
@@ -35,6 +37,8 @@ struct LibraryView: View {
             switch tab.wrappedValue {
             case .skills: SkillsLibraryView()
             case .people: PeopleLibraryView()
+            case .bringin: BringInView()
+            case .tools: MyToolsView()
             case .repos: ReposLibraryView()
             case .cleanup: DuplicateCleanupView()
             case .snippets: SnippetsLibraryView()
@@ -47,59 +51,177 @@ private struct SkillsLibraryView: View {
     @EnvironmentObject private var store: ConfigStore
     @Environment(\.palette) private var p
     @State private var response: HubSkillsResponse?
+    @State private var overview = SkillOverview()
     @State private var loading = true
     @State private var error: String?
     @State private var notice: String?
     @State private var addError: String?
     @State private var dropTargeted = false
     @State private var adding = false
+    @State private var working = false
+    @State private var pickedMaster: Set<String> = []
+    @State private var pickedFound: Set<String> = []
+    @State private var pickedInTool: [String: Set<String>] = [:]
+    @State private var confirmRemoval: (tool: String?, names: [String])?
 
     var body: some View {
-        WLPageHeader(title: "Skills library", subtitle: "Portable skills shared by every connected client.") {
+        WLPageHeader(title: "My skills", subtitle: "Your master set. Push it and every AI tool on this Mac gets the same skills.") {
             HStack(spacing: 8) {
+                if working { ProgressView().controlSize(.small) }
                 Button("Add skill") { chooseSkills() }.buttonStyle(SecondaryButtonStyle())
-                Button("Export all") { MainLinks.open(exportURL) }.buttonStyle(OutlineButtonStyle())
+                Button("Push to all my tools") { Task { await push() } }.buttonStyle(PrimaryButtonStyle()).disabled(working)
             }
         }
         if let notice { WLStatusPill(text: notice, kind: .good) }
         if let addError { WLStatusPill(text: addError, kind: .bad) }
+        if let error { WLStatusPill(text: error, kind: .bad) }
         dropZone
         if loading && response == nil {
             ProgressView("Loading skills…")
-        } else if let error {
-            MainNotice(symbol: "shippingbox", title: "Skills unavailable", message: error)
         } else if let response {
-            WLGroup(title: "Available skills", subtitle: "\(response.skills.count) stored on the hub", icon: "shippingbox") {
-                if response.skills.isEmpty {
-                    Text("No shared skills yet.").foregroundStyle(p.textMuted)
-                }
+            WLGroup(title: "My skills", subtitle: "\(response.skills.count) in your set", icon: "shippingbox") {
+                if response.skills.isEmpty { Text("No skills yet. Drop one above.").foregroundStyle(p.textMuted) }
                 ForEach(response.skills) { skill in
-                    if skill.id != response.skills.first?.id { WLDivider() }
-                    HStack {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(skill.name).font(DS.Font.bodySmall.weight(.semibold))
-                            Text(skill.description ?? "\(skill.fileCount) files")
-                                .font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(2)
-                        }
-                        Spacer()
-                        Button("Download") { MainLinks.open(downloadURL(skill.id)) }
-                            .buttonStyle(OutlineButtonStyle())
+                    checkRow(skill.name, detail: skill.description, note: reach(skill.id), picked: $pickedMaster, key: skill.id)
+                }
+                selectionBar(all: response.skills.map(\.id), picked: $pickedMaster) {
+                    Button("Remove from my set") { confirmRemoval = (nil, pickedMaster.sorted()) }
+                        .buttonStyle(OutlineButtonStyle()).disabled(pickedMaster.isEmpty)
+                }
+            }
+            if !overview.notInSet.isEmpty {
+                WLGroup(title: "Found in your tools", subtitle: "Not in your set yet. Add the ones you want everywhere.", icon: "tray.and.arrow.down") {
+                    ForEach(overview.notInSet, id: \.self) { name in
+                        checkRow(name, detail: nil, note: "in " + overview.tools.filter { $0.skills.contains(name) }.map(\.name).joined(separator: ", "),
+                                 picked: $pickedFound, key: name)
+                    }
+                    selectionBar(all: overview.notInSet, picked: $pickedFound) {
+                        Button("Add to my set") { Task { await adopt() } }
+                            .buttonStyle(SecondaryButtonStyle()).disabled(pickedFound.isEmpty || working)
                     }
                 }
             }
-            WLGroup(title: "Connect another client", subtitle: "Copy the current hub-specific install prompt.", icon: "laptopcomputer") {
-                Text(response.installPrompt).font(DS.Font.micro).foregroundStyle(p.textMuted).textSelection(.enabled)
-                Button("Copy install prompt") { copy(response.installPrompt) }.buttonStyle(SecondaryButtonStyle())
+            ForEach(overview.tools) { tool in
+                WLGroup(title: tool.name, subtitle: "\(tool.skills.count) skills" + (tool.missing.isEmpty ? "" : " · missing \(tool.missing.count) from your set"), icon: "laptopcomputer") {
+                    DisclosureGroup("Show its skills") {
+                        let binding = Binding(get: { pickedInTool[tool.id] ?? [] }, set: { pickedInTool[tool.id] = $0 })
+                        ForEach(tool.skills, id: \.self) { name in
+                            checkRow(name, detail: nil, note: overview.inSet.contains(name) ? "in your set" : nil, picked: binding, key: name)
+                        }
+                        selectionBar(all: tool.skills, picked: binding) {
+                            Button("Remove from \(tool.name)") { confirmRemoval = (tool.id, (pickedInTool[tool.id] ?? []).sorted()) }
+                                .buttonStyle(OutlineButtonStyle()).disabled((pickedInTool[tool.id] ?? []).isEmpty)
+                        }
+                    }
+                    .font(DS.Font.bodySmall)
+                }
+            }
+            WLGroup(title: "Connect another client", subtitle: "Copy the current hub-specific install prompt.", icon: "link") {
+                Text(response.installPrompt).font(DS.Font.micro).foregroundStyle(p.textMuted).textSelection(.enabled).lineLimit(4)
+                Button("Copy install prompt") { copy(response.installPrompt) }.buttonStyle(OutlineButtonStyle())
             }
         }
         Color.clear.frame(height: 0).task(id: store.config.hubURL) { await load() }
+            .confirmationDialog(
+                removalTitle,
+                isPresented: Binding(get: { confirmRemoval != nil }, set: { if !$0 { confirmRemoval = nil } })
+            ) {
+                Button("Remove", role: .destructive) { if let c = confirmRemoval { Task { await remove(tool: c.tool, names: c.names) } } }
+                Button("Cancel", role: .cancel) { confirmRemoval = nil }
+            } message: {
+                Text(confirmRemoval?.tool == nil
+                     ? "They leave your master set. AI tools keep their copies until you remove them there."
+                     : "A copy of each is kept in a backup folder, so nothing is lost.")
+            }
+    }
+
+    private var removalTitle: String {
+        guard let c = confirmRemoval else { return "" }
+        let what = c.names.count == 1 ? c.names[0] : "\(c.names.count) skills"
+        if let tool = c.tool { return "Remove \(what) from \(overview.tools.first { $0.id == tool }?.name ?? tool)?" }
+        return "Remove \(what) from your set?"
+    }
+
+    /// Which tools have a master skill.
+    private func reach(_ id: String) -> String? {
+        guard !overview.tools.isEmpty else { return nil }
+        let lacking = overview.tools.filter { $0.missing.contains(id) }.map(\.name)
+        return lacking.isEmpty ? "in all your tools" : "not yet in " + lacking.joined(separator: ", ")
+    }
+
+    private func checkRow(_ title: String, detail: String?, note: String?, picked: Binding<Set<String>>, key: String) -> some View {
+        Toggle(isOn: Binding(get: { picked.wrappedValue.contains(key) },
+                             set: { if $0 { picked.wrappedValue.insert(key) } else { picked.wrappedValue.remove(key) } })) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(DS.Font.bodySmall.weight(.semibold))
+                    if let detail, !detail.isEmpty { Text(detail).font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(2) }
+                }
+                Spacer()
+                if let note { Text(note).font(DS.Font.micro).foregroundStyle(p.textFaint) }
+            }
+        }
+        .toggleStyle(.checkbox)
+    }
+
+    private func selectionBar<Action: View>(all: [String], picked: Binding<Set<String>>, @ViewBuilder action: () -> Action) -> some View {
+        HStack {
+            Button(picked.wrappedValue.count == all.count && !all.isEmpty ? "Clear" : "Check all") {
+                picked.wrappedValue = picked.wrappedValue.count == all.count ? [] : Set(all)
+            }
+            .buttonStyle(OutlineButtonStyle()).disabled(all.isEmpty)
+            Spacer()
+            action()
+        }
+    }
+
+    private func bridge(_ args: [String]) async throws -> [String: Any] {
+        try await ToolBridge.json(args, hubURL: store.config.hubURL)
+    }
+
+    private func push() async {
+        working = true; defer { working = false }
+        do {
+            let json = try await bridge(["push-skills"])
+            let added = (json["added"] as? [Any])?.count ?? 0
+            let updated = (json["updated"] as? [Any])?.count ?? 0
+            notice = added + updated == 0 ? "Every tool already has your set."
+                : "Pushed: \(added) added, \(updated) brought up to date. Old copies are kept in a backup folder."
+            error = nil
+            await load()
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func adopt() async {
+        working = true; defer { working = false }
+        do {
+            let json = try await bridge(["adopt-skills", "--skills", pickedFound.sorted().joined(separator: ",")])
+            let added = (json["added"] as? [Any])?.count ?? 0
+            notice = "Added \(added) to your set. Push to give them to every tool."
+            pickedFound = []
+            error = nil
+            await load()
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func remove(tool: String?, names: [String]) async {
+        confirmRemoval = nil
+        working = true; defer { working = false }
+        do {
+            if let tool {
+                _ = try await bridge(["remove-skills", "--tool", tool, "--skills", names.joined(separator: ",")])
+                pickedInTool[tool] = []
+            } else {
+                for name in names { try await store.hub.deleteSkill(id: name) }
+                pickedMaster = []
+            }
+            notice = "Removed \(names.count == 1 ? names[0] : "\(names.count) skills")."
+            error = nil
+            await load()
+        } catch { self.error = error.localizedDescription }
     }
 
     private var root: String { store.config.hubURL.trimmingCharacters(in: CharacterSet(charactersIn: "/ ")) }
-    private var exportURL: URL? { URL(string: root + "/api/skills/export.zip") }
-    private func downloadURL(_ id: String) -> URL? {
-        URL(string: root + "/api/skills/\(id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id)/download")
-    }
     private func copy(_ value: String) {
         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(value, forType: .string)
         notice = "Copied to the clipboard."
@@ -241,6 +363,35 @@ private struct SkillsLibraryView: View {
     private func load() async {
         loading = true; defer { loading = false }
         do { response = try await store.hub.skills(); error = nil } catch { self.error = error.localizedDescription }
+        if let json = try? await bridge(["skills"]) { overview = SkillOverview(json) }
+    }
+}
+
+/// The master set compared with each AI tool on this Mac (from the bundled scanner).
+private struct SkillOverview {
+    struct Tool: Identifiable {
+        var id: String
+        var name: String
+        var skills: [String]
+        var missing: [String]
+    }
+
+    var tools: [Tool] = []
+    var notInSet: [String] = []
+    var inSet: Set<String> = []
+
+    init() {}
+
+    init(_ json: [String: Any]) {
+        let names = ["claude": "Claude Code", "codex": "Codex", "cursor": "Cursor"]
+        tools = ((json["tools"] as? [[String: Any]]) ?? []).map { tool in
+            let id = tool["tool"] as? String ?? ""
+            return Tool(id: id, name: names[id] ?? id.capitalized,
+                        skills: ((tool["skills"] as? [[String: Any]]) ?? []).compactMap { $0["name"] as? String },
+                        missing: tool["missing"] as? [String] ?? [])
+        }
+        notInSet = json["not_in_set"] as? [String] ?? []
+        inSet = Set(((json["master"] as? [[String: Any]]) ?? []).compactMap { $0["id"] as? String })
     }
 }
 
@@ -382,11 +533,12 @@ private struct PeopleLibraryView: View {
     @State private var renaming: String?
     @State private var renameText = ""
     @State private var removing: String?
+    @State private var profileOf: String?
     @State private var error: String?
     @State private var notice: String?
 
     var body: some View {
-        WLPageHeader(title: "People", subtitle: "Who a project can belong to. Change a project's owner from its tag in Projects.")
+        WLPageHeader(title: "People", subtitle: "Who a project can belong to, and what AI tools should know about each person.")
         if let notice { WLStatusPill(text: notice, kind: .good) }
         if let error { WLStatusPill(text: error, kind: .bad) }
         WLGroup(title: "Owners", subtitle: "\(counts[""] ?? 0) project\((counts[""] ?? 0) == 1 ? " has" : "s have") no owner.", icon: "person.2") {
@@ -406,6 +558,7 @@ private struct PeopleLibraryView: View {
                     }
                     Spacer()
                     if renaming != name {
+                        Button("Profile") { profileOf = name }.buttonStyle(SecondaryButtonStyle())
                         Button("Rename") { renameText = name; renaming = name }.buttonStyle(OutlineButtonStyle())
                         Button("Remove") { removing = name }.buttonStyle(OutlineButtonStyle())
                     }
@@ -420,6 +573,9 @@ private struct PeopleLibraryView: View {
             }
         }
         Color.clear.frame(height: 0).task(id: store.config.hubURL) { await load() }
+            .sheet(item: Binding(get: { profileOf.map(PersonRef.init) }, set: { profileOf = $0?.id })) { ref in
+                ProfileSheet(person: ref.id).environmentObject(store)
+            }
             .confirmationDialog(
                 "Remove \(removing ?? "")?",
                 isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
@@ -467,3 +623,5 @@ private struct PeopleLibraryView: View {
         } catch { self.error = error.localizedDescription }
     }
 }
+
+private struct PersonRef: Identifiable { var id: String }

@@ -33,11 +33,46 @@ def seed_builtin_skills() -> None:
         return
     root = skills_dir()
     root.mkdir(parents=True, exist_ok=True)
+    removed = _removed_names()
     for source in BUILTIN_SKILLS_DIR.iterdir():
+        if source.name in removed:
+            continue
         if source.is_dir() and (source / "SKILL.md").is_file():
             destination = root / source.name
             if not destination.exists():
                 shutil.copytree(source, destination)
+
+
+def _removed_names() -> set[str]:
+    try:
+        return set((skills_dir() / ".removed").read_text(encoding="utf-8").split())
+    except OSError:
+        return set()
+
+
+def _set_removed(name: str, removed: bool) -> None:
+    names = _removed_names()
+    names = names | {name} if removed else names - {name}
+    marker = skills_dir() / ".removed"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("".join(f"{n}\n" for n in sorted(names)), encoding="utf-8")
+
+
+def delete_skill(name: str) -> dict[str, Any]:
+    """Take a skill out of the library. The files move to .trash, never deleted outright."""
+    from datetime import datetime, timezone
+
+    if not SKILL_NAME_RE.fullmatch(name):
+        raise ValueError("Invalid skill name")
+    path = skills_dir() / name
+    if not (path / "SKILL.md").is_file():
+        raise FileNotFoundError(name)
+    trash = skills_dir() / ".trash"
+    trash.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    shutil.move(str(path), str(trash / f"{name}-{stamp}"))
+    _set_removed(name, True)
+    return {"removed": name}
 
 
 def _parse_manifest(text: str, fallback_name: str) -> tuple[str, str]:
@@ -47,11 +82,21 @@ def _parse_manifest(text: str, fallback_name: str) -> tuple[str, str]:
     parts = text.split("---", 2)
     if len(parts) < 3:
         return name, description
-    for line in parts[1].splitlines():
+    lines = parts[1].splitlines()
+    for index, line in enumerate(lines):
         key, separator, value = line.partition(":")
-        if not separator:
+        if not separator or line[:1].isspace():
             continue
-        value = value.strip().strip('"\'')
+        value = value.strip()
+        if value in (">", ">-", "|", "|-", ""):
+            # A YAML block: the value is the indented lines that follow.
+            block = []
+            for follow in lines[index + 1:]:
+                if follow.strip() and not follow[:1].isspace():
+                    break
+                block.append(follow.strip())
+            value = " ".join(b for b in block if b)
+        value = value.strip('"\'')
         if key.strip() == "name" and value:
             name = value
         elif key.strip() == "description":
@@ -191,6 +236,7 @@ def _install_staged_skill(staged: Path, name: str | None, hint: str | None, over
         raise
     if backup.exists():
         shutil.rmtree(backup)
+    _set_removed(name, False)  # adding it back undoes an earlier removal
     return get_skill(name)
 
 

@@ -81,6 +81,8 @@ struct MainView: View {
                 Section("Library") {
                     Label("Skills", systemImage: "shippingbox").tag(SidebarItem.library("skills"))
                     Label("People", systemImage: "person.2").tag(SidebarItem.library("people"))
+                    Label("Bring in", systemImage: "tray.and.arrow.down").tag(SidebarItem.library("bringin"))
+                    Label("My tools", systemImage: "laptopcomputer").tag(SidebarItem.library("tools"))
                     Label("Backups", systemImage: "externaldrive.badge.checkmark").tag(SidebarItem.library("repos"))
                     Label("Cleanup", systemImage: "arrow.triangle.merge").tag(SidebarItem.library("cleanup"))
                     Label("Snippets", systemImage: "chevron.left.forwardslash.chevron.right").tag(SidebarItem.library("snippets"))

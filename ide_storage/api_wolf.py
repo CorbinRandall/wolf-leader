@@ -340,6 +340,182 @@ async def get_progress():
     return progress_overview()
 
 
+class ProfileItemBody(BaseModel):
+    text: Optional[str] = None
+    kind: Optional[str] = None
+    source: Optional[str] = None
+
+
+class ProfileImportBody(BaseModel):
+    items: List[Dict[str, Any]]
+
+
+class BringInText(BaseModel):
+    text: str
+
+
+class BringInApply(BaseModel):
+    person: Optional[str] = None
+    source: Optional[str] = None
+    about_me: List[Dict[str, Any]] = []
+    projects: List[Dict[str, Any]] = []
+
+
+class KnownSessionsBody(BaseModel):
+    ids: List[str]
+
+
+@router.get("/people/{name}/profile")
+async def get_profile(name: str):
+    """Who this person is and how they like to work, by section."""
+    from ide_storage.profiles import profile
+
+    return _progress_call(profile, name)
+
+
+@router.get("/people/{name}/profile.md")
+async def get_profile_markdown(name: str):
+    """The profile as an AI tool should read it."""
+    from fastapi.responses import PlainTextResponse
+
+    from ide_storage.profiles import as_markdown
+
+    return PlainTextResponse(_progress_call(as_markdown, name), media_type="text/markdown")
+
+
+@router.get("/people/{name}/profile/prompt")
+async def get_profile_prompt(name: str):
+    """A prompt to paste into any AI chat; it answers with profile lines to paste back."""
+    from ide_storage.profiles import profile_prompt
+
+    return _progress_call(profile_prompt, name)
+
+
+@router.post("/profile/read")
+async def post_profile_read(body: BringInText):
+    """Profile lines from an AI's pasted answer. Nothing is saved."""
+    from ide_storage.profiles import read_items
+
+    return {"items": _progress_call(read_items, body.text)}
+
+
+@router.get("/bring-in/prompt")
+async def get_bring_in_prompt():
+    """The prompt to paste into any AI chatbot to bring its history in."""
+    from ide_storage.bring_in import PROMPT
+
+    return {"prompt": PROMPT}
+
+
+@router.post("/bring-in/preview")
+async def post_bring_in_preview(body: BringInText):
+    """What a chatbot's answer would add. Nothing is saved."""
+    from ide_storage.bring_in import preview
+
+    return _progress_call(preview, body.text)
+
+
+@router.post("/bring-in/apply")
+async def post_bring_in_apply(body: BringInApply):
+    from ide_storage.bring_in import apply
+
+    return _progress_call(apply, body.person or "", body.source or "", body.about_me, body.projects)
+
+
+@router.get("/people/{name}/profile/digest")
+async def get_profile_digest(name: str):
+    """A compact read of the person's history, for an AI tool to write their profile from."""
+    from ide_storage.profiles import history_digest
+
+    return _progress_call(history_digest, name)
+
+
+@router.get("/people/{name}/profile/suggestions")
+async def get_profile_suggestions(name: str):
+    """Profile lines found in the person's own words, no AI needed. Nothing is saved."""
+    from ide_storage.profiles import suggest_from_history
+
+    return _progress_call(suggest_from_history, name)
+
+
+@router.post("/people/{name}/profile")
+async def post_profile_item(name: str, body: ProfileItemBody):
+    from ide_storage.profiles import add_item
+
+    return _progress_call(add_item, name, body.text or "", body.kind or "about", body.source or "manual")
+
+
+@router.post("/people/{name}/profile/import")
+async def post_profile_import(name: str, body: ProfileImportBody):
+    from ide_storage.profiles import import_items
+
+    return _progress_call(import_items, name, body.items)
+
+
+@router.put("/profile-items/{item_id}")
+async def put_profile_item(item_id: int, body: ProfileItemBody):
+    from ide_storage.profiles import update_item
+
+    return _progress_call(update_item, item_id, body.text, body.kind)
+
+
+@router.delete("/profile-items/{item_id}")
+async def remove_profile_item(item_id: int):
+    from ide_storage.profiles import delete_item
+
+    return _progress_call(delete_item, item_id)
+
+
+@router.post("/sessions/known")
+async def post_known_sessions(body: KnownSessionsBody):
+    """Which of these session ids Wolf Leader already has, so an import can skip them."""
+    from ide_storage.db import db_conn
+
+    ids = [i for i in body.ids if i][:5000]
+    if not ids:
+        return {"known": []}
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(f"SELECT session_id FROM chats WHERE session_id IN ({','.join('?' * len(ids))})", ids)
+        return {"known": sorted({r["session_id"] for r in cur.fetchall()})}
+
+
+class StartProjectBody(BaseModel):
+    name: str
+    description: Optional[str] = None
+    north_star: Optional[str] = None
+    owner: Optional[str] = None
+    status: Optional[str] = None
+    milestones: Optional[List[str]] = None
+    folder: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+class JournalBody(BaseModel):
+    text: str
+    title: Optional[str] = None
+
+
+@router.post("/projects/start")
+async def post_start_project(body: StartProjectBody):
+    """Start a project by hand: name, what it is, its North Star, owner, stage, first milestones, folder."""
+    from ide_storage.progress import start_project
+
+    return _progress_call(
+        start_project, body.name, description=body.description or "", north_star=body.north_star or "",
+        owner=body.owner, status=body.status or "in_progress", milestones=body.milestones or [],
+        folder=body.folder or "", tags=body.tags or [],
+    )
+
+
+@router.post("/projects/{project_id}/journal")
+async def post_journal(project_id: int, body: JournalBody):
+    """Write a journal entry by hand. It is saved like an agent's session."""
+    from ide_storage.progress import write_journal
+
+    return _progress_call(write_journal, project_id, body.text, body.title or "")
+
+
 class NorthStarBody(BaseModel):
     body: str = ""
     why: Optional[str] = None
@@ -449,6 +625,14 @@ async def post_auto_file_sessions():
     from ide_storage.progress import auto_file_sessions
 
     return auto_file_sessions()
+
+
+@router.post("/sessions/one-offs")
+async def post_sessions_to_one_offs():
+    """File loose chats that clearly belong to a project; the rest go to One-offs."""
+    from ide_storage.progress import file_loose_in_one_offs
+
+    return file_loose_in_one_offs()
 
 
 @router.post("/sessions/{chat_id}/file")

@@ -207,6 +207,93 @@ def delete_goal(goal_id: int) -> dict[str, Any]:
     return {"ok": True, "id": goal_id}
 
 
+# ------------------------------------------------------------------ starting a project by hand
+def _unique_slug(cur, name: str) -> str:
+    base = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:56] or "project"
+    slug, n = base, 2
+    while True:
+        cur.execute("SELECT 1 FROM projects WHERE slug = ?", (slug,))
+        if not cur.fetchone():
+            return slug
+        slug, n = f"{base}-{n}", n + 1
+
+
+def start_project(
+    name: str, *, description: str = "", north_star: str = "", owner: str | None = None, status: str = "in_progress",
+    milestones: list[str] | None = None, folder: str = "", tags: list[str] | None = None,
+) -> dict[str, Any]:
+    """Create a project from the app, with everything that gets it going, no agent needed."""
+    from ide_storage.markdown_sync import ensure_project_md_from_db, regenerate_index
+    from ide_storage.owners import canonical_owner
+    from ide_storage.paths import register_project_path
+
+    name = " ".join((name or "").split())
+    if not name:
+        raise ValueError("A project needs a name")
+    metadata: dict[str, Any] = {"created_from": "app"}
+    if owner and owner.strip():
+        resolved = canonical_owner(owner)
+        if resolved is None:
+            raise ValueError(f"Unknown owner: {owner}")
+        metadata["owner"] = resolved
+    now = _now()
+    with db_conn() as conn:
+        cur = conn.cursor()
+        slug = _unique_slug(cur, name)
+        cur.execute(
+            """
+            INSERT INTO projects (name, path, description, slug, status, tags, created_at, updated_at, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (name[:120], (folder or "").strip(), (description or "").strip() or None, slug, status or "in_progress",
+             json.dumps([t.strip() for t in tags if t.strip()]) if tags else None, now, now, json.dumps(metadata)),
+        )
+        project_id = int(cur.lastrowid)
+        conn.commit()
+        cur.execute("SELECT * FROM projects WHERE id = ?", (project_id,))
+        row = dict(cur.fetchone())
+    if (north_star or "").strip():
+        set_north_star(project_id, north_star, "Set when the project was started.")
+    for title in milestones or []:
+        if title.strip():
+            create_milestone(project_id, title)
+    if (folder or "").strip():
+        register_project_path(project_id, folder.strip(), kind="workspace")
+    try:
+        ensure_project_md_from_db(row)
+        regenerate_index()
+    except Exception:  # noqa: BLE001  - the project exists either way
+        pass
+    return {"id": project_id, "slug": slug, "name": row["name"]}
+
+
+def write_journal(project_id: int, text: str, title: str = "") -> dict[str, Any]:
+    """A journal entry written by hand. It goes through the same save as an agent's session, so it
+    shows in the logbook, its decisions and problems become memories, and Ask can find it."""
+    import uuid
+
+    from ide_storage.save_project import save_project
+
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("Write something first")
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT slug FROM projects WHERE id = ?", (project_id,))
+        row = cur.fetchone()
+    if not row:
+        raise LookupError("project not found")
+    first_line = text.splitlines()[0]
+    result = save_project(
+        f"journal-{uuid.uuid4()}", project_slug=row["slug"],
+        title=(title or "").strip() or _clip(first_line, 80),
+        content=text, messages=[{"role": "user", "content": text}], occurred_at=_now(),
+    )
+    if not result.get("ok"):
+        raise ValueError(result.get("error") or "The entry could not be saved")
+    return {"ok": True, "chat_id": result.get("chat_id"), "project_id": project_id}
+
+
 # ------------------------------------------------------------------ North Star
 _STAR_NOTE = re.compile(r"^\s*north star(?:\s+(?:revised|changed|updated)(?:\s+on\s+([0-9]{4}-[0-9]{2}-[0-9]{2}))?)?\s*:\s*", re.I)
 
@@ -419,6 +506,44 @@ def auto_file_sessions() -> dict[str, Any]:
     return {"filed": filed, "left_loose": len(loose) - len(filed)}
 
 
+def one_offs_project() -> dict[str, Any]:
+    """The standard home for chats that belong to no project: quick questions, experiments.
+    Every hub gets one, so unmatched chats never turn into a pile of tiny projects."""
+    from ide_storage.project_match import ONE_OFFS_SLUG, ONE_OFFS_TAG
+
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, name, slug FROM projects WHERE slug = ?", (ONE_OFFS_SLUG,))
+        row = cur.fetchone()
+        if row:
+            return dict(row)
+        now = _now()
+        cur.execute(
+            """
+            INSERT INTO projects (name, path, description, slug, status, tags, created_at, updated_at, metadata)
+            VALUES (?, '', ?, ?, 'done', ?, ?, ?, ?)
+            """,
+            ("One-offs", "Chats that belong to no project: quick questions, experiments, one-time fixes.",
+             ONE_OFFS_SLUG, json.dumps([ONE_OFFS_TAG]), now, now, json.dumps({"created_from": "one-offs"})),
+        )
+        project_id = int(cur.lastrowid)
+        conn.commit()
+    return {"id": project_id, "name": "One-offs", "slug": ONE_OFFS_SLUG}
+
+
+def file_loose_in_one_offs() -> dict[str, Any]:
+    """File loose chats that clearly belong somewhere, then put the rest in One-offs."""
+    filed = auto_file_sessions()["filed"]
+    home = one_offs_project()
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM chats WHERE project_id IS NULL")
+        rest = [int(r["id"]) for r in cur.fetchall()]
+    for chat_id in rest:
+        file_session(chat_id, int(home["id"]))
+    return {"filed": filed, "one_offs": len(rest), "project_id": home["id"]}
+
+
 def file_session(chat_id: int, project_id: int) -> dict[str, Any]:
     with db_conn() as conn:
         cur = conn.cursor()
@@ -474,6 +599,13 @@ def build_prompt(project_id: int, goal_ids: list[int], *, note: str = "", public
     lines += ["", "Build only what is listed. If something else looks necessary, say so and stop instead of widening the scope.", ""]
     if note.strip():
         lines += ["## Notes from the owner", "", note.strip(), ""]
+    owner = _owner_of(project)
+    if owner:
+        from ide_storage.profiles import as_markdown, profile
+
+        if profile(owner)["count"]:
+            body = as_markdown(owner).split("\n", 3)[-1].strip()
+            lines += [f"## Working with {owner}", "", body, ""]
     if left.get("summary"):
         lines += ["## Where the project stands", "", _clip(left["summary"], 700), ""]
     if constraints:
@@ -510,6 +642,15 @@ def build_prompt(project_id: int, goal_ids: list[int], *, note: str = "", public
         conn.commit()
     return {"id": prompt_id, "project_id": project_id, "goal_ids": [g["id"] for g in goals], "title": _clip(goals[0]["title"], 120),
             "body": text, "created_at": now}
+
+
+def _owner_of(project: dict[str, Any]) -> str | None:
+    try:
+        from ide_storage.owners import attach_owners
+
+        return attach_owners([dict(project)])[0].get("owner")
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def list_build_prompts(project_id: int, limit: int = 20) -> list[dict[str, Any]]:

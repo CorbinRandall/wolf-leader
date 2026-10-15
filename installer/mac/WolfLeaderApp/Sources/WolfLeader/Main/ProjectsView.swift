@@ -18,6 +18,7 @@ struct ProjectsView: View {
     @State private var promptFor: ProjectEntry?
     @State private var columnEditor: ColumnEditorContext?
     @State private var showLoose = false
+    @State private var starting = false
     @State private var stageFilter = "open"
     @State private var topic = ""
 
@@ -57,6 +58,11 @@ struct ProjectsView: View {
             BuildPromptSheet(entry: entry, onDone: { await model.reload() })
         }
         .sheet(isPresented: $showLoose) { LooseSessionsSheet(model: model) }
+        .sheet(isPresented: $starting) {
+            NewProjectSheet(model: model) { id in
+                Task { await model.reload(); nav.open(project: id) }
+            }
+        }
         .sheet(item: $columnEditor) { editor in
             KanbanColumnEditor(context: editor) { label, description in
                 model.perform { hub in
@@ -76,6 +82,9 @@ struct ProjectsView: View {
             WLPageHeader(title: "Projects", subtitle: "What you are working on, what is next, and where everything else is.") {
                 HStack(spacing: 8) {
                     WLSearchField(text: $query, placeholder: "Search projects and goals").frame(width: 260)
+                    Button { starting = true } label: { Label("New project", systemImage: "plus") }
+                        .buttonStyle(PrimaryButtonStyle())
+                        .keyboardShortcut("n", modifiers: .command)
                     if tab.wrappedValue == .board {
                         Button("Add column") { columnEditor = ColumnEditorContext() }.buttonStyle(SecondaryButtonStyle())
                     }
@@ -397,10 +406,16 @@ private struct LooseSessionsSheet: View {
                 VStack(alignment: .leading, spacing: 4) {
                     WLEyebrow("Loose sessions")
                     Text("Chats that belong to no project").font(DS.Font.section).foregroundStyle(p.text)
-                    Text("One-off questions end up here. The hub files a session by itself when it clearly matches a project. You can leave the rest.")
+                    Text("Chats that match a project are filed by themselves. Move the rest to One-offs to keep things tidy.")
                         .font(DS.Font.micro).foregroundStyle(p.textMuted).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
+                if !model.unfiled.isEmpty {
+                    Button("Move all to One-offs") {
+                        model.perform("Moved to One-offs.") { try await $0.fileLooseInOneOffs() }
+                    }
+                    .buttonStyle(SecondaryButtonStyle())
+                }
                 if model.unfiled.count > 1 {
                     Button("Delete all") { confirmAll = true }.buttonStyle(OutlineButtonStyle())
                 }
@@ -703,6 +718,131 @@ struct BuildPromptSheet: View {
                 error = nil
                 await onDone()
             } catch { self.error = error.localizedDescription }
+        }
+    }
+}
+
+
+/// Start a project by hand: what it is, where it is heading, and a few first steps. No agent needed.
+struct NewProjectSheet: View {
+    @EnvironmentObject private var store: ConfigStore
+    @Environment(\.palette) private var p
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var model: ProjectsModel
+    let created: (Int) -> Void
+
+    @State private var name = ""
+    @State private var about = ""
+    @State private var northStar = ""
+    @State private var owner = ""
+    @State private var stage = "in_progress"
+    @State private var milestones = ""
+    @State private var folder = ""
+    @State private var topics = ""
+    @State private var saving = false
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                WLEyebrow("New project")
+                Text("Start something").font(DS.Font.page).foregroundStyle(p.text)
+                Text("Only the name is needed. Everything else can be filled in or changed later.")
+                    .font(DS.Font.bodySmall).foregroundStyle(p.textMuted)
+            }
+            .padding(24)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    field("Name") { TextField("For example: First album", text: $name).mainField() }
+                    field("What is it?") {
+                        TextField("A sentence or two, for you and for any AI tool you point at it", text: $about, axis: .vertical)
+                            .lineLimit(2...4).mainField()
+                    }
+                    field("North Star", note: "Where it is heading. It is fine to be unsure; you will change it as you go.") {
+                        TextField("For example: ten songs I would play for friends, released by spring", text: $northStar, axis: .vertical)
+                            .lineLimit(2...4).mainField()
+                    }
+                    HStack(alignment: .top, spacing: 16) {
+                        field("Owner") {
+                            Picker("", selection: $owner) {
+                                Text("No owner").tag("")
+                                ForEach(model.owners, id: \.self) { Text($0).tag($0) }
+                            }
+                            .labelsHidden()
+                        }
+                        field("Stage") {
+                            Picker("", selection: $stage) {
+                                ForEach(model.columns) { Text($0.label).tag($0.status) }
+                            }
+                            .labelsHidden()
+                        }
+                    }
+                    field("First milestones", note: "Optional. One per line, in order: the big chunks between now and the North Star.") {
+                        TextEditor(text: $milestones)
+                            .font(DS.Font.bodySmall).frame(height: 84).scrollContentBackground(.hidden)
+                            .padding(6).background(p.surface, in: RoundedRectangle(cornerRadius: DS.Radius.row))
+                            .overlay(RoundedRectangle(cornerRadius: DS.Radius.row).strokeBorder(p.border.opacity(0.7), lineWidth: 0.6))
+                    }
+                    field("Folder", note: "Optional. Where the work lives, so saves from there land here.") {
+                        HStack {
+                            TextField("/path/to/the/project", text: $folder).mainField()
+                            Button("Choose…") { chooseFolder() }.buttonStyle(OutlineButtonStyle())
+                        }
+                    }
+                    field("Topics", note: "Optional, comma separated.") {
+                        TextField("music, ai", text: $topics).mainField()
+                    }
+                    if let error { WLStatusPill(text: error, kind: .bad) }
+                }
+                .padding(24)
+            }
+            Divider()
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.buttonStyle(OutlineButtonStyle()).keyboardShortcut(.cancelAction)
+                Button(saving ? "Creating…" : "Create project") { create() }
+                    .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || saving)
+            }
+            .padding(16)
+        }
+        .frame(width: 600, height: 720)
+        .background(p.background)
+        .onAppear {
+            if model.columns.contains(where: { $0.status == "in_progress" }) == false { stage = model.columns.first?.status ?? "active" }
+        }
+    }
+
+    private func field<Content: View>(_ title: String, note: String? = nil, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            WLEyebrow(title)
+            content()
+            if let note { Text(note).font(DS.Font.micro).foregroundStyle(p.textFaint) }
+        }
+    }
+
+    private func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.prompt = "Choose"
+        if panel.runModal() == .OK, let url = panel.url { folder = url.path }
+    }
+
+    private func create() {
+        saving = true
+        let lines = milestones.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let tags = topics.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        Task {
+            defer { saving = false }
+            do {
+                let id = try await store.hub.startProject(
+                    name: name.trimmingCharacters(in: .whitespaces), description: about, northStar: northStar,
+                    owner: owner, status: stage, milestones: lines, folder: folder, tags: tags)
+                dismiss()
+                created(id)
+            } catch { self.error = "Could not create it. \(error.localizedDescription)" }
         }
     }
 }

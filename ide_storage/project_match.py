@@ -117,16 +117,20 @@ def conversation_text(
     )
 
 
+ONE_OFFS_SLUG = "one-offs"
+ONE_OFFS_TAG = "one-offs"
+
 def _slug_rows(db_path: Any = None) -> list[dict[str, Any]]:
     conn = connect()
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT id, slug, name, compose_path, path, description
+        SELECT id, slug, name, compose_path, path, description, tags
         FROM projects WHERE COALESCE(status, 'active') != 'archived'
         """
     )
-    rows = [dict(r) for r in cur.fetchall()]
+    # One-offs holds unrelated chats, so what they say must never pull new chats in.
+    rows = [dict(r) for r in cur.fetchall() if ONE_OFFS_TAG not in str(dict(r).get("tags") or "")]
     conn.close()
     return rows
 
@@ -272,7 +276,8 @@ def score_project_matches(
     except Exception:
         pass
 
-    ranked = sorted(scores.values(), key=lambda x: x["score"], reverse=True)
+    allowed = {r["id"] for r in rows}
+    ranked = sorted((v for v in scores.values() if v["project_id"] in allowed), key=lambda x: x["score"], reverse=True)
     for item in ranked:
         row = next((r for r in rows if r["id"] == item["project_id"]), None)
         if row:

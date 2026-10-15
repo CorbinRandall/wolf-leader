@@ -358,3 +358,37 @@ def test_create_repo_refuses_a_folder_inside_another_repo(tmp_path):
 
     assert result.returncode == 1
     assert "inside another git repo" in json.loads(result.stdout)["error"]
+
+
+def test_a_home_folder_never_claims_the_projects_inside_it(tmp_path):
+    from ide_storage.hub import create_project_for_path, resolve_project
+    from ide_storage.paths import register_project_path
+
+    home = "/" + "Users/example"
+    migration = _project("migration", home)
+    register_project_path(migration, home, force=True)  # how old data came to hold one
+
+    # The home folder itself still finds its project...
+    assert resolve_project(path=home)["slug"] == "migration"
+    # ...but a new folder inside it is not that project.
+    new_folder = home + "/Projects/live-worship"
+    assert resolve_project(path=new_folder) is None
+    made = create_project_for_path(new_folder, name="Live Worship")
+    assert made["created"] is True and made["name"] == "Live Worship"
+    assert resolve_project(path=new_folder + "/song-1")["id"] == made["id"]
+    # Asking again for the same folder returns it rather than making a second one.
+    again = create_project_for_path(new_folder, name="Live Worship")
+    assert (again["created"], again["id"]) == (False, made["id"])
+    # And a home folder is not linked to a project unless forced.
+    assert register_project_path(made["id"], home)["broad_folder"] is True
+
+
+def test_a_new_folder_under_a_real_project_folder_still_belongs_to_it():
+    from ide_storage.hub import create_project_for_path, resolve_project
+    from ide_storage.paths import register_project_path
+
+    pid = _project("fans")
+    register_project_path(pid, "/work/fans")
+    assert resolve_project(path="/work/fans/scripts")["id"] == pid
+    # Creating a project for a subfolder on purpose makes a new one.
+    assert create_project_for_path("/work/fans/scripts", name="Fan Scripts")["created"] is True

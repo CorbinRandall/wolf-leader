@@ -1424,6 +1424,18 @@ async def api_download_skill(skill_name: str):
     )
 
 
+@app.delete("/api/skills/{skill_name}")
+async def api_delete_skill(skill_name: str):
+    from ide_storage.skill_registry import delete_skill
+
+    try:
+        return delete_skill(skill_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Skill not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/api/skills/{skill_name}")
 async def api_get_skill(skill_name: str):
     from ide_storage.skill_registry import get_skill

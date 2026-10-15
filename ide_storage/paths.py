@@ -128,12 +128,29 @@ def ancestors(path: str) -> list[str]:
     return out
 
 
+def is_broad_folder(path: str) -> bool:
+    """A filesystem root or someone's home folder: where people happen to be, not a project's folder.
+
+    Such a folder can be linked to a project only as itself; it never claims the folders under it,
+    or every new project anywhere in a home folder would be mistaken for that one project.
+    """
+    n = _norm(path)
+    return n in ("", "/", "/root", "/home", "/users", "/srv", "/mnt", "/mnt/user", "/volumes") or bool(
+        re.fullmatch(r"/(users|home)/[^/]+", n) or re.fullmatch(r"[a-z]:(/users(/[^/]+)?)?", n)
+    )
+
+
 def match_candidates(path: str) -> list[str]:
-    """Normalized prefixes of ``path`` in every alias spelling, for a DB IN-match."""
+    """Normalized prefixes of ``path`` in every alias spelling, for a DB IN-match.
+
+    The folder itself always counts. Its parents count only when they are a project's own folder,
+    not a home folder or a root (see ``is_broad_folder``).
+    """
     cands: set[str] = set()
     for v in variants(path):
-        for a in ancestors(v):
-            cands.add(a)
+        for i, a in enumerate(ancestors(v)):
+            if i == 0 or not is_broad_folder(a):
+                cands.add(a)
     return sorted(cands, key=len, reverse=True)
 
 
@@ -159,6 +176,9 @@ def register_project_path(
     hub = to_hub_path(path)
     if hub and hub != path:
         to_add.append(hub)
+    # A home folder or a root would swallow every project under it; never link one unless forced.
+    if is_broad_folder(path) and not force:
+        return {"added": 0, "paths": [], "hub_path": hub, "broad_folder": True}
     # A folder already registered to another project stays theirs: adding it here
     # too would make every later save from that folder ambiguous.
     norms = [_norm(p) for p in to_add]

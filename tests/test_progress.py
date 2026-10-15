@@ -248,3 +248,36 @@ def test_milestones_order_goals_and_survive_being_removed():
     # Removing a milestone keeps its goals.
     assert client.delete(f"/api/milestones/{style['id']}").json()["ok"] is True
     assert {g["id"]: g["milestone_id"] for g in list_goals(pid)}[goal["id"]] is None
+
+
+def test_a_project_can_be_started_and_written_in_without_an_agent(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from ide_storage.main import app
+    from ide_storage.progress import list_milestones, north_star
+
+    monkeypatch.setenv("WOLF_WIKI_ENABLED", "0")
+    client = TestClient(app)
+    _project("album")  # takes the slug, so the new one gets the next free one
+
+    made = client.post("/api/projects/start", json={
+        "name": "Album", "description": "Ten songs made with AI tools.",
+        "north_star": "Release a ten-song album I would play for friends.",
+        "status": "in_progress", "milestones": ["Pick the sound", " ", "Write ten songs"],
+        "folder": "/work/album", "tags": ["music", " "],
+    }).json()
+    assert made["slug"] == "album-2"
+    pid = made["id"]
+    assert north_star(pid)["current"]["body"] == "Release a ten-song album I would play for friends."
+    assert [m["title"] for m in list_milestones(pid)] == ["Pick the sound", "Write ten songs"]
+    project = client.get(f"/api/projects/{pid}").json()
+    assert (project["status"], project["description"]) == ("in_progress", "Ten songs made with AI tools.")
+    assert [p["path"] for p in client.get(f"/api/projects/{pid}/paths").json()] == ["/work/album"]
+    assert client.post("/api/projects/start", json={"name": "  "}).status_code == 400
+
+    entry = client.post(f"/api/projects/{pid}/journal", json={"text": "Decided to keep every song under three minutes."}).json()
+    assert entry["ok"] is True
+    chats = client.get(f"/api/projects/{pid}/chats", params={"archived": "true"}).json()
+    titles = [c["title"] for c in chats.get("archived", []) + chats.get("active", [])]
+    assert "Decided to keep every song under three minutes." in titles
+    assert client.post(f"/api/projects/{pid}/journal", json={"text": " "}).status_code == 400

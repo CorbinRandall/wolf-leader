@@ -492,6 +492,11 @@ extension HubClient {
         try await get("/api/skills", as: HubSkillsResponse.self)
     }
 
+    /// Take a skill out of the master set. The hub keeps the files in its trash.
+    func deleteSkill(id: String) async throws {
+        _ = try await data("/api/skills/" + (id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id), method: "DELETE")
+    }
+
     /// Add a skill from a ZIP. The hub names it from SKILL.md, its folder, or the file name.
     func addSkill(archive: Data, filename: String, overwrite: Bool) async throws -> String {
         try await postSkill(["archive_base64": archive.base64EncodedString(), "filename": filename, "overwrite": overwrite])
@@ -1030,6 +1035,11 @@ extension HubClient {
         return (((try JSONSerialization.jsonObject(with: raw) as? [String: Any])?["filed"] as? [Any]) ?? []).count
     }
 
+    /// File loose chats that clearly match a project; everything else goes to One-offs.
+    func fileLooseInOneOffs() async throws {
+        _ = try await data("/api/sessions/one-offs", method: "POST", body: Data("{}".utf8), timeout: 180)
+    }
+
     func deleteSession(id: Int) async throws {
         _ = try await data("/api/chats/\(id)", method: "DELETE", timeout: 60)
     }
@@ -1234,5 +1244,111 @@ struct HubAnswer: Decodable {
 extension HubClient {
     func ask(_ question: String) async throws -> HubAnswer {
         try JSONDecoder().decode(HubAnswer.self, from: try await data("/api/ask", query: ["q": question], timeout: 60))
+    }
+}
+
+// MARK: - Making and keeping projects by hand
+
+extension HubClient {
+    private func json(_ path: String, _ method: String, _ payload: [String: Any], timeout: TimeInterval = 60) async throws -> [String: Any] {
+        let raw = try await data(path, method: method, body: try JSONSerialization.data(withJSONObject: payload), timeout: timeout)
+        return (try? JSONSerialization.jsonObject(with: raw) as? [String: Any]) ?? [:]
+    }
+
+    /// Returns the new project's id.
+    func startProject(name: String, description: String, northStar: String, owner: String, status: String,
+                      milestones: [String], folder: String, tags: [String]) async throws -> Int {
+        let reply = try await json("/api/projects/start", "POST", [
+            "name": name, "description": description, "north_star": northStar, "owner": owner, "status": status,
+            "milestones": milestones, "folder": folder, "tags": tags,
+        ], timeout: 120)
+        return (reply["id"] as? Int) ?? 0
+    }
+
+    func writeJournal(projectID: Int, text: String) async throws {
+        _ = try await json("/api/projects/\(projectID)/journal", "POST", ["text": text], timeout: 180)
+    }
+
+    /// Link a folder. Returns the projects that already use it, if any (then it is not linked).
+    func addFolder(projectID: Int, path: String) async throws -> [String] {
+        let reply = try await json("/api/projects/\(projectID)/paths", "POST", ["path": path])
+        return (reply["shared_with"] as? [String]) ?? []
+    }
+
+    func removeFolder(projectID: Int, path: String) async throws {
+        _ = try await data("/api/projects/\(projectID)/paths", query: ["path": path], method: "DELETE")
+    }
+
+    func setTags(projectID: Int, tags: [String]) async throws {
+        _ = try await json("/api/projects/\(projectID)", "PUT", ["tags": tags])
+    }
+
+    func deleteProject(id: Int) async throws {
+        _ = try await data("/api/projects/\(id)", method: "DELETE", timeout: 120)
+    }
+}
+
+// MARK: - Profiles
+
+struct HubProfileItem: Identifiable, Hashable {
+    var id: Int
+    var kind: String
+    var text: String
+    var source: String
+}
+
+struct HubProfileSection: Identifiable, Hashable {
+    var id: String { kind }
+    var kind: String
+    var title: String
+    var items: [HubProfileItem]
+}
+
+extension HubClient {
+    private func personPath(_ name: String) -> String {
+        "/api/people/" + (name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name)
+    }
+
+    func profile(person: String) async throws -> [HubProfileSection] {
+        let json = (try JSONSerialization.jsonObject(with: try await data(personPath(person) + "/profile")) as? [String: Any]) ?? [:]
+        return ((json["sections"] as? [[String: Any]]) ?? []).map { section in
+            HubProfileSection(
+                kind: section["kind"] as? String ?? "about",
+                title: section["title"] as? String ?? "",
+                items: ((section["items"] as? [[String: Any]]) ?? []).compactMap { item in
+                    guard let id = item["id"] as? Int else { return nil }
+                    return HubProfileItem(id: id, kind: item["kind"] as? String ?? "about",
+                                          text: item["text"] as? String ?? "", source: item["source"] as? String ?? "manual")
+                })
+        }
+    }
+
+    func profileMarkdown(person: String) async throws -> String {
+        String(decoding: try await data(personPath(person) + "/profile.md"), as: UTF8.self)
+    }
+
+    func addProfileItem(person: String, text: String, kind: String, source: String = "manual") async throws {
+        _ = try await data(personPath(person) + "/profile", method: "POST",
+                           body: try JSONSerialization.data(withJSONObject: ["text": text, "kind": kind, "source": source]))
+    }
+
+    func updateProfileItem(id: Int, text: String? = nil, kind: String? = nil) async throws {
+        var body: [String: String] = [:]
+        if let text { body["text"] = text }
+        if let kind { body["kind"] = kind }
+        _ = try await data("/api/profile-items/\(id)", method: "PUT", body: try JSONSerialization.data(withJSONObject: body))
+    }
+
+    func deleteProfileItem(id: Int) async throws {
+        _ = try await data("/api/profile-items/\(id)", method: "DELETE")
+    }
+}
+
+extension HubClient {
+    /// GET (no body) or POST a JSON body, and read a JSON object back.
+    func jsonObject(_ path: String, body: [String: Any]? = nil, timeout: TimeInterval = 30) async throws -> [String: Any] {
+        let raw = try await data(path, method: body == nil ? "GET" : "POST",
+                                 body: try body.map { try JSONSerialization.data(withJSONObject: $0) }, timeout: timeout)
+        return (try JSONSerialization.jsonObject(with: raw) as? [String: Any]) ?? [:]
     }
 }

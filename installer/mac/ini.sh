@@ -46,7 +46,7 @@ function tzknown(v,   f, r, junk) {
 function check(s, k, v,   hp, i, j) {
   if (s == "wolf") {
     if (k == "format") { if (v != "1") bad("format must be 1 (this installer only reads format=1)") }
-    else if (k == "os") { if (v != "mac" && v != "windows") bad("os must be mac or windows") }
+    else if (k == "os") { if (v != "mac" && v != "windows" && v != "linux") bad("os must be mac, windows or linux") }
     else if (k == "hub_url" || k == "mcp_url") {
       if (v !~ /^https?:\/\/[^\/ \t]+/ || v ~ /[ \t]/) bad(k " must start with http:// or https:// followed by a host, no spaces")
     }
@@ -159,8 +159,8 @@ END {
 
   os = ""
   if (("wolf", "os") in val_of) os = val_of["wolf", "os"]
-  if (os != "" && expect_os != "" && os != expect_os && (os == "mac" || os == "windows"))
-    badk("wolf", "os", "this answer file is for os=" os " but this is the " (expect_os == "mac" ? "Mac" : "Windows") " installer - ask your agent again on this computer")
+  if (os != "" && expect_os != "" && os != expect_os && (os == "mac" || os == "windows" || os == "linux"))
+    badk("wolf", "os", "this answer file is for os=" os " but this is the " (expect_os == "mac" ? "Mac" : (expect_os == "linux" ? "Linux" : "Windows")) " installer - ask your agent again on this computer")
 
   # Share keys are judged by the OS this installer runs on, so a wrong os= gives one clear error.
   tos = (expect_os != "") ? expect_os : os
@@ -172,8 +172,8 @@ END {
     req = (tos == "windows") ? "unc letter user password role" : "smb_url user password role"
     m = split(req, rk, " ")
     for (i = 1; i <= m; i++) if (!((s, rk[i]) in val_of)) missing(s, rk[i])
-    if (tos == "mac" && ((s, "smb_url") in val_of) && val_of[s, "smb_url"] == "NONE")
-      badk(s, "smb_url", "smb_url is required on a Mac (smb://server/share)")
+    if ((tos == "mac" || tos == "linux") && ((s, "smb_url") in val_of) && val_of[s, "smb_url"] == "NONE")
+      badk(s, "smb_url", "smb_url is required on a Mac or Linux (smb://server/share)")
     if (tos == "windows" && ((s, "unc") in val_of) && val_of[s, "unc"] == "NONE")
       badk(s, "unc", "unc is required on Windows (\\\\server\\share)")
     if (((s, "user") in val_of) && ((s, "password") in val_of) && val_of[s, "user"] == "NONE" && val_of[s, "password"] == "ASK")

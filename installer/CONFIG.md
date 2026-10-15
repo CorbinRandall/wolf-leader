@@ -1,6 +1,6 @@
 # Installer answer file — `wolf-leader-setup.ini`
 
-The Windows and Mac installers both read this file. The user's own AI agent writes it in response to
+The Windows, Mac and Linux installers all read this file. The user's own AI agent writes it in response to
 `PROMPT.md`; the user pastes it into (or loads it from) the installer. Passwords are **never** put in
 this file by the agent: shares that need one say `password=ASK`, and the installer prompts the user
 directly on a password page.
@@ -13,7 +13,7 @@ that violates them and show the offending line.
 [wolf]
 ; version of this format; installers refuse anything else
 format=1
-; which OS the agent inspected: windows | mac
+; which OS the agent inspected: windows | mac | linux
 os=windows
 ; hub location the client should talk to. For mode=new on this machine use http://localhost:6971
 hub_url=http://wolf.local:6971
@@ -62,7 +62,7 @@ ssh_key=~/.ssh/id_ed25519
 ; up to five sections: share1..share5. Omit all of them if no network share is used.
 ; windows form, e.g. \\server\share   (required when os=windows)
 unc=\\wolf.local\wolf
-; mac form, e.g. smb://server/share   (required when os=mac)
+; mac and linux form, e.g. smb://server/share   (required when os=mac or os=linux)
 smb_url=smb://wolf.local/wolf
 ; Windows drive letter A-Z, single letter, no colon (windows only)
 letter=W

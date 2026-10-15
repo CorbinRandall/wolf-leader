@@ -1,6 +1,6 @@
 # Prompt the installer shows (copy → paste into your AI agent)
 
-Installers render this text with `{{OS}}` replaced by `windows` or `mac`, `{{MODE}}` by `new`,
+Installers render this text with `{{OS}}` replaced by `windows`, `mac` or `linux`, `{{MODE}}` by `new`,
 `connect` or `update`, and `{{HUB_HINT}}` by `http://localhost:6971` for `new`, otherwise
 `http://wolf.local:6971`. Keep the wording: it is written to force exact, machine-readable answers.
 
@@ -18,7 +18,8 @@ with a strict parser, so follow these rules exactly:
    `user=NONE` and `password=NONE`.
 5. Run real commands to check. Use: `git --version`, `python --version` (or `python3 --version`),
    `docker --version`, and look for Obsidian, Cursor and Claude Code in the usual install locations.
-   On Windows use `net use` to list mapped shares; on a Mac use `mount | grep smbfs`.
+   On Windows use `net use` to list mapped shares; on a Mac use `mount | grep smbfs`; on Linux use
+   `findmnt -t cifs,smb3` and `gio mount -l`.
 
 **Before you answer, back this machine up.** Create the folder
 `~/WolfLeader-backup-<YYYYMMDD-HHMM>` (on Windows `%USERPROFILE%\WolfLeader-backup-<YYYYMMDD-HHMM>`) and
@@ -26,7 +27,7 @@ copy into it every one of these that exists, keeping the folder structure:
 `~/.cursor/mcp.json`, `~/.cursor/hooks.json`, `~/.cursor/AGENTS.md`, `~/.cursor/wolf-leader.env`,
 `~/.cursor/rules/`, `~/.cursor/skills/`, `~/.claude/settings.json`, `~/.claude/CLAUDE.md`,
 `~/.claude/skills/`, `~/.gitconfig`, and the `.env` of any existing Wolf Leader hub folder.
-Also save the output of `net use` (Windows) or `mount | grep smbfs` (Mac) to `shares.txt` in that
+Also save the output of `net use` (Windows), `mount | grep smbfs` (Mac) or `findmnt -t cifs,smb3` (Linux) to `shares.txt` in that
 folder. Never copy passwords or keychain data. Report the folder in the `[backup]` section; if you
 could not make the backup, write `done=no` and the installer will make one itself.
 
@@ -66,7 +67,7 @@ ssh_key=<absolute path of the SSH private key FILE on this computer, or NONE>
 
 [share1]
 unc=<Windows only: \\server\share, else NONE>
-smb_url=<Mac only: smb://server/share, else NONE>
+smb_url=<Mac or Linux only: smb://server/share, else NONE>
 letter=<Windows only: single drive letter A-Z without colon, else NONE>
 user=<share username, or NONE>
 password=<ASK or NONE>
@@ -93,7 +94,7 @@ Never write the contents of a key, never type a password, never create keys, and
 anything on the hub computer. Reading `~/.ssh/config` and running the one test command is all.
 
 **Which shares to list (strict):** include a share only if a folder named exactly `wolf-leader`
-exists at the top of it (Mac: `<mount point>/wolf-leader`, Windows: `<letter>:\wolf-leader`). That
+exists at the top of it (Mac or Linux: `<mount point>/wolf-leader`, Windows: `<letter>:\wolf-leader`). That
 share is `[share1]` with `role=wolf`. Do not list any other share, even if it is mounted or looks
 related; I add those myself in the app. Only check for that folder name; do not open, list or read
 anything else on any share. If no share has a `wolf-leader` folder, omit all `[shareN]` sections.

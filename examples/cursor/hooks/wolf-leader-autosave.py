@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Idempotently save a meaningful Codex/Cursor transcript after each response."""
+"""Idempotently save a meaningful Codex, Cursor or Claude Code transcript after each response."""
 from __future__ import annotations
 import json, os, re, sys, urllib.request
 from pathlib import Path
@@ -8,7 +8,7 @@ API=(os.environ.get("WOLF_LEADER_API_LOCAL") or os.environ.get("WOLF_LEADER_API"
 CLIENT_DIR=Path(os.environ.get("WOLF_LEADER_CLIENT_DIR") or (Path.home()/".cursor"))
 
 # Client-injected "user" turns: not the person talking, so never the title or the match text.
-INJECTED_PREFIXES=("<recommended_plugins>","<environment_context>","# AGENTS.md instructions","<heartbeat>","<system-reminder>","<skills_instructions>","<codex_apps_client_time_context>")
+INJECTED_PREFIXES=("<command-name>","<local-command","<command-message>","<recommended_plugins>","<environment_context>","# AGENTS.md instructions","<heartbeat>","<system-reminder>","<skills_instructions>","<codex_apps_client_time_context>")
 WRAPPED_BLOCK=re.compile(r"^\s*<([a-z][a-z0-9]*(?:[_-][a-z0-9]+)+)>.*</\1>\s*$", re.S)
 
 def call(method, path, body=None, timeout=180):
@@ -30,6 +30,10 @@ def parse(path):
             item=row["payload"]; role=item.get("role"); content=text_blocks(item.get("content"))
         elif row.get("role") in ("user","assistant"):
             role=row.get("role"); content=text_blocks(row.get("message",{}).get("content"))
+        elif row.get("type") in ("user","assistant") and isinstance(row.get("message"),dict):
+            # Claude Code: side chats and its own notes are not the conversation; tool results have no text.
+            if row.get("isMeta") or row.get("isSidechain"): continue
+            role=row["message"].get("role"); content=text_blocks(row["message"].get("content"))
         if role not in ("user","assistant") or not content.strip(): continue
         if role=="user" and (content.lstrip().startswith(INJECTED_PREFIXES) or WRAPPED_BLOCK.match(content)): continue
         messages.append({"role":role,"content":content.strip(),**({"created_at":created} if created else {})})

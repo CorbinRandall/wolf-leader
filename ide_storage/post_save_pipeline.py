@@ -265,6 +265,11 @@ def post_save_pipeline(
         chat_ids=[chat["id"]],
     )
 
+    # Message-window embeddings, so "what was discussed" can match this chat's moments.
+    from ide_storage.conversation_search import sync_conversation_windows
+
+    report["conversation_windows"] = sync_conversation_windows(chat_ids=[chat["id"]])
+
     # Human-readable mirrors (Obsidian vault on the share + Fumadocs wiki).
     from ide_storage.mirrors import refresh_mirrors
 

@@ -556,8 +556,16 @@ async def global_search(
     limit: int = 50,
     include_archived: bool = False,
     kinds: Optional[str] = None,
+    project_id: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
 ):
-    """Hybrid keyword + vector search. kinds: comma-separated subset of memory,project,chat,message."""
+    """Hybrid keyword + fuzzy + vector search.
+
+    kinds: comma-separated subset of memory,project,chat,message,howl,convo.
+    project_id: only hits from this project. date_from / date_to: ISO dates
+    (YYYY-MM-DD), both ends inclusive.
+    """
     from ide_storage.search_ops import hybrid_search, _parse_kinds
 
     return hybrid_search(
@@ -566,7 +574,18 @@ async def global_search(
         include_archived=include_archived,
         hub_mode=False,
         kinds=_parse_kinds(kinds),
+        project_id=project_id,
+        date_from=date_from,
+        date_to=date_to,
     )
+
+
+@app.get("/api/projects/{project_id}/timeline")
+async def project_timeline_api(project_id: int, limit: int = 200):
+    """One project's chats, saved memories and howls, newest first."""
+    from ide_storage.conversation_search import project_timeline
+
+    return {"project_id": project_id, "items": project_timeline(project_id, limit=limit)}
 
 
 @app.get("/api/chats")

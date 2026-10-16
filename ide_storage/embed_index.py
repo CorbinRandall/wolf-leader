@@ -586,6 +586,29 @@ def _hydrate_knn_rows(
                         "slug": proj.get("slug"),
                     }
                 )
+            elif kind == "convo":
+                # A window of messages: ref_id is its first message id.
+                cur.execute(
+                    """
+                    SELECT m.id, m.chat_id, m.created_at, c.title, c.project_id
+                    FROM messages m JOIN chats c ON c.id = m.chat_id
+                    WHERE m.id = ?
+                    """,
+                    (ref_id,),
+                )
+                msg = cur.fetchone()
+                if not msg:
+                    continue
+                msg = dict(msg)
+                item.update(
+                    {
+                        "title": msg.get("title") or "Conversation",
+                        "content": (row.get("embed_text") or "")[:300],
+                        "chat_id": msg["chat_id"],
+                        "project_id": msg["project_id"],
+                        "created_at": msg["created_at"],
+                    }
+                )
             elif kind == "chat":
                 # Mirror the keyword leg: exclude non-active (archived) chats from
                 # vector results unless the caller explicitly wants archived too,

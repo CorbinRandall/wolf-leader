@@ -14,8 +14,6 @@ struct AskView: View {
     @State private var error: String? = nil
     @State private var projectNames: [Int: String] = [:]
     @State private var searchTask: Task<Void, Never>? = nil
-    @State private var kindFilter: HitGroup? = nil
-    @State private var projectFilter: Int? = nil
     @FocusState private var focused: Bool
 
     private var canSearch: Bool { !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -107,132 +105,86 @@ struct AskView: View {
             )
         } else if lastQuery.isEmpty {
             EmptyView()
-        } else if hits.isEmpty && !searching && (answer?.summary.isEmpty ?? true) {
+        } else if hits.isEmpty && !searching && (answer?.sections.isEmpty ?? true) && (answer?.sessions.isEmpty ?? true) {
             MainNotice(
                 symbol: "questionmark.bubble",
                 title: "Nothing found for \u{201C}\(lastQuery)\u{201D}",
                 message: "Try fewer or different words."
             )
         } else {
-            if let answer, !answer.summary.isEmpty { answerBlock(answer) }
-            if !hits.isEmpty {
-            WLSectionLabel(text: (answer?.summary.isEmpty ?? true)
-                           ? "\(hits.count) result\(hits.count == 1 ? "" : "s") for \u{201C}\(lastQuery)\u{201D}"
-                           : "Also found by search")
-                .padding(.top, DS.Spacing.sm)
-            resultFilters
-            LazyVStack(spacing: DS.Spacing.sm + 4) {
-                ForEach(filteredHits) { hit in
-                    AskResultCard(hit: hit, projectName: projectName(for: hit)) {
-                        open(hit)
+            if let answer, !answer.summary.isEmpty {
+                Text(answer.summary).font(DS.Font.body.weight(.semibold)).foregroundStyle(p.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, DS.Spacing.sm)
+            }
+            topics
+                .id(lastQuery) // a new search starts every topic collapsed again
+        }
+    }
+
+    /// One card per topic with only the top few rows, so you pick where to dig in.
+    private var topics: some View {
+        VStack(spacing: DS.Spacing.sm + 4) {
+            if !projectRows.isEmpty {
+                TopicGroup(title: "Projects", icon: "folder", items: projectRows) { row in
+                    ProjectHitRowView(row: row) { nav.open(project: row.id) }
+                }
+            }
+            ForEach(answer?.sections ?? []) { section in
+                TopicGroup(title: section.title, icon: MemoryKind(rawValue: section.kind)?.symbol ?? "square.stack",
+                           items: section.items) { item in
+                    AnswerItemRow(item: item,
+                                  read: item.chatID.map { chat in { reading = ReadingSession(id: chat, title: item.project ?? "Session", when: item.when) } },
+                                  openProject: item.projectID.map { id in { nav.open(project: id) } })
+                }
+            }
+            if let sessions = answer?.sessions, !sessions.isEmpty {
+                TopicGroup(title: "Sessions", icon: "book", items: sessions) { session in
+                    SessionRow(session: session) {
+                        reading = ReadingSession(id: session.chatID, title: session.title, when: session.when)
                     }
                 }
             }
+            ForEach(hitTopics, id: \.title) { topic in
+                TopicGroup(title: topic.title, icon: topic.icon, items: topic.hits) { hit in
+                    HitRow(hit: hit, projectName: projectName(for: hit)) { open(hit) }
+                }
             }
         }
     }
 
-    private var filteredHits: [HubSearchHit] {
-        hits.filter { hit in
-            (kindFilter == nil || HitGroup(hit) == kindFilter)
-                && (projectFilter == nil || hit.linkedProjectID == projectFilter)
-        }
+    /// The project the question named comes first, then projects that matched by name,
+    /// then projects mentioned most often in the other results.
+    private var projectRows: [ProjectHitRow] {
+        var order: [Int] = []
+        if let id = answer?.understoodProjectID { order.append(id) }
+        for hit in hits where hit.kind == "project" && !order.contains(hit.refID) { order.append(hit.refID) }
+        var mentions: [Int: Int] = [:]
+        for hit in hits { if let id = hit.linkedProjectID { mentions[id, default: 0] += 1 } }
+        order += mentions.keys.filter { !order.contains($0) }.sorted { (mentions[$0] ?? 0) > (mentions[$1] ?? 0) }
+        return order.map { ProjectHitRow(id: $0, name: projectNames[$0] ?? "Project \($0)", mentions: mentions[$0] ?? 0) }
     }
 
-    /// Narrow the results after they come back: by kind, and by the projects that appear in them.
-    @ViewBuilder
-    private var resultFilters: some View {
-        let groups = HitGroup.allCases.filter { g in hits.contains { HitGroup($0) == g } }
-        let projectIDs = Array(Set(hits.compactMap(\.linkedProjectID))).sorted {
-            (projectNames[$0] ?? "") < (projectNames[$1] ?? "")
-        }
-        HStack(spacing: 6) {
-            FilterChip(label: "All", count: hits.count, on: kindFilter == nil) { kindFilter = nil }
-            ForEach(groups, id: \.self) { g in
-                FilterChip(label: g.label, count: hits.filter { HitGroup($0) == g }.count, on: kindFilter == g) {
-                    kindFilter = kindFilter == g ? nil : g
-                }
-            }
-            Spacer(minLength: 0)
-            if projectIDs.count > 1 {
-                Menu {
-                    Button("All projects") { projectFilter = nil }
-                    Divider()
-                    ForEach(projectIDs, id: \.self) { id in
-                        Button(projectNames[id] ?? "Project \(id)") { projectFilter = id }
-                    }
-                } label: {
-                    Text(projectFilter.flatMap { projectNames[$0] } ?? "All projects")
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-            }
-        }
+    private struct HitTopic {
+        let title: String
+        let icon: String
+        let hits: [HubSearchHit]
+    }
+
+    private var hitTopics: [HitTopic] {
+        // Memories already shown in an answer section are not repeated.
+        let answered = Set((answer?.sections ?? []).flatMap { $0.items.map(\.memoryID) })
+        func pick(_ kinds: Set<String>) -> [HubSearchHit] { hits.filter { kinds.contains($0.kind) } }
+        return [
+            HitTopic(title: "Conversations", icon: "bubble.left.and.bubble.right", hits: pick(["message", "convo", "chat", "howl"])),
+            HitTopic(title: "Memories", icon: "square.stack", hits: pick(["memory"]).filter { !answered.contains($0.refID) }),
+            HitTopic(title: "Files", icon: "doc.text", hits: pick(["catalog", "chunk"])),
+        ].filter { !$0.hits.isEmpty }
     }
 
     private var placeholder: String {
         let name = projectNames.values.sorted().first { $0.count > 3 } ?? "my project"
         return "What did I learn for \(name) three days ago?"
-    }
-
-    /// The direct answer: what the hub understood, then the matching entries in full.
-    @ViewBuilder
-    private func answerBlock(_ answer: HubAnswer) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                if let project = answer.understoodProject { MainTag(text: project) }
-                if let when = answer.understoodWhen { MainTag(text: when, color: p.accent2) }
-                if let about = answer.understoodAbout { MainTag(text: about, color: p.textMuted) }
-                Spacer(minLength: 0)
-            }
-            Text(answer.summary).font(DS.Font.body.weight(.semibold)).foregroundStyle(p.text)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.top, DS.Spacing.sm)
-        ForEach(answer.sections) { section in
-            WLGroup(title: section.title, subtitle: "\(section.items.count)", icon: MemoryKind(rawValue: section.kind)?.symbol ?? "square.stack") {
-                ForEach(section.items) { item in
-                    if item.id != section.items.first?.id { WLDivider() }
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(item.text).font(DS.Font.bodySmall).foregroundStyle(p.text).textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                        HStack(spacing: 8) {
-                            Text([item.project, HubDate.format(item.when)].compactMap { $0 }.joined(separator: " · "))
-                                .font(DS.Font.micro).foregroundStyle(p.textFaint)
-                            if let chat = item.chatID {
-                                Button("Read the session") { reading = ReadingSession(id: chat, title: item.project ?? "Session", when: item.when) }
-                                    .buttonStyle(.plain).font(DS.Font.micro.weight(.semibold)).foregroundStyle(p.accent)
-                            }
-                            if let project = item.projectID {
-                                Button("Open project") { nav.open(project: project) }
-                                    .buttonStyle(.plain).font(DS.Font.micro.weight(.semibold)).foregroundStyle(p.accent)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        if !answer.sessions.isEmpty {
-            WLGroup(title: "Sessions", subtitle: "What was worked on then. Click one to read it.", icon: "book") {
-                ForEach(answer.sessions) { session in
-                    if session.id != answer.sessions.first?.id { WLDivider() }
-                    Button { reading = ReadingSession(id: session.chatID, title: session.title, when: session.when) } label: {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(session.title).font(DS.Font.bodySmall.weight(.semibold)).foregroundStyle(p.text).lineLimit(2)
-                                .multilineTextAlignment(.leading)
-                            if !session.summary.isEmpty {
-                                Text(session.summary).font(DS.Font.micro).foregroundStyle(p.textMuted)
-                                    .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
-                            }
-                            Text([session.project, HubDate.format(session.when)].compactMap { $0 }.joined(separator: " · "))
-                                .font(DS.Font.micro).foregroundStyle(p.textFaint)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
     }
 
     private func projectName(for hit: HubSearchHit) -> String? {
@@ -254,8 +206,6 @@ struct AskView: View {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return }
         searchTask?.cancel()
-        kindFilter = nil
-        projectFilter = nil
         searchTask = Task {
             searching = true
             defer { searching = false }
@@ -316,12 +266,133 @@ private struct AskIconCluster: View {
     }
 }
 
-private struct AskResultCard: View {
+/// A saved session picked to be read in the app.
+struct ReadingSession: Identifiable, Hashable {
+    let id: Int
+    let title: String
+    let when: String?
+}
+
+
+// MARK: - Topic cards
+
+private let topicPreview = 3
+
+/// A titled card that shows the first few rows and grows on request.
+private struct TopicGroup<Item: Identifiable, Row: View>: View {
+    @Environment(\.palette) private var p
+    let title: String
+    let icon: String
+    let items: [Item]
+    @ViewBuilder let row: (Item) -> Row
+    @State private var shown = topicPreview
+
+    var body: some View {
+        WLGroup(title: title, subtitle: "\(items.count)", icon: icon) {
+            ForEach(Array(items.prefix(shown).enumerated()), id: \.element.id) { index, item in
+                if index > 0 { WLDivider() }
+                row(item)
+            }
+            if items.count > topicPreview {
+                HStack(spacing: 14) {
+                    if items.count > shown {
+                        Button("Show \(min(10, items.count - shown)) more") { withAnimation(DS.Anim.hover) { shown += 10 } }
+                    }
+                    if shown > topicPreview {
+                        Button("Show less") { withAnimation(DS.Anim.hover) { shown = topicPreview } }
+                    }
+                }
+                .buttonStyle(.plain)
+                .font(DS.Font.micro.weight(.semibold))
+                .foregroundStyle(p.accent)
+            }
+        }
+    }
+}
+
+struct ProjectHitRow: Identifiable, Hashable {
+    let id: Int
+    let name: String
+    let mentions: Int
+}
+
+private struct ProjectHitRowView: View {
+    @Environment(\.palette) private var p
+    let row: ProjectHitRow
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Text(row.name).font(DS.Font.bodySmall.weight(.semibold)).foregroundStyle(p.text)
+                Spacer(minLength: 8)
+                if row.mentions > 0 {
+                    Text("\(row.mentions) result\(row.mentions == 1 ? "" : "s")").font(DS.Font.micro).foregroundStyle(p.textMuted)
+                }
+                Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(p.textFaint)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct AnswerItemRow: View {
+    @Environment(\.palette) private var p
+    let item: HubAnswerItem
+    let read: (() -> Void)?
+    let openProject: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(item.text).font(DS.Font.bodySmall).foregroundStyle(p.text).textSelection(.enabled)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Text([item.project, HubDate.format(item.when)].compactMap { $0 }.joined(separator: " · "))
+                    .font(DS.Font.micro).foregroundStyle(p.textFaint)
+                if let read {
+                    Button("Read the session", action: read)
+                        .buttonStyle(.plain).font(DS.Font.micro.weight(.semibold)).foregroundStyle(p.accent)
+                }
+                if let openProject {
+                    Button("Open project", action: openProject)
+                        .buttonStyle(.plain).font(DS.Font.micro.weight(.semibold)).foregroundStyle(p.accent)
+                }
+            }
+        }
+    }
+}
+
+private struct SessionRow: View {
+    @Environment(\.palette) private var p
+    let session: HubAnswerSession
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(session.title).font(DS.Font.bodySmall.weight(.semibold)).foregroundStyle(p.text).lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                if !session.summary.isEmpty {
+                    Text(session.summary).font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
+                Text([session.project, HubDate.format(session.when)].compactMap { $0 }.joined(separator: " · "))
+                    .font(DS.Font.micro).foregroundStyle(p.textFaint)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// One search result inside a topic card: kind, where it came from, when, and a short excerpt.
+private struct HitRow: View {
     @Environment(\.palette) private var p
     let hit: HubSearchHit
     let projectName: String?
     let action: () -> Void
-    @State private var hovering = false
 
     private var kindLabel: String {
         switch hit.kind {
@@ -344,122 +415,32 @@ private struct AskResultCard: View {
     private var snippet: String {
         var text = hit.content ?? ""
         if hit.kind == "memory", text.isEmpty, let title = hit.title { text = title }
-        let flat = text
-            .replacingOccurrences(of: "\r", with: " ")
-            .replacingOccurrences(of: "\n", with: " ")
+        return text.replacingOccurrences(of: "\r", with: " ").replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespaces)
-        return flat.count > 280 ? String(flat.prefix(280)) + "…" : flat
     }
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     MainTag(text: kindLabel)
-                    Text(heading)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(p.text)
-                        .lineLimit(1)
+                    Text(heading).font(DS.Font.bodySmall.weight(.semibold)).foregroundStyle(p.text).lineLimit(1)
                     Spacer(minLength: 8)
                     if let date = hit.date {
-                        Text(HubDate.format(date))
-                            .font(DS.Font.timestamp)
-                            .foregroundStyle(p.textMuted)
+                        Text(HubDate.format(date)).font(DS.Font.timestamp).foregroundStyle(p.textMuted)
                     }
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(hovering ? p.accent : p.textFaint)
                 }
                 if !snippet.isEmpty {
-                    Text(snippet)
-                        .font(DS.Font.bodySmall)
-                        .foregroundStyle(p.text.opacity(0.85))
-                        .lineLimit(4)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Text(snippet).font(DS.Font.micro).foregroundStyle(p.text.opacity(0.85)).lineLimit(2)
+                        .multilineTextAlignment(.leading)
                 }
                 if let decision = hit.decisions.first {
                     Label("Decided: \(decision.text)", systemImage: "checkmark.seal")
-                        .font(DS.Font.micro)
-                        .foregroundStyle(p.text.opacity(0.85))
-                        .lineLimit(2)
-                }
-                if let around = hit.context.first {
-                    Text("\(around.role ?? "") \u{00B7} \(around.text)")
-                        .font(DS.Font.micro)
-                        .foregroundStyle(p.textMuted)
-                        .lineLimit(2)
-                }
-                if hit.source == "fuzzy" {
-                    Text("Close spelling match").font(DS.Font.micro).foregroundStyle(p.textFaint)
-                }
-                if let name = projectName, hit.kind != "memory", hit.kind != "project" {
-                    Label(name, systemImage: "folder")
-                        .font(DS.Font.micro)
-                        .foregroundStyle(p.textMuted)
+                        .font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(1)
                 }
             }
-            .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(hovering ? p.surfaceRaised : p.surface,
-                        in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
-                    .strokeBorder(p.border.opacity(0.7), lineWidth: 0.6)
-            )
             .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { h in withAnimation(DS.Anim.hover) { hovering = h } }
-        .help("Open in the hub")
-    }
-}
-
-
-/// A saved session picked to be read in the app.
-struct ReadingSession: Identifiable, Hashable {
-    let id: Int
-    let title: String
-    let when: String?
-}
-
-/// The kinds a result can be narrowed to.
-enum HitGroup: CaseIterable, Hashable {
-    case memories, conversations, projects, other
-
-    init(_ hit: HubSearchHit) {
-        switch hit.kind {
-        case "memory": self = .memories
-        case "chat", "message", "convo", "howl": self = .conversations
-        case "project": self = .projects
-        default: self = .other
-        }
-    }
-
-    var label: String {
-        switch self {
-        case .memories: return "Memories"
-        case .conversations: return "Conversations"
-        case .projects: return "Projects"
-        case .other: return "Files"
-        }
-    }
-}
-
-private struct FilterChip: View {
-    @Environment(\.palette) private var p
-    let label: String
-    let count: Int
-    let on: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Text("\(label) \(count)")
-                .font(.system(size: 11, weight: .semibold))
-                .padding(.horizontal, 10).padding(.vertical, 4)
-                .foregroundStyle(on ? p.background : p.text)
-                .background(on ? p.accent : p.surface, in: Capsule())
-                .overlay(Capsule().strokeBorder(p.border.opacity(on ? 0 : 0.7), lineWidth: 0.6))
         }
         .buttonStyle(.plain)
     }

@@ -1242,6 +1242,7 @@ struct HubAnswerSession: Decodable, Identifiable, Hashable {
 struct HubAnswer: Decodable {
     var summary: String
     var understoodProject: String?
+    var understoodProjectID: Int?
     var understoodWhen: String?
     var understoodAbout: String?
     var sections: [HubAnswerSection]
@@ -1259,6 +1260,7 @@ struct HubAnswer: Decodable {
             understoodAbout = u.str("about")
             if let project = try? u.nestedContainer(keyedBy: HubJSONKey.self, forKey: HubJSONKey("project")) {
                 understoodProject = project.str("name")
+                understoodProjectID = project.int("id")
             }
         }
     }

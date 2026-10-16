@@ -138,56 +138,19 @@ function switchTab(tab) {
   else if (tab === "projects") showClassicProjects();
 }
 
-function searchFilters() {
-  const project = $("#search-project")?.value || "";
-  const from = $("#search-from")?.value || "";
-  const to = $("#search-to")?.value || "";
-  return { project, from, to, active: Boolean(project || from || to) };
-}
-
-function populateSearchProjects() {
-  const select = $("#search-project");
-  if (!select) return;
-  const current = select.value;
-  const options = (state.projects || [])
-    .slice()
-    .sort((a, b) => String(a.name || a.slug).localeCompare(String(b.name || b.slug)))
-    .map((p) => `<option value="${p.id}">${escapeHtml(p.name || p.slug || `#${p.id}`)}</option>`);
-  select.innerHTML = `<option value="">All projects</option>${options.join("")}`;
-  select.value = current;
-}
-
 async function runGlobalSearch(q) {
   const list = $("#sidebar-list");
   list.innerHTML = `<div class="loading">Searching…</div>`;
   try {
     const kinds = searchKindsForTab(state.tab);
-    const f = searchFilters();
     const params = new URLSearchParams({ q });
     if (kinds) params.set("kinds", kinds);
-    if (f.project) params.set("project_id", f.project);
-    if (f.from) params.set("date_from", f.from);
-    if (f.to) params.set("date_to", f.to);
     const data = await api(`/api/search?${params.toString()}`);
     state.searchResults = data.results || [];
     state.searchMode = data.fuzzy ? "fuzzy" : (data.mode || "keyword");
     renderSidebar();
   } catch (err) {
     list.innerHTML = `<div class="loading">Search failed: ${escapeHtml(String(err))}</div>`;
-  }
-}
-
-// One project, newest first: its chats, saved memories and howls.
-async function runProjectTimeline(projectId) {
-  const list = $("#sidebar-list");
-  list.innerHTML = `<div class="loading">Loading timeline…</div>`;
-  try {
-    const data = await api(`/api/projects/${projectId}/timeline`);
-    state.searchResults = (data.items || []).map((it) => ({ ...it, project_id: projectId }));
-    state.searchMode = "timeline";
-    renderSidebar();
-  } catch (err) {
-    list.innerHTML = `<div class="loading">Timeline failed: ${escapeHtml(String(err))}</div>`;
   }
 }
 
@@ -200,7 +163,6 @@ function renderSearchResults() {
   const modeLabel = {
     hybrid: "⊕ hybrid",
     fuzzy: "≈ typo-tolerant",
-    timeline: "timeline",
   }[mode] || "keyword";
   if (!results.length) {
     list.innerHTML = `<div class="sidebar-hint">No results — try different words.</div>`;
@@ -1482,19 +1444,6 @@ function searchPlaceholderForTab(tab) {
 }
 
 let _searchTimer = null;
-function refreshSearchForFilters() {
-  clearTimeout(_searchTimer);
-  const q = ($("#search").value || "").trim();
-  const f = searchFilters();
-  if (q.length >= 3) {
-    _searchTimer = setTimeout(() => runGlobalSearch(q), 150);
-  } else if (f.project && state.tab !== "kanban" && state.tab !== "skills") {
-    _searchTimer = setTimeout(() => runProjectTimeline(+f.project), 150);
-  } else {
-    state.searchResults = null;
-    renderSidebar();
-  }
-}
 $("#search").addEventListener("input", () => {
   clearTimeout(_searchTimer);
   const q = ($("#search").value || "").trim();
@@ -1508,11 +1457,9 @@ $("#search").addEventListener("input", () => {
   if (q.length >= 3) {
     _searchTimer = setTimeout(() => runGlobalSearch(q), 350);
   } else {
-    refreshSearchForFilters();
+    state.searchResults = null;
+    renderSidebar();
   }
-});
-["#search-project", "#search-from", "#search-to"].forEach((sel) => {
-  $(sel)?.addEventListener("change", refreshSearchForFilters);
 });
 $("#search").addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
@@ -1525,7 +1472,6 @@ $("#search").addEventListener("keydown", (e) => {
 // --- Init ---
 (async function init() {
   await loadData();
-  populateSearchProjects();
   const params = new URLSearchParams(location.search);
   const pathSlug = decodeURIComponent(location.pathname.replace(/^\/+|\/+$/g, ""));
   const pathProject = pathSlug && !pathSlug.includes("/")

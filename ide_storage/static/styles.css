@@ -1015,8 +1015,3 @@ body[data-tab="projects"] .main {
   body[data-tab="projects"] .sidebar-footer { grid-row: 3; border-right: 0; }
   body[data-tab="projects"] .main { grid-row: 4; overflow: visible; }
 }
-
-/* Search filters (project and date range) under the search box */
-.search-filters { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
-.search-filters select,
-.search-filters input { font: inherit; font-size: 12px; flex: 1 1 90px; min-width: 0; }

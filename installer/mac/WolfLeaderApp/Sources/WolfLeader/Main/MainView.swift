@@ -12,7 +12,7 @@ enum MainSection: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .projects: return "Projects"
         case .library: return "Library"
-        case .ask: return "Ask"
+        case .ask: return "Super Search"
         case .shares: return "Shares"
         case .settings: return "Settings"
         }
@@ -59,6 +59,7 @@ struct MainView: View {
     @StateObject private var updates = UpdateChecker()
     @StateObject private var nav = Navigator()
     @State private var hubOK: Bool? = nil
+    @State private var toolbarQuery = ""
 
     var body: some View {
         NavigationSplitView {
@@ -119,6 +120,12 @@ struct MainView: View {
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(p.background)
+        }
+        // Always in the top-right corner: Return opens Super Search with what was typed.
+        .searchable(text: $toolbarQuery, placement: .toolbar, prompt: "Super Search")
+        .onSubmit(of: .search) {
+            nav.search(toolbarQuery)
+            toolbarQuery = ""
         }
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {

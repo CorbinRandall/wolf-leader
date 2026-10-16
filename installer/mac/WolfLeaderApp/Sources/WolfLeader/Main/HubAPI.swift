@@ -366,8 +366,24 @@ struct HubMemory: Decodable, Identifiable, Hashable {
     }
 }
 
+/// A line attached to a search hit: a decision saved from that chat, or a message said around it.
+struct HubHitLine: Decodable, Hashable {
+    var text: String
+    var role: String?
+    var type: String?
+    var when: String?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: HubJSONKey.self)
+        text = c.str("content") ?? ""
+        role = c.str("role")
+        type = c.str("type")
+        when = c.str("when")
+    }
+}
+
 struct HubSearchHit: Decodable, Identifiable, Hashable {
-    /// memory | project | chat | message | howl | catalog | chunk
+    /// memory | project | chat | message | convo | howl | catalog | chunk
     var kind: String
     var refID: Int
     var title: String?
@@ -380,6 +396,10 @@ struct HubSearchHit: Decodable, Identifiable, Hashable {
     var chatTitle: String?
     var stamp: String?
     var rank: Double?
+    /// "fuzzy" when the words matched with a typo.
+    var source: String?
+    var decisions: [HubHitLine]
+    var context: [HubHitLine]
 
     var id: String { "\(kind):\(refID):\(chatID ?? 0)" }
     var date: Date? { HubDate.parse(stamp) }
@@ -396,15 +416,18 @@ struct HubSearchHit: Decodable, Identifiable, Hashable {
         slug = c.str("slug", "project_slug")
         path = c.str("path")
         chatTitle = c.str("chat_title")
-        stamp = c.str("updated_at", "created_at", "occurred_at")
+        stamp = c.str("when_iso", "created_at", "occurred_at", "updated_at")
         rank = c.double("rrf_score", "rank", "score")
+        source = c.str("source")
+        decisions = (try? c.decode([HubHitLine].self, forKey: HubJSONKey("decisions"))) ?? []
+        context = (try? c.decode([HubHitLine].self, forKey: HubJSONKey("context"))) ?? []
     }
 
     /// The chat this hit belongs to, if any (chat rows and message rows).
     var linkedChatID: Int? {
         switch kind {
         case "chat": return refID
-        case "message": return chatID
+        case "message", "convo": return chatID
         default: return nil
         }
     }

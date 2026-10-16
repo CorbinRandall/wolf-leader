@@ -14,6 +14,8 @@ struct AskView: View {
     @State private var error: String? = nil
     @State private var projectNames: [Int: String] = [:]
     @State private var searchTask: Task<Void, Never>? = nil
+    @State private var kindFilter: HitGroup? = nil
+    @State private var projectFilter: Int? = nil
     @FocusState private var focused: Bool
 
     private var canSearch: Bool { !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -25,7 +27,19 @@ struct AskView: View {
         }
         .task(id: store.config.hubURL) { await loadProjectNames() }
         .sheet(item: $reading) { SessionReader(chatID: $0.id, title: $0.title, when: $0.when) }
-        .onAppear { focused = true }
+        .onAppear {
+            focused = true
+            takePendingSearch()
+        }
+        .onChange(of: nav.pendingSearch) { takePendingSearch() }
+    }
+
+    /// A search typed in the toolbar lands here and runs straight away.
+    private func takePendingSearch() {
+        guard let q = nav.pendingSearch else { return }
+        nav.pendingSearch = nil
+        query = q
+        runSearch()
     }
 
     /// Hero tile in the shape of MacParakeet's "Transcribe YouTube & more".
@@ -33,7 +47,7 @@ struct AskView: View {
         Tile {
             VStack(spacing: DS.Spacing.md) {
                 AskIconCluster()
-                Text("Ask your memory")
+                Text("Super Search")
                     .font(.system(size: 22, weight: .bold, design: .rounded))
                     .foregroundStyle(p.text)
                 HStack(spacing: 10) {
@@ -66,14 +80,14 @@ struct AskView: View {
                     Button(action: runSearch) {
                         HStack(spacing: 6) {
                             Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold))
-                            Text("Ask")
+                            Text("Search")
                         }
                     }
                     .buttonStyle(OutlineButtonStyle())
                     .disabled(!canSearch)
                 }
                 .frame(maxWidth: 520)
-                Text("Name a project and a time, like \u{201C}three days ago\u{201D} or \u{201C}last week\u{201D}. Answers are quoted from your journal, not written by an AI.")
+                Text("Search every memory, session and message. Or ask, like \u{201C}what did I save for Wolf Leader three months ago?\u{201D} Answers are quoted from your records, not written by an AI.")
                     .font(DS.Font.caption)
                     .foregroundStyle(p.textFaint)
                     .multilineTextAlignment(.center)
@@ -106,13 +120,52 @@ struct AskView: View {
                            ? "\(hits.count) result\(hits.count == 1 ? "" : "s") for \u{201C}\(lastQuery)\u{201D}"
                            : "Also found by search")
                 .padding(.top, DS.Spacing.sm)
+            resultFilters
             LazyVStack(spacing: DS.Spacing.sm + 4) {
-                ForEach(hits) { hit in
+                ForEach(filteredHits) { hit in
                     AskResultCard(hit: hit, projectName: projectName(for: hit)) {
                         open(hit)
                     }
                 }
             }
+            }
+        }
+    }
+
+    private var filteredHits: [HubSearchHit] {
+        hits.filter { hit in
+            (kindFilter == nil || HitGroup(hit) == kindFilter)
+                && (projectFilter == nil || hit.linkedProjectID == projectFilter)
+        }
+    }
+
+    /// Narrow the results after they come back: by kind, and by the projects that appear in them.
+    @ViewBuilder
+    private var resultFilters: some View {
+        let groups = HitGroup.allCases.filter { g in hits.contains { HitGroup($0) == g } }
+        let projectIDs = Array(Set(hits.compactMap(\.linkedProjectID))).sorted {
+            (projectNames[$0] ?? "") < (projectNames[$1] ?? "")
+        }
+        HStack(spacing: 6) {
+            FilterChip(label: "All", count: hits.count, on: kindFilter == nil) { kindFilter = nil }
+            ForEach(groups, id: \.self) { g in
+                FilterChip(label: g.label, count: hits.filter { HitGroup($0) == g }.count, on: kindFilter == g) {
+                    kindFilter = kindFilter == g ? nil : g
+                }
+            }
+            Spacer(minLength: 0)
+            if projectIDs.count > 1 {
+                Menu {
+                    Button("All projects") { projectFilter = nil }
+                    Divider()
+                    ForEach(projectIDs, id: \.self) { id in
+                        Button(projectNames[id] ?? "Project \(id)") { projectFilter = id }
+                    }
+                } label: {
+                    Text(projectFilter.flatMap { projectNames[$0] } ?? "All projects")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
             }
         }
     }
@@ -201,6 +254,8 @@ struct AskView: View {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return }
         searchTask?.cancel()
+        kindFilter = nil
+        projectFilter = nil
         searchTask = Task {
             searching = true
             defer { searching = false }
@@ -273,6 +328,7 @@ private struct AskResultCard: View {
         case "memory": return (hit.memoryType ?? "memory").replacingOccurrences(of: "_", with: " ")
         case "catalog": return "file"
         case "chunk": return "file excerpt"
+        case "convo": return "conversation"
         default: return hit.kind
         }
     }
@@ -280,7 +336,7 @@ private struct AskResultCard: View {
     private var heading: String {
         switch hit.kind {
         case "memory": return projectName ?? "Memory"
-        case "message": return hit.chatTitle ?? hit.title ?? "Chat message"
+        case "message", "convo": return hit.chatTitle ?? hit.title ?? "Conversation"
         default: return hit.title ?? projectName ?? "Result"
         }
     }
@@ -321,6 +377,21 @@ private struct AskResultCard: View {
                         .lineLimit(4)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if let decision = hit.decisions.first {
+                    Label("Decided: \(decision.text)", systemImage: "checkmark.seal")
+                        .font(DS.Font.micro)
+                        .foregroundStyle(p.text.opacity(0.85))
+                        .lineLimit(2)
+                }
+                if let around = hit.context.first {
+                    Text("\(around.role ?? "") \u{00B7} \(around.text)")
+                        .font(DS.Font.micro)
+                        .foregroundStyle(p.textMuted)
+                        .lineLimit(2)
+                }
+                if hit.source == "fuzzy" {
+                    Text("Close spelling match").font(DS.Font.micro).foregroundStyle(p.textFaint)
+                }
                 if let name = projectName, hit.kind != "memory", hit.kind != "project" {
                     Label(name, systemImage: "folder")
                         .font(DS.Font.micro)
@@ -349,4 +420,47 @@ struct ReadingSession: Identifiable, Hashable {
     let id: Int
     let title: String
     let when: String?
+}
+
+/// The kinds a result can be narrowed to.
+enum HitGroup: CaseIterable, Hashable {
+    case memories, conversations, projects, other
+
+    init(_ hit: HubSearchHit) {
+        switch hit.kind {
+        case "memory": self = .memories
+        case "chat", "message", "convo", "howl": self = .conversations
+        case "project": self = .projects
+        default: self = .other
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .memories: return "Memories"
+        case .conversations: return "Conversations"
+        case .projects: return "Projects"
+        case .other: return "Files"
+        }
+    }
+}
+
+private struct FilterChip: View {
+    @Environment(\.palette) private var p
+    let label: String
+    let count: Int
+    let on: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text("\(label) \(count)")
+                .font(.system(size: 11, weight: .semibold))
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .foregroundStyle(on ? p.background : p.text)
+                .background(on ? p.accent : p.surface, in: Capsule())
+                .overlay(Capsule().strokeBorder(p.border.opacity(on ? 0 : 0.7), lineWidth: 0.6))
+        }
+        .buttonStyle(.plain)
+    }
 }

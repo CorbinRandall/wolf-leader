@@ -35,3 +35,13 @@ def test_sqlite_path_on_windows_and_unix(monkeypatch):
     assert sqlite_path() == "D:/a/data/wolf-leader.db"
     monkeypatch.setenv("DATABASE_URL", "sqlite:///" + "srv/x/wolf-leader.db")
     assert sqlite_path() == "/srv/x/wolf-leader.db"
+
+
+def test_first_save_on_a_new_hub():
+    from ide_storage.main import app
+
+    client = TestClient(app)
+    saved = client.post("/api/save-project", json={"session_id": "fresh-1", "title": "First chat", "messages": [
+        {"role": "user", "content": "Testing a brand new hub: does the very first chat save?"},
+        {"role": "assistant", "content": "Yes."}]}).json()
+    assert saved["ok"], saved

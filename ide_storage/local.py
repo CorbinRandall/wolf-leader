@@ -98,7 +98,12 @@ def main(argv: list[str] | None = None) -> int:
 
     # The MCP server runs beside the API as its own process, as in the server image.
     mcp_log = open(data / "mcp.log", "a", encoding="utf-8")
-    mcp = subprocess.Popen([sys.executable, "-m", "ide_storage.mcp_standalone"], env=dict(os.environ),
+    # The MCP process must find this same code, however this one was started (run_hub.pyw adds it
+    # to sys.path only for itself).
+    code_dir = str(Path(__file__).resolve().parent.parent)
+    child_env = dict(os.environ)
+    child_env["PYTHONPATH"] = os.pathsep.join(p for p in (code_dir, child_env.get("PYTHONPATH", "")) if p)
+    mcp = subprocess.Popen([sys.executable, "-m", "ide_storage.mcp_standalone"], env=child_env,
                            stdout=mcp_log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
 
     def stop(*_):

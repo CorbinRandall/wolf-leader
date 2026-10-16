@@ -111,8 +111,9 @@ def filter_hits_by_scope(
 
 # --- fuzzy fallback --------------------------------------------------------
 
-def _word_matches(word: str, text: str, tokens: set[str]) -> bool:
-    if word in text:
+def _word_matches(word: str, tokens: set[str]) -> bool:
+    """Whole-word or near-word match. Substrings do not count, so "lid" will not match "solid"."""
+    if word in tokens:
         return True
     for tok in tokens:
         if abs(len(tok) - len(word)) > 2:
@@ -143,7 +144,7 @@ def fuzzy_search(
     def accept(text: str) -> bool:
         lowered = text.lower()
         tokens = set(_TOKEN_RE.findall(lowered))
-        return all(_word_matches(w, lowered, tokens) for w in words)
+        return all(_word_matches(w, tokens) for w in words)
 
     with db_conn() as conn:
         cur = conn.cursor()

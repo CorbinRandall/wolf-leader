@@ -295,7 +295,12 @@ def hybrid_search(
         seen = {result_key(h) for h in keyword_hits}
         keyword_hits = keyword_hits + [h for h in fuzzy_hits if result_key(h) not in seen]
 
-    if vector_hits:
+    if vector_hits and fuzzy_hits:
+        # Word matches (even typo-tolerant ones) come first; meaning-only hits fill in after.
+        seen = {result_key(h) for h in keyword_hits}
+        merged = keyword_hits + [h for h in vector_hits if result_key(h) not in seen]
+        mode = "hybrid"
+    elif vector_hits:
         merged = reciprocal_rank_fusion(keyword_hits, vector_hits)
         mode = "hybrid"
     else:

@@ -58,6 +58,7 @@ struct MainView: View {
     @Environment(\.palette) private var p
     @StateObject private var updates = UpdateChecker()
     @StateObject private var nav = Navigator()
+    @StateObject private var search = SearchModel()
     @State private var hubOK: Bool? = nil
     @State private var toolbarQuery = ""
 
@@ -139,6 +140,7 @@ struct MainView: View {
             }
         }
         .environmentObject(nav)
+        .environmentObject(search)
         .onAppear { nav.watchSwipes() }
         .environmentObject(updates)
         .task {

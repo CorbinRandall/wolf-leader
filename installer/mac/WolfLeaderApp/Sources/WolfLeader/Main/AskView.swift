@@ -5,16 +5,18 @@ struct AskView: View {
     @EnvironmentObject private var nav: Navigator
     @Environment(\.palette) private var p
 
-    @State private var answer: HubAnswer?
+    @EnvironmentObject private var search: SearchModel
     @State private var reading: ReadingSession?
-    @State private var query = ""
-    @State private var lastQuery = ""
-    @State private var hits: [HubSearchHit] = []
-    @State private var searching = false
-    @State private var error: String? = nil
     @State private var projectNames: [Int: String] = [:]
-    @State private var searchTask: Task<Void, Never>? = nil
     @FocusState private var focused: Bool
+
+    // The search lives in SearchModel, so it is still here after you open a result and come back.
+    private var answer: HubAnswer? { search.answer }
+    private var query: String { search.query }
+    private var lastQuery: String { search.lastQuery }
+    private var hits: [HubSearchHit] { search.hits }
+    private var searching: Bool { search.searching }
+    private var error: String? { search.error }
 
     private var canSearch: Bool { !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
@@ -36,7 +38,7 @@ struct AskView: View {
     private func takePendingSearch() {
         guard let q = nav.pendingSearch else { return }
         nav.pendingSearch = nil
-        query = q
+        search.query = q
         runSearch()
     }
 
@@ -53,7 +55,7 @@ struct AskView: View {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(p.textMuted)
-                        TextField(placeholder, text: $query)
+                        TextField(placeholder, text: $search.query)
                             .textFieldStyle(.plain)
                             .font(DS.Font.bodySmall)
                             .foregroundStyle(p.text)
@@ -62,7 +64,7 @@ struct AskView: View {
                         if searching {
                             ProgressView().controlSize(.small)
                         } else if !query.isEmpty {
-                            Button { query = "" } label: {
+                            Button { search.query = "" } label: {
                                 Image(systemName: "xmark.circle.fill").foregroundStyle(p.textFaint)
                             }
                             .buttonStyle(.plain)
@@ -118,7 +120,6 @@ struct AskView: View {
                     .padding(.top, DS.Spacing.sm)
             }
             topics
-                .id(lastQuery) // a new search starts every topic collapsed again
         }
     }
 
@@ -203,25 +204,7 @@ struct AskView: View {
     }
 
     private func runSearch() {
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return }
-        searchTask?.cancel()
-        searchTask = Task {
-            searching = true
-            defer { searching = false }
-            do {
-                let found = try await store.hub.ask(q)
-                guard !Task.isCancelled else { return }
-                answer = found
-                hits = found.results
-                lastQuery = q
-                error = nil
-            } catch {
-                guard !Task.isCancelled else { return }
-                self.error = error.localizedDescription
-                lastQuery = q
-            }
-        }
+        search.run(hub: store.hub)
     }
 
     private func loadProjectNames() async {
@@ -285,7 +268,12 @@ private struct TopicGroup<Item: Identifiable, Row: View>: View {
     let icon: String
     let items: [Item]
     @ViewBuilder let row: (Item) -> Row
-    @State private var shown = topicPreview
+    @EnvironmentObject private var search: SearchModel
+
+    private var shown: Int {
+        get { search.shown[title] ?? topicPreview }
+        nonmutating set { search.shown[title] = newValue }
+    }
 
     var body: some View {
         WLGroup(title: title, subtitle: "\(items.count)", icon: icon) {
@@ -443,5 +431,46 @@ private struct HitRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Search state that outlives the page
+
+/// The last search and which cards were opened. Owned by the main window, so going to a
+/// result and pressing Back shows the same results instead of an empty page.
+@MainActor
+final class SearchModel: ObservableObject {
+    @Published var query = ""
+    @Published private(set) var lastQuery = ""
+    @Published private(set) var answer: HubAnswer?
+    @Published private(set) var hits: [HubSearchHit] = []
+    @Published private(set) var searching = false
+    @Published private(set) var error: String?
+    /// Rows shown per topic card, by card title.
+    @Published var shown: [String: Int] = [:]
+
+    private var task: Task<Void, Never>?
+
+    func run(hub: HubClient) {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return }
+        task?.cancel()
+        task = Task {
+            searching = true
+            defer { searching = false }
+            do {
+                let found = try await hub.ask(q)
+                guard !Task.isCancelled else { return }
+                answer = found
+                hits = found.results
+                lastQuery = q
+                shown = [:]
+                error = nil
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.error = error.localizedDescription
+                lastQuery = q
+            }
+        }
     }
 }

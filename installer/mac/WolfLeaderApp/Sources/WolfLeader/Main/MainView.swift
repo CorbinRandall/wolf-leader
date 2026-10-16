@@ -12,7 +12,7 @@ enum MainSection: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .projects: return "Projects"
         case .library: return "Library"
-        case .ask: return "Super Search"
+        case .ask: return "Search"
         case .shares: return "Shares"
         case .settings: return "Settings"
         }
@@ -89,7 +89,6 @@ struct MainView: View {
                     Label("Snippets", systemImage: "chevron.left.forwardslash.chevron.right").tag(SidebarItem.library("snippets"))
                 }
                 Section {
-                    Label(MainSection.ask.label, systemImage: MainSection.ask.symbol).tag(SidebarItem.section(.ask))
                     Label(MainSection.shares.label, systemImage: MainSection.shares.symbol).tag(SidebarItem.section(.shares))
                     Label {
                         HStack(spacing: 6) {
@@ -121,8 +120,8 @@ struct MainView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(p.background)
         }
-        // Always in the top-right corner: Return opens Super Search with what was typed.
-        .searchable(text: $toolbarQuery, placement: .toolbar, prompt: "Super Search")
+        // Always in the top-right corner: Return opens the results page with what was typed.
+        .searchable(text: $toolbarQuery, placement: .toolbar, prompt: "Search")
         .onSubmit(of: .search) {
             nav.search(toolbarQuery)
             toolbarQuery = ""

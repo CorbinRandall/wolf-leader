@@ -47,7 +47,7 @@ struct AskView: View {
         Tile {
             VStack(spacing: DS.Spacing.md) {
                 AskIconCluster()
-                Text("Super Search")
+                Text("Search")
                     .font(.system(size: 22, weight: .bold, design: .rounded))
                     .foregroundStyle(p.text)
                 HStack(spacing: 10) {

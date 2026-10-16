@@ -87,7 +87,7 @@ final class Navigator: ObservableObject {
         go(next)
     }
 
-    /// Run a search from anywhere: open Super Search with this text.
+    /// Run a search from anywhere: open the results page with this text.
     func search(_ text: String) {
         let q = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return }

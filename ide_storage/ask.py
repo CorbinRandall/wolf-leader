@@ -219,7 +219,7 @@ def ask(question: str, *, limit: int = 40, now: datetime | None = None) -> dict[
     try:
         from ide_storage.search_ops import hybrid_search
 
-        results = hybrid_search(question, limit=20, include_archived=True, hub_mode=False).get("results", [])
+        results = hybrid_search(question, limit=60, include_archived=True, hub_mode=False).get("results", [])
     except Exception:  # noqa: BLE001
         results = []
     return {

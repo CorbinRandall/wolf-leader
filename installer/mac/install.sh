@@ -4,10 +4,15 @@
 # it can also be run by hand. Contract: installer/CONFIG.md.
 # Each phase starts with a "==> <Step name>" line; the app turns those into its live checklist.
 #
-#   install.sh --ini wolf-leader-setup.ini --mode new|connect|update \
+#   install.sh --ini wolf-leader-setup.ini|auto --mode new|connect|update \
 #              [--toggles client,shares,prereqs,obsidian,wiki] \
 #              [--git-name "Name" --git-email you@example.com] [--result FILE]
 #              [--backup-dir DIR] [--dry-run]
+#
+# --ini auto: setup answers for itself (hub on this computer, what is installed here). Used for a
+# hub on this computer, where there is nothing to ask an AI agent about.
+# --mode new: the hub runs on this computer. When the installer carries the built-in hub
+# (installer/runtime), that is used: no Docker. Without it, the hub runs in Docker.
 #
 # Share passwords never go on the command line: put "shareN=<password>" lines in a mode-600 file
 # and pass its path in WL_SECRETS_FILE. This script reads it and deletes it before doing anything.
@@ -60,7 +65,7 @@ while [ $# -gt 0 ]; do
 done
 
 case "$MODE" in new|connect|update) ;; *) echo "--mode must be new, connect or update" >&2; exit 2 ;; esac
-[ -n "$INI" ] && [ -f "$INI" ] || { echo "--ini FILE is required (wolf-leader-setup.ini)" >&2; exit 2; }
+[ "$INI" = auto ] || { [ -n "$INI" ] && [ -f "$INI" ]; } || { echo "--ini FILE (or auto) is required (wolf-leader-setup.ini)" >&2; exit 2; }
 
 IS_MAC=0
 IS_LINUX=0
@@ -218,6 +223,52 @@ say "  mode:    $MODE"
 say "  toggles: ${TOGGLES:-none}"
 say "  log:     $LOG"
 
+# Setup's own answers: the hub on this computer, and what is installed here.
+auto_answers() {
+  local tz device
+  tz=$(readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||')
+  [ -n "$tz" ] || tz=$(timedatectl show -p Timezone --value 2>/dev/null || true)
+  [ -n "$tz" ] && [ -f "/usr/share/zoneinfo/$tz" ] || tz=UTC
+  device=$(hostname -s 2>/dev/null || hostname)
+  device=$(printf '%s' "$device" | tr -c 'A-Za-z0-9-' '-' | sed 's/-*$//' | cut -c1-32)
+  [ -n "$device" ] || device=this-computer
+  yn() { if "$@" >/dev/null 2>&1; then echo yes; else echo no; fi; }
+  cat <<ANSWERS
+[wolf]
+format=1
+os=$PLATFORM
+hub_url=http://127.0.0.1:${WL_HUB_PORT:-6971}
+mcp_url=http://127.0.0.1:$(( ${WL_HUB_PORT:-6971} + 1 ))/mcp
+timezone=$tz
+device_name=$device
+[detected]
+git=$(yn git_usable)
+python=$(yn real_python)
+python_version=NONE
+docker=$(yn has docker)
+obsidian=$(if [ -d /Applications/Obsidian.app ] || has obsidian; then echo yes; else echo no; fi)
+cursor=$(if [ -d "$HOME/.cursor" ] || [ -d /Applications/Cursor.app ] || has cursor; then echo yes; else echo no; fi)
+claude_code=$(if [ -d "$HOME/.claude" ] || has claude; then echo yes; else echo no; fi)
+wolf_client=$(if [ -d "$HOME/.cursor/skills/wolfhowl" ] || [ -f "$HOME/.cursor/rules/wolf-leader-hub.mdc" ]; then echo yes; else echo no; fi)
+[backup]
+done=no
+path=NONE
+files=0
+[original]
+found=no
+where=NONE
+folder=NONE
+ssh_target=NONE
+ssh_port=NONE
+ssh_key=NONE
+ANSWERS
+}
+if [ "$INI" = auto ]; then
+  auto_answers >"$WORK/auto.ini"
+  INI="$WORK/auto.ini"
+  say "  answers: filled in by setup (hub on this computer)"
+fi
+
 wl_ini_extract "$INI" >"$WORK/answers.ini"
 if ! wl_ini_parse "$WORK/answers.ini" "$PLATFORM" >"$WORK/cfg"; then
   say ""
@@ -274,8 +325,10 @@ while IFS="$TAB" read -r kind rel path; do
   esac
 done <"$DIR/manifest.tsv"
 echo "Done. Restart Cursor / Claude Code."
+launchctl bootout "gui/$(id -u)/app.wolfleader.hub" >/dev/null 2>&1 || true
+systemctl --user disable --now wolf-leader-hub.service >/dev/null 2>&1 || true
 echo "Not undone by this script: Keychain passwords, Login Items, mounted shares, installed apps,"
-echo "and Docker containers (stop a hub with: docker compose -f docker-compose.postgres.yml down)."
+echo "your Wolf Leader data, and Docker containers (stop a hub with: docker compose -f docker-compose.postgres.yml down)."
 RESTORE
 }
 
@@ -285,7 +338,8 @@ snapshot_targets() {
     .cursor/skills/save .cursor/skills/new .claude/skills/save-new .claude/skills/save \
     .claude/skills/new .claude/settings.json .claude/hooks/wolf-leader-save.sh \
     .claude/hooks/wolf-leader-autosave.py .claude/wolf-leader.env .gitconfig \
-    .local/share/applications/wolf-leader.desktop; do
+    .local/share/applications/wolf-leader.desktop Library/LaunchAgents/app.wolfleader.hub.plist \
+    .config/systemd/user/wolf-leader-hub.service; do
     printf '%s\n' "$HOME/$f"
   done
   for f in "$ROOT"/examples/cursor/rules/*.mdc; do
@@ -360,8 +414,42 @@ else
 fi
 
 # --- preflight: a new hub needs Docker; fail before touching anything -------------------------
+# --- the built-in hub: a whole hub (Python, packages, search model) inside the installer ---------
+hub_target() {
+  case "$(uname -s)-$(uname -m)" in
+    Darwin-arm64) echo mac-arm64 ;;
+    Darwin-x86_64) echo mac-x86_64 ;;
+    Linux-x86_64) echo linux-x86_64 ;;
+  esac
+}
+find_runtime() {
+  local t d
+  t=$(hub_target)
+  for d in "${WL_HUB_RUNTIME:-}" "$ROOT/hub/$t" "$ROOT/../hub/$t"; do
+    if [ -n "$d" ] && [ -x "$d/run-hub" ]; then (cd "$d" && pwd); return 0; fi
+  done
+  return 1
+}
+RUNTIME=$(find_runtime || true)
+# The built-in hub's port (6971, MCP on the next one). Tests set WL_HUB_PORT to run beside another hub.
+HUB_PORT=${WL_HUB_PORT:-6971}
+MCP_PORT=$((HUB_PORT + 1))
+HUB_HOME="$DATA_HOME/runtime"
+HUB_DATA="$DATA_HOME/hub"
+HUB_PLIST="$HOME/Library/LaunchAgents/app.wolfleader.hub.plist"
+HUB_UNIT="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/wolf-leader-hub.service"
+LOCAL_HUB=0
+if [ -n "$RUNTIME" ]; then
+  if [ "$MODE" = new ]; then LOCAL_HUB=1; fi
+  # An update refreshes a built-in hub that is already set up.
+  if [ "$MODE" = update ] && { [ -f "$HUB_PLIST" ] || [ -f "$HUB_UNIT" ]; }; then LOCAL_HUB=1; fi
+fi
+
 COMPOSE=""
-if [ "$MODE" = new ]; then
+if [ "$MODE" = new ] && [ "$LOCAL_HUB" = 1 ]; then
+  step "Wolf Leader hub (built in)"
+  ok "this installer carries the whole hub: no Docker needed ($RUNTIME)"
+elif [ "$MODE" = new ]; then
   step "Docker (required for a new hub)"
   if [ "$IS_LINUX" = 1 ] && ! has docker; then
     fatal "Docker is not installed. Install Docker Engine (https://docs.docker.com/engine/install/), then run Wolf Leader setup again."
@@ -871,7 +959,102 @@ set_env_key() {
     END { if (!done) print k "=" v }' "$file" >"$file.wolf-tmp" && mv "$file.wolf-tmp" "$file"
 }
 
-if [ "$MODE" = new ]; then
+hub_health() { curl -fsS --max-time 3 "http://127.0.0.1:$HUB_PORT/health" 2>/dev/null; }
+
+stop_local_hub() {
+  if [ "$IS_MAC" = 1 ]; then
+    launchctl bootout "gui/$(id -u)/app.wolfleader.hub" >/dev/null 2>&1 || true
+  elif has systemctl; then
+    systemctl --user stop wolf-leader-hub.service >/dev/null 2>&1 || true
+  fi
+  if [ -f "$HUB_DATA/hub.pid" ]; then kill "$(cat "$HUB_DATA/hub.pid")" >/dev/null 2>&1 || true; fi
+}
+
+start_local_hub() {
+  if [ "$IS_MAC" = 1 ]; then
+    write_file "$HUB_PLIST" 644 <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>app.wolfleader.hub</string>
+  <key>ProgramArguments</key>
+  <array><string>$HUB_HOME/run-hub</string><string>--data</string><string>$HUB_DATA</string><string>--port</string><string>$HUB_PORT</string><string>--mcp-port</string><string>$MCP_PORT</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>$LOG_DIR/hub.log</string>
+  <key>StandardErrorPath</key><string>$LOG_DIR/hub.log</string>
+</dict>
+</plist>
+PLIST
+    run launchctl bootstrap "gui/$(id -u)" "$HUB_PLIST" || warn "could not start the hub's background service"
+  elif has systemctl && systemctl --user show-environment >/dev/null 2>&1; then
+    write_file "$HUB_UNIT" 644 <<UNIT
+[Unit]
+Description=Wolf Leader hub (this computer)
+
+[Service]
+ExecStart=$HUB_HOME/run-hub --data $HUB_DATA --port $HUB_PORT --mcp-port $MCP_PORT
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+UNIT
+    run systemctl --user daemon-reload
+    run systemctl --user enable --now wolf-leader-hub.service || warn "could not start the hub's background service"
+    run systemctl --user restart wolf-leader-hub.service || true
+  else
+    # No user services (a container, WSL): start it now and at each desktop login.
+    write_file "${XDG_CONFIG_HOME:-$HOME/.config}/autostart/wolf-leader-hub.desktop" 644 <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=Wolf Leader hub
+Exec=$HUB_HOME/run-hub --data $HUB_DATA --port $HUB_PORT --mcp-port $MCP_PORT
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+DESKTOP
+    if [ "$DRY" = 0 ]; then
+      mkdir -p "$HUB_DATA"
+      nohup "$HUB_HOME/run-hub" --data "$HUB_DATA" --port "$HUB_PORT" --mcp-port "$MCP_PORT" >>"$LOG_DIR/hub.log" 2>&1 &
+      echo $! >"$HUB_DATA/hub.pid"
+      ok "hub started (it starts again at your next desktop login)"
+    fi
+  fi
+}
+
+if [ "$LOCAL_HUB" = 1 ]; then
+  step "Wolf Leader hub (on this computer)"
+  if [ "$DRY" = 0 ] && hub_health >/dev/null && [ ! -f "$HUB_PLIST" ] && [ ! -f "$HUB_UNIT" ] && [ ! -f "$HUB_DATA/hub.pid" ]; then
+    fatal "Something else already answers on port $HUB_PORT (another Wolf Leader hub?). Stop it, then run setup again."
+  fi
+  stop_local_hub
+  run rm -rf "$HUB_HOME.new"
+  run mkdir -p "$DATA_HOME"
+  run cp -R "$RUNTIME" "$HUB_HOME.new" || fatal "could not copy the hub to $HUB_HOME"
+  if [ ! -d "$RUNTIME/models" ] && [ -d "$RUNTIME/../models" ]; then
+    run cp -R "$RUNTIME/../models" "$HUB_HOME.new/models"
+  fi
+  run rm -rf "$HUB_HOME"
+  run mv "$HUB_HOME.new" "$HUB_HOME"
+  # Copied out of a downloaded app, the files keep the download mark, and macOS would block the
+  # hub's Python when it starts in the background. The person already opened the app itself.
+  if [ "$IS_MAC" = 1 ] && [ "$DRY" = 0 ]; then xattr -dr com.apple.quarantine "$HUB_HOME" 2>/dev/null || true; fi
+  run mkdir -p "$HUB_DATA"
+  start_local_hub
+  if [ "$DRY" = 1 ]; then
+    say "  [dry-run] wait for http://127.0.0.1:6971/health"
+  else
+    say "  Waiting for the hub to start..."
+    up=0
+    for _ in $(seq 1 90); do if hub_health >/dev/null; then up=1; break; fi; sleep 2; done
+    if [ "$up" = 1 ]; then ok "the hub runs on this computer at http://127.0.0.1:$HUB_PORT (data: $HUB_DATA)"; else warn "the hub did not answer within 3 minutes; see $LOG_DIR/hub.log"; fi
+  fi
+  note "Your Wolf Leader data is in $HUB_DATA. It is reachable only from this computer."
+fi
+
+if [ "$MODE" = new ] && [ "$LOCAL_HUB" = 0 ]; then
   step "Wolf Leader hub (Docker)"
   if [ "$HUB_DIR" = "$ROOT" ]; then
     ok "using this checkout as the hub folder: $HUB_DIR"

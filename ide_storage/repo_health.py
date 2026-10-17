@@ -104,13 +104,14 @@ def project_repo_status() -> list[dict[str, Any]]:
             owners.setdefault(_norm(row["path"]), set()).add(int(row["project_id"]))
         cur.execute(
             """
-            SELECT DISTINCT ON (project_id) project_id, git_commit, git_branch, git_remote,
+            SELECT project_id, git_commit, git_branch, git_remote,
                    git_dirty_files, device_name, workspace_path, created_at
             FROM howls
             WHERE git_commit IS NOT NULL OR git_remote IS NOT NULL
-            ORDER BY project_id, created_at DESC
+            ORDER BY project_id, created_at, id
             """
         )
+        # Oldest first, so each project's newest howl is the one left (works on SQLite too).
         howls = {int(r["project_id"]): dict(r) for r in cur.fetchall()}
     active_ids = {int(p["id"]) for p in projects}
     notes = notes_repos()

@@ -12,7 +12,7 @@ enum MainSection: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .projects: return "Projects"
         case .library: return "Library"
-        case .ask: return "Ask"
+        case .ask: return "Search"
         case .shares: return "Shares"
         case .settings: return "Settings"
         }
@@ -58,7 +58,9 @@ struct MainView: View {
     @Environment(\.palette) private var p
     @StateObject private var updates = UpdateChecker()
     @StateObject private var nav = Navigator()
+    @StateObject private var search = SearchModel()
     @State private var hubOK: Bool? = nil
+    @State private var toolbarQuery = ""
 
     var body: some View {
         NavigationSplitView {
@@ -88,7 +90,6 @@ struct MainView: View {
                     Label("Snippets", systemImage: "chevron.left.forwardslash.chevron.right").tag(SidebarItem.library("snippets"))
                 }
                 Section {
-                    Label(MainSection.ask.label, systemImage: MainSection.ask.symbol).tag(SidebarItem.section(.ask))
                     Label(MainSection.shares.label, systemImage: MainSection.shares.symbol).tag(SidebarItem.section(.shares))
                     Label {
                         HStack(spacing: 6) {
@@ -120,6 +121,12 @@ struct MainView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(p.background)
         }
+        // Always in the top-right corner: Return opens the results page with what was typed.
+        .searchable(text: $toolbarQuery, placement: .toolbar, prompt: "Search")
+        .onSubmit(of: .search) {
+            nav.search(toolbarQuery)
+            toolbarQuery = ""
+        }
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
                 Button { nav.goBack() } label: { Image(systemName: "chevron.left") }
@@ -133,6 +140,7 @@ struct MainView: View {
             }
         }
         .environmentObject(nav)
+        .environmentObject(search)
         .onAppear { nav.watchSwipes() }
         .environmentObject(updates)
         .task {

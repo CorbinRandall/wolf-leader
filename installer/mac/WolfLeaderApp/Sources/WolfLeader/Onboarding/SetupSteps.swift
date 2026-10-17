@@ -58,7 +58,6 @@ struct SetupWelcomeStep: View {
 struct SetupPathStep: View {
     @Environment(\.palette) private var p
     @ObservedObject var model: OnboardingModel
-    @State private var dockerFound = SetupSystem.dockerFound
 
     init(model: OnboardingModel) {
         self.model = model
@@ -68,17 +67,25 @@ struct SetupPathStep: View {
         VStack(alignment: .leading, spacing: 12) {
             SetupHeader(title: "Your setup", subtitle: "Where does your Wolf Leader memory live?")
             SetupChoiceCard(
+                title: SetupPath.newOnThisMac.setupTitle,
+                detail: "No server and no Docker. Your AI tools save here, on this Mac. Most people pick this.",
+                example: "You work on one computer",
+                selected: model.path == .newOnThisMac
+            ) { model.path = .newOnThisMac }
+            if model.path == .newOnThisMac && !SetupSystem.builtInHub {
+                SetupNotice(
+                    kind: .warn,
+                    text: SetupSystem.isIntel
+                        ? "On a Mac with an Intel processor the hub runs in Docker instead. Install Docker Desktop and open it once before you press Install."
+                        : "This copy of Wolf Leader was built without the hub inside it, so the hub would run in Docker. Download Wolf Leader again, or install Docker Desktop first."
+                )
+            }
+            SetupChoiceCard(
                 title: SetupPath.connectExisting.setupTitle,
-                detail: "Connect this Mac to it. Most people pick this.",
+                detail: "Connect this Mac to it.",
                 example: "Your NAS or home server at http://wolf.local:6971",
                 selected: model.path == .connectExisting
             ) { model.path = .connectExisting }
-            SetupChoiceCard(
-                title: SetupPath.updateThisMac.setupTitle,
-                detail: "Refresh the skills, rule and settings to the latest version.",
-                example: "You set this Mac up before and want the new version",
-                selected: model.path == .updateThisMac
-            ) { model.path = .updateThisMac }
             SetupChoiceCard(
                 title: SetupPath.newOnServer.setupTitle,
                 detail: "Your memory lives on a computer that's always on, so every machine can reach it.",
@@ -86,33 +93,11 @@ struct SetupPathStep: View {
                 selected: model.path == .newOnServer
             ) { model.path = .newOnServer }
             SetupChoiceCard(
-                title: SetupPath.newOnThisMac.setupTitle,
-                detail: "Runs in Docker and only works while this Mac is on.",
-                example: "Good for trying it out",
-                selected: model.path == .newOnThisMac
-            ) {
-                model.path = .newOnThisMac
-                dockerFound = SetupSystem.dockerFound
-            }
-            if model.path == .newOnThisMac && !dockerFound {
-                VStack(alignment: .leading, spacing: 8) {
-                    SetupNotice(
-                        kind: .warn,
-                        text: "Docker isn't installed on this Mac. Install Docker Desktop and open it once before you press Install, or pick another option."
-                    )
-                    HStack(spacing: 14) {
-                        if let url = URL(string: "https://www.docker.com/products/docker-desktop/") {
-                            Link("Get Docker Desktop", destination: url)
-                                .font(.system(size: 13))
-                        }
-                        Button("Check again") { dockerFound = SetupSystem.dockerFound }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 13))
-                            .foregroundStyle(p.accent)
-                    }
-                    .padding(.leading, 4)
-                }
-            }
+                title: SetupPath.updateThisMac.setupTitle,
+                detail: "Refresh the skills, rule and settings to the latest version.",
+                example: "You set this Mac up before and want the new version",
+                selected: model.path == .updateThisMac
+            ) { model.path = .updateThisMac }
         }
     }
 }
@@ -234,14 +219,6 @@ struct SetupTogglesStep: View {
                 example: "Browse your project notes like a wiki",
                 isOn: $model.toggles.obsidian
             )
-            if model.path == .newOnThisMac {
-                SetupToggleCard(
-                    title: "Wiki — highly recommended",
-                    detail: "Builds a website from your projects inside the hub.",
-                    example: "A searchable site of every project at /wiki",
-                    isOn: $model.toggles.wiki
-                )
-            }
         }
     }
 }
@@ -535,7 +512,7 @@ struct SetupReviewStep: View {
         if t.prereqs { items.append("Git and Python (if missing)") }
         if t.obsidian { items.append("Obsidian") }
         if model.path == .newOnThisMac {
-            items.append(t.wiki ? "Hub in Docker, with the wiki" : "Hub in Docker")
+            items.append("The Wolf Leader hub, running on this Mac")
         }
         return items.isEmpty ? "Only the git name and a hub check" : items.joined(separator: ", ")
     }

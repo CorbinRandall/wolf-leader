@@ -16,6 +16,8 @@ final class Navigator: ObservableObject {
     @Published private(set) var route: Route
     @Published private(set) var canGoBack = false
     @Published private(set) var canGoForward = false
+    /// A search typed in the toolbar, waiting for Super Search to run it.
+    @Published var pendingSearch: String?
 
     private var backStack: [Route] = []
     private var forwardStack: [Route] = []
@@ -83,6 +85,14 @@ final class Navigator: ObservableObject {
         next.section = .projects
         next.projectID = id
         go(next)
+    }
+
+    /// Run a search from anywhere: open the results page with this text.
+    func search(_ text: String) {
+        let q = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return }
+        pendingSearch = q
+        open(section: .ask)
     }
 
     /// Leave a project page. If you came from the list, that is simply "back".

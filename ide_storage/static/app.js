@@ -143,23 +143,27 @@ async function runGlobalSearch(q) {
   list.innerHTML = `<div class="loading">Searching…</div>`;
   try {
     const kinds = searchKindsForTab(state.tab);
-    const url = `/api/search?q=${encodeURIComponent(q)}${kinds ? `&kinds=${kinds}` : ""}`;
-    const data = await api(url);
+    const params = new URLSearchParams({ q });
+    if (kinds) params.set("kinds", kinds);
+    const data = await api(`/api/search?${params.toString()}`);
     state.searchResults = data.results || [];
-    state.searchMode = data.mode || "keyword";
+    state.searchMode = data.fuzzy ? "fuzzy" : (data.mode || "keyword");
     renderSidebar();
   } catch (err) {
     list.innerHTML = `<div class="loading">Search failed: ${escapeHtml(String(err))}</div>`;
   }
 }
 
-const KIND_ICON = { memory: "◈", project: "◫", chat: "▤", message: "◎" };
+const KIND_ICON = { memory: "◈", project: "◫", chat: "▤", message: "◎", convo: "◎", howl: "✦" };
 
 function renderSearchResults() {
   const list = $("#sidebar-list");
   const results = state.searchResults || [];
   const mode = state.searchMode || "keyword";
-  const modeLabel = mode === "hybrid" ? "⊕ hybrid" : "keyword";
+  const modeLabel = {
+    hybrid: "⊕ hybrid",
+    fuzzy: "≈ typo-tolerant",
+  }[mode] || "keyword";
   if (!results.length) {
     list.innerHTML = `<div class="sidebar-hint">No results — try different words.</div>`;
     $("#list-count").textContent = `0 results · ${modeLabel}`;
@@ -172,11 +176,25 @@ function renderSearchResults() {
     const sub = escapeHtml(
       r.kind === "memory" ? (r.memory_type || "memory") :
       r.kind === "project" ? (r.slug || r.kind) :
-      r.kind === "chat" ? "session" : r.kind
+      r.kind === "chat" ? "session" :
+      r.kind === "howl" ? "howl" :
+      r.kind === "convo" || r.kind === "message" ? (r.chat_title || "message") : r.kind
     );
+    const when = r.when ? `<span class="muted">${escapeHtml(r.when)}</span>` : "";
+    const fuzzyBadge = r.source === "fuzzy" ? `<span class="muted">≈ typo match</span>` : "";
+    const decision = (r.decisions || [])[0];
+    const decisionLine = decision
+      ? `<div class="chat-item-meta"><span>Decided: ${escapeHtml(decision.content).slice(0, 120)}</span></div>`
+      : "";
+    const contextLine = (r.context || []).length
+      ? `<div class="chat-item-meta muted">${escapeHtml(r.context[0].when)} · ${escapeHtml(r.context[0].role)}: ${escapeHtml(r.context[0].content).slice(0, 100)}</div>`
+      : "";
+    const body = r.kind === "message" || r.kind === "convo" ? escapeHtml(r.content || "").slice(0, 200) : "";
     return `<button type="button" class="chat-item" data-sr-kind="${escapeHtml(r.kind)}" data-sr-id="${r.id}" data-sr-pid="${r.project_id || ""}" data-sr-cid="${r.chat_id || ""}">
       <div class="chat-item-title">${icon} ${title}</div>
-      <div class="chat-item-meta"><span>${sub}</span>${sim ? `<span class="muted">${sim} match</span>` : ""}</div>
+      ${body && body !== title ? `<div class="chat-item-meta">${body}</div>` : ""}
+      <div class="chat-item-meta"><span>${sub}</span>${when}${sim ? `<span class="muted">${sim} match</span>` : ""}${fuzzyBadge}</div>
+      ${decisionLine}${contextLine}
     </button>`;
   }).join("");
   list.querySelectorAll("[data-sr-kind]").forEach((b) => {
@@ -196,13 +214,13 @@ function renderSearchResults() {
         $("#search").value = "";
         renderSidebar();
         await selectChat(id);
-      } else if (kind === "memory" && pid) {
+      } else if ((kind === "memory" || kind === "howl") && pid) {
         switchTab("projects");
         state.searchResults = null;
         $("#search").value = "";
         renderSidebar();
         await selectProject(pid);
-      } else if (kind === "message" && b.dataset.srCid) {
+      } else if ((kind === "message" || kind === "convo") && b.dataset.srCid) {
         const chatId = +b.dataset.srCid;
         switchTab("archive");
         state.searchResults = null;

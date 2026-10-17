@@ -56,11 +56,19 @@ echo "Wolf Leader keeps your projects and AI chats in one place, for every AI to
 echo
 
 # 1. What kind of install
+BUILT_IN=0
+[ -x "$ROOT/hub/linux-x86_64/run-hub" ] && [ "$(uname -m)" = x86_64 ] && BUILT_IN=1
 if [ -z "$MODE" ]; then
-  echo "  1) Connect this computer to my Wolf Leader hub"
-  echo "  2) Start a new hub on this computer (needs Docker)"
+  if [ "$BUILT_IN" = 1 ]; then
+    echo "  1) Just this computer: everything runs inside Wolf Leader (most people pick this)"
+  else
+    echo "  1) Just this computer: a hub here, in Docker"
+  fi
+  echo "  2) Connect this computer to my Wolf Leader hub on another computer"
   echo "  3) Update an existing setup"
-  case "$(ask "Choose 1, 2 or 3:" 1)" in 2) MODE=new ;; 3) MODE=update ;; *) MODE=connect ;; esac
+  case "$(ask "Choose 1, 2 or 3:" 1)" in 2) MODE=connect ;; 3) MODE=update ;; *) MODE=new ;; esac
+  # A built-in hub needs no answers from an AI agent: setup knows them.
+  if [ "$MODE" = new ] && [ "$BUILT_IN" = 1 ] && [ -z "$INI" ]; then INI=auto; fi
 fi
 case "$MODE" in new|connect|update) ;; *) echo "--mode must be new, connect or update" >&2; exit 2 ;; esac
 
@@ -95,7 +103,7 @@ if [ -z "$INI" ]; then
     echo "Ask your agent to fix it, then paste the new answer and press Ctrl-D."
   done
   INI="$WORK/answer.ini"
-else
+elif [ "$INI" != auto ]; then
   wl_ini_extract "$INI" >"$WORK/answers.ini"
   if ! wl_ini_parse "$WORK/answers.ini" linux >"$WORK/cfg"; then
     echo "The answer file is not valid:" >&2
@@ -103,8 +111,12 @@ else
     exit 2
   fi
 fi
-wl_cfg_load "$WORK/cfg"
-echo "  hub: $(wl_cfg wolf hub_url)"
+if [ "$INI" = auto ]; then
+  echo "  hub: on this computer (http://127.0.0.1:6971)"
+else
+  wl_cfg_load "$WORK/cfg"
+  echo "  hub: $(wl_cfg wolf hub_url)"
+fi
 
 # 3. What to set up
 if [ -z "$TOGGLES" ]; then
@@ -113,7 +125,7 @@ if [ -z "$TOGGLES" ]; then
   [ -n "$(wl_cfg meta shares)" ] && yes_no "Connect the network share your agent found?" y && t+=(shares)
   yes_no "Install git and Python if they are missing (may ask for your password)?" y && t+=(prereqs)
   yes_no "Install Obsidian, to read your notes as a vault?" n && t+=(obsidian)
-  [ "$MODE" = new ] && yes_no "Turn on the built-in wiki?" y && t+=(wiki)
+  [ "$MODE" = new ] && [ "$BUILT_IN" = 0 ] && yes_no "Turn on the built-in wiki?" y && t+=(wiki)
   TOGGLES=$(IFS=,; echo "${t[*]:-}")
 fi
 
@@ -150,7 +162,7 @@ set -e
 echo
 if [ "$code" = 0 ]; then
   bold "Wolf Leader is set up."
-  echo "Open it from your app menu (Wolf Leader), or at $(wl_cfg wolf hub_url)."
+  echo "Open it from your app menu (Wolf Leader), or at $( [ "$INI" = auto ] && echo http://127.0.0.1:6971 || wl_cfg wolf hub_url )."
   echo "Restart Claude Code and Cursor so they pick up Wolf Leader."
 else
   bold "Setup stopped. See the FAIL line above; the log is in ~/.local/state/wolf-leader/install.log."

@@ -5,16 +5,18 @@ struct AskView: View {
     @EnvironmentObject private var nav: Navigator
     @Environment(\.palette) private var p
 
-    @State private var answer: HubAnswer?
+    @EnvironmentObject private var search: SearchModel
     @State private var reading: ReadingSession?
-    @State private var query = ""
-    @State private var lastQuery = ""
-    @State private var hits: [HubSearchHit] = []
-    @State private var searching = false
-    @State private var error: String? = nil
     @State private var projectNames: [Int: String] = [:]
-    @State private var searchTask: Task<Void, Never>? = nil
     @FocusState private var focused: Bool
+
+    // The search lives in SearchModel, so it is still here after you open a result and come back.
+    private var answer: HubAnswer? { search.answer }
+    private var query: String { search.query }
+    private var lastQuery: String { search.lastQuery }
+    private var hits: [HubSearchHit] { search.hits }
+    private var searching: Bool { search.searching }
+    private var error: String? { search.error }
 
     private var canSearch: Bool { !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
@@ -25,7 +27,19 @@ struct AskView: View {
         }
         .task(id: store.config.hubURL) { await loadProjectNames() }
         .sheet(item: $reading) { SessionReader(chatID: $0.id, title: $0.title, when: $0.when) }
-        .onAppear { focused = true }
+        .onAppear {
+            focused = true
+            takePendingSearch()
+        }
+        .onChange(of: nav.pendingSearch) { takePendingSearch() }
+    }
+
+    /// A search typed in the toolbar lands here and runs straight away.
+    private func takePendingSearch() {
+        guard let q = nav.pendingSearch else { return }
+        nav.pendingSearch = nil
+        search.query = q
+        runSearch()
     }
 
     /// Hero tile in the shape of MacParakeet's "Transcribe YouTube & more".
@@ -33,7 +47,7 @@ struct AskView: View {
         Tile {
             VStack(spacing: DS.Spacing.md) {
                 AskIconCluster()
-                Text("Ask your memory")
+                Text("Search")
                     .font(.system(size: 22, weight: .bold, design: .rounded))
                     .foregroundStyle(p.text)
                 HStack(spacing: 10) {
@@ -41,7 +55,7 @@ struct AskView: View {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(p.textMuted)
-                        TextField(placeholder, text: $query)
+                        TextField(placeholder, text: $search.query)
                             .textFieldStyle(.plain)
                             .font(DS.Font.bodySmall)
                             .foregroundStyle(p.text)
@@ -50,7 +64,7 @@ struct AskView: View {
                         if searching {
                             ProgressView().controlSize(.small)
                         } else if !query.isEmpty {
-                            Button { query = "" } label: {
+                            Button { search.query = "" } label: {
                                 Image(systemName: "xmark.circle.fill").foregroundStyle(p.textFaint)
                             }
                             .buttonStyle(.plain)
@@ -66,14 +80,14 @@ struct AskView: View {
                     Button(action: runSearch) {
                         HStack(spacing: 6) {
                             Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold))
-                            Text("Ask")
+                            Text("Search")
                         }
                     }
                     .buttonStyle(OutlineButtonStyle())
                     .disabled(!canSearch)
                 }
                 .frame(maxWidth: 520)
-                Text("Name a project and a time, like \u{201C}three days ago\u{201D} or \u{201C}last week\u{201D}. Answers are quoted from your journal, not written by an AI.")
+                Text("Search every memory, session and message. Or ask, like \u{201C}what did I save for Wolf Leader three months ago?\u{201D} Answers are quoted from your records, not written by an AI.")
                     .font(DS.Font.caption)
                     .foregroundStyle(p.textFaint)
                     .multilineTextAlignment(.center)
@@ -93,93 +107,85 @@ struct AskView: View {
             )
         } else if lastQuery.isEmpty {
             EmptyView()
-        } else if hits.isEmpty && !searching && (answer?.summary.isEmpty ?? true) {
+        } else if hits.isEmpty && !searching && (answer?.sections.isEmpty ?? true) && (answer?.sessions.isEmpty ?? true) {
             MainNotice(
                 symbol: "questionmark.bubble",
                 title: "Nothing found for \u{201C}\(lastQuery)\u{201D}",
                 message: "Try fewer or different words."
             )
         } else {
-            if let answer, !answer.summary.isEmpty { answerBlock(answer) }
-            if !hits.isEmpty {
-            WLSectionLabel(text: (answer?.summary.isEmpty ?? true)
-                           ? "\(hits.count) result\(hits.count == 1 ? "" : "s") for \u{201C}\(lastQuery)\u{201D}"
-                           : "Also found by search")
-                .padding(.top, DS.Spacing.sm)
-            LazyVStack(spacing: DS.Spacing.sm + 4) {
-                ForEach(hits) { hit in
-                    AskResultCard(hit: hit, projectName: projectName(for: hit)) {
-                        open(hit)
+            if let answer, !answer.summary.isEmpty {
+                Text(answer.summary).font(DS.Font.body.weight(.semibold)).foregroundStyle(p.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, DS.Spacing.sm)
+            }
+            topics
+        }
+    }
+
+    /// One card per topic with only the top few rows, so you pick where to dig in.
+    private var topics: some View {
+        VStack(spacing: DS.Spacing.sm + 4) {
+            if !projectRows.isEmpty {
+                TopicGroup(title: "Projects", icon: "folder", items: projectRows) { row in
+                    ProjectHitRowView(row: row) { nav.open(project: row.id) }
+                }
+            }
+            ForEach(answer?.sections ?? []) { section in
+                TopicGroup(title: section.title, icon: MemoryKind(rawValue: section.kind)?.symbol ?? "square.stack",
+                           items: section.items) { item in
+                    AnswerItemRow(item: item,
+                                  read: item.chatID.map { chat in { reading = ReadingSession(id: chat, title: item.project ?? "Session", when: item.when) } },
+                                  openProject: item.projectID.map { id in { nav.open(project: id) } })
+                }
+            }
+            if let sessions = answer?.sessions, !sessions.isEmpty {
+                TopicGroup(title: "Sessions", icon: "book", items: sessions) { session in
+                    SessionRow(session: session) {
+                        reading = ReadingSession(id: session.chatID, title: session.title, when: session.when)
                     }
                 }
             }
+            ForEach(hitTopics, id: \.title) { topic in
+                TopicGroup(title: topic.title, icon: topic.icon, items: topic.hits) { hit in
+                    HitRow(hit: hit, projectName: projectName(for: hit)) { open(hit) }
+                }
             }
         }
+    }
+
+    /// The project the question named comes first, then projects that matched by name,
+    /// then projects mentioned most often in the other results.
+    private var projectRows: [ProjectHitRow] {
+        var order: [Int] = []
+        if let id = answer?.understoodProjectID { order.append(id) }
+        for hit in hits where hit.kind == "project" && !order.contains(hit.refID) { order.append(hit.refID) }
+        var mentions: [Int: Int] = [:]
+        for hit in hits { if let id = hit.linkedProjectID { mentions[id, default: 0] += 1 } }
+        order += mentions.keys.filter { !order.contains($0) }.sorted { (mentions[$0] ?? 0) > (mentions[$1] ?? 0) }
+        return order.map { ProjectHitRow(id: $0, name: projectNames[$0] ?? "Project \($0)", mentions: mentions[$0] ?? 0) }
+    }
+
+    private struct HitTopic {
+        let title: String
+        let icon: String
+        let hits: [HubSearchHit]
+    }
+
+    private var hitTopics: [HitTopic] {
+        // Memories already shown in an answer section are not repeated.
+        let answered = Set((answer?.sections ?? []).flatMap { $0.items.map(\.memoryID) })
+        func pick(_ kinds: Set<String>) -> [HubSearchHit] { hits.filter { kinds.contains($0.kind) } }
+        return [
+            HitTopic(title: "Conversations", icon: "bubble.left.and.bubble.right", hits: pick(["message", "convo", "chat", "howl"])),
+            HitTopic(title: "Memories", icon: "square.stack", hits: pick(["memory"]).filter { !answered.contains($0.refID) }),
+            HitTopic(title: "Files", icon: "doc.text", hits: pick(["catalog", "chunk"])),
+        ].filter { !$0.hits.isEmpty }
     }
 
     private var placeholder: String {
         let name = projectNames.values.sorted().first { $0.count > 3 } ?? "my project"
         return "What did I learn for \(name) three days ago?"
-    }
-
-    /// The direct answer: what the hub understood, then the matching entries in full.
-    @ViewBuilder
-    private func answerBlock(_ answer: HubAnswer) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 6) {
-                if let project = answer.understoodProject { MainTag(text: project) }
-                if let when = answer.understoodWhen { MainTag(text: when, color: p.accent2) }
-                if let about = answer.understoodAbout { MainTag(text: about, color: p.textMuted) }
-                Spacer(minLength: 0)
-            }
-            Text(answer.summary).font(DS.Font.body.weight(.semibold)).foregroundStyle(p.text)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.top, DS.Spacing.sm)
-        ForEach(answer.sections) { section in
-            WLGroup(title: section.title, subtitle: "\(section.items.count)", icon: MemoryKind(rawValue: section.kind)?.symbol ?? "square.stack") {
-                ForEach(section.items) { item in
-                    if item.id != section.items.first?.id { WLDivider() }
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(item.text).font(DS.Font.bodySmall).foregroundStyle(p.text).textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                        HStack(spacing: 8) {
-                            Text([item.project, HubDate.format(item.when)].compactMap { $0 }.joined(separator: " · "))
-                                .font(DS.Font.micro).foregroundStyle(p.textFaint)
-                            if let chat = item.chatID {
-                                Button("Read the session") { reading = ReadingSession(id: chat, title: item.project ?? "Session", when: item.when) }
-                                    .buttonStyle(.plain).font(DS.Font.micro.weight(.semibold)).foregroundStyle(p.accent)
-                            }
-                            if let project = item.projectID {
-                                Button("Open project") { nav.open(project: project) }
-                                    .buttonStyle(.plain).font(DS.Font.micro.weight(.semibold)).foregroundStyle(p.accent)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        if !answer.sessions.isEmpty {
-            WLGroup(title: "Sessions", subtitle: "What was worked on then. Click one to read it.", icon: "book") {
-                ForEach(answer.sessions) { session in
-                    if session.id != answer.sessions.first?.id { WLDivider() }
-                    Button { reading = ReadingSession(id: session.chatID, title: session.title, when: session.when) } label: {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(session.title).font(DS.Font.bodySmall.weight(.semibold)).foregroundStyle(p.text).lineLimit(2)
-                                .multilineTextAlignment(.leading)
-                            if !session.summary.isEmpty {
-                                Text(session.summary).font(DS.Font.micro).foregroundStyle(p.textMuted)
-                                    .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
-                            }
-                            Text([session.project, HubDate.format(session.when)].compactMap { $0 }.joined(separator: " · "))
-                                .font(DS.Font.micro).foregroundStyle(p.textFaint)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
     }
 
     private func projectName(for hit: HubSearchHit) -> String? {
@@ -198,25 +204,7 @@ struct AskView: View {
     }
 
     private func runSearch() {
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return }
-        searchTask?.cancel()
-        searchTask = Task {
-            searching = true
-            defer { searching = false }
-            do {
-                let found = try await store.hub.ask(q)
-                guard !Task.isCancelled else { return }
-                answer = found
-                hits = found.results
-                lastQuery = q
-                error = nil
-            } catch {
-                guard !Task.isCancelled else { return }
-                self.error = error.localizedDescription
-                lastQuery = q
-            }
-        }
+        search.run(hub: store.hub)
     }
 
     private func loadProjectNames() async {
@@ -261,18 +249,145 @@ private struct AskIconCluster: View {
     }
 }
 
-private struct AskResultCard: View {
+/// A saved session picked to be read in the app.
+struct ReadingSession: Identifiable, Hashable {
+    let id: Int
+    let title: String
+    let when: String?
+}
+
+
+// MARK: - Topic cards
+
+private let topicPreview = 3
+
+/// A titled card that shows the first few rows and grows on request.
+private struct TopicGroup<Item: Identifiable, Row: View>: View {
+    @Environment(\.palette) private var p
+    let title: String
+    let icon: String
+    let items: [Item]
+    @ViewBuilder let row: (Item) -> Row
+    @EnvironmentObject private var search: SearchModel
+
+    private var shown: Int {
+        get { search.shown[title] ?? topicPreview }
+        nonmutating set { search.shown[title] = newValue }
+    }
+
+    var body: some View {
+        WLGroup(title: title, subtitle: "\(items.count)", icon: icon) {
+            ForEach(Array(items.prefix(shown).enumerated()), id: \.element.id) { index, item in
+                if index > 0 { WLDivider() }
+                row(item)
+            }
+            if items.count > topicPreview {
+                HStack(spacing: 14) {
+                    if items.count > shown {
+                        Button("Show \(min(10, items.count - shown)) more") { withAnimation(DS.Anim.hover) { shown += 10 } }
+                    }
+                    if shown > topicPreview {
+                        Button("Show less") { withAnimation(DS.Anim.hover) { shown = topicPreview } }
+                    }
+                }
+                .buttonStyle(.plain)
+                .font(DS.Font.micro.weight(.semibold))
+                .foregroundStyle(p.accent)
+            }
+        }
+    }
+}
+
+struct ProjectHitRow: Identifiable, Hashable {
+    let id: Int
+    let name: String
+    let mentions: Int
+}
+
+private struct ProjectHitRowView: View {
+    @Environment(\.palette) private var p
+    let row: ProjectHitRow
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Text(row.name).font(DS.Font.bodySmall.weight(.semibold)).foregroundStyle(p.text)
+                Spacer(minLength: 8)
+                if row.mentions > 0 {
+                    Text("\(row.mentions) result\(row.mentions == 1 ? "" : "s")").font(DS.Font.micro).foregroundStyle(p.textMuted)
+                }
+                Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(p.textFaint)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct AnswerItemRow: View {
+    @Environment(\.palette) private var p
+    let item: HubAnswerItem
+    let read: (() -> Void)?
+    let openProject: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(item.text).font(DS.Font.bodySmall).foregroundStyle(p.text).textSelection(.enabled)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Text([item.project, HubDate.format(item.when)].compactMap { $0 }.joined(separator: " · "))
+                    .font(DS.Font.micro).foregroundStyle(p.textFaint)
+                if let read {
+                    Button("Read the session", action: read)
+                        .buttonStyle(.plain).font(DS.Font.micro.weight(.semibold)).foregroundStyle(p.accent)
+                }
+                if let openProject {
+                    Button("Open project", action: openProject)
+                        .buttonStyle(.plain).font(DS.Font.micro.weight(.semibold)).foregroundStyle(p.accent)
+                }
+            }
+        }
+    }
+}
+
+private struct SessionRow: View {
+    @Environment(\.palette) private var p
+    let session: HubAnswerSession
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(session.title).font(DS.Font.bodySmall.weight(.semibold)).foregroundStyle(p.text).lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                if !session.summary.isEmpty {
+                    Text(session.summary).font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
+                Text([session.project, HubDate.format(session.when)].compactMap { $0 }.joined(separator: " · "))
+                    .font(DS.Font.micro).foregroundStyle(p.textFaint)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// One search result inside a topic card: kind, where it came from, when, and a short excerpt.
+private struct HitRow: View {
     @Environment(\.palette) private var p
     let hit: HubSearchHit
     let projectName: String?
     let action: () -> Void
-    @State private var hovering = false
 
     private var kindLabel: String {
         switch hit.kind {
         case "memory": return (hit.memoryType ?? "memory").replacingOccurrences(of: "_", with: " ")
         case "catalog": return "file"
         case "chunk": return "file excerpt"
+        case "convo": return "conversation"
         default: return hit.kind
         }
     }
@@ -280,7 +395,7 @@ private struct AskResultCard: View {
     private var heading: String {
         switch hit.kind {
         case "memory": return projectName ?? "Memory"
-        case "message": return hit.chatTitle ?? hit.title ?? "Chat message"
+        case "message", "convo": return hit.chatTitle ?? hit.title ?? "Conversation"
         default: return hit.title ?? projectName ?? "Result"
         }
     }
@@ -288,65 +403,74 @@ private struct AskResultCard: View {
     private var snippet: String {
         var text = hit.content ?? ""
         if hit.kind == "memory", text.isEmpty, let title = hit.title { text = title }
-        let flat = text
-            .replacingOccurrences(of: "\r", with: " ")
-            .replacingOccurrences(of: "\n", with: " ")
+        return text.replacingOccurrences(of: "\r", with: " ").replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespaces)
-        return flat.count > 280 ? String(flat.prefix(280)) + "…" : flat
     }
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     MainTag(text: kindLabel)
-                    Text(heading)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(p.text)
-                        .lineLimit(1)
+                    Text(heading).font(DS.Font.bodySmall.weight(.semibold)).foregroundStyle(p.text).lineLimit(1)
                     Spacer(minLength: 8)
                     if let date = hit.date {
-                        Text(HubDate.format(date))
-                            .font(DS.Font.timestamp)
-                            .foregroundStyle(p.textMuted)
+                        Text(HubDate.format(date)).font(DS.Font.timestamp).foregroundStyle(p.textMuted)
                     }
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(hovering ? p.accent : p.textFaint)
                 }
                 if !snippet.isEmpty {
-                    Text(snippet)
-                        .font(DS.Font.bodySmall)
-                        .foregroundStyle(p.text.opacity(0.85))
-                        .lineLimit(4)
-                        .fixedSize(horizontal: false, vertical: true)
+                    Text(snippet).font(DS.Font.micro).foregroundStyle(p.text.opacity(0.85)).lineLimit(2)
+                        .multilineTextAlignment(.leading)
                 }
-                if let name = projectName, hit.kind != "memory", hit.kind != "project" {
-                    Label(name, systemImage: "folder")
-                        .font(DS.Font.micro)
-                        .foregroundStyle(p.textMuted)
+                if let decision = hit.decisions.first {
+                    Label("Decided: \(decision.text)", systemImage: "checkmark.seal")
+                        .font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(1)
                 }
             }
-            .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(hovering ? p.surfaceRaised : p.surface,
-                        in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
-                    .strokeBorder(p.border.opacity(0.7), lineWidth: 0.6)
-            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { h in withAnimation(DS.Anim.hover) { hovering = h } }
-        .help("Open in the hub")
     }
 }
 
+// MARK: - Search state that outlives the page
 
-/// A saved session picked to be read in the app.
-struct ReadingSession: Identifiable, Hashable {
-    let id: Int
-    let title: String
-    let when: String?
+/// The last search and which cards were opened. Owned by the main window, so going to a
+/// result and pressing Back shows the same results instead of an empty page.
+@MainActor
+final class SearchModel: ObservableObject {
+    @Published var query = ""
+    @Published private(set) var lastQuery = ""
+    @Published private(set) var answer: HubAnswer?
+    @Published private(set) var hits: [HubSearchHit] = []
+    @Published private(set) var searching = false
+    @Published private(set) var error: String?
+    /// Rows shown per topic card, by card title.
+    @Published var shown: [String: Int] = [:]
+
+    private var task: Task<Void, Never>?
+
+    func run(hub: HubClient) {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return }
+        task?.cancel()
+        task = Task {
+            searching = true
+            defer { searching = false }
+            do {
+                let found = try await hub.ask(q)
+                guard !Task.isCancelled else { return }
+                answer = found
+                hits = found.results
+                lastQuery = q
+                shown = [:]
+                error = nil
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.error = error.localizedDescription
+                lastQuery = q
+            }
+        }
+    }
 }

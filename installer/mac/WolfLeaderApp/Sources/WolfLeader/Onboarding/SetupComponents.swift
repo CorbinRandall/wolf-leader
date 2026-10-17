@@ -247,8 +247,8 @@ extension SetupPath {
         switch self {
         case .connectExisting: return "Wolf Leader already runs on another computer"
         case .updateThisMac: return "Wolf Leader is already on this Mac"
-        case .newOnServer: return "I'm new — host it on an always-on computer (recommended)"
-        case .newOnThisMac: return "I'm new — host it on this Mac (experimental)"
+        case .newOnServer: return "I'm new — host it on an always-on computer"
+        case .newOnThisMac: return "Just this Mac — everything runs inside Wolf Leader"
         }
     }
 
@@ -257,7 +257,7 @@ extension SetupPath {
         case .connectExisting: return "Connect this Mac to your hub"
         case .updateThisMac: return "Update Wolf Leader on this Mac"
         case .newOnServer: return "New hub on an always-on computer"
-        case .newOnThisMac: return "New hub on this Mac (Docker, experimental)"
+        case .newOnThisMac: return "Just this Mac (built-in hub)"
         }
     }
 }

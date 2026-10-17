@@ -21,6 +21,10 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
 
+      - name: Build the built-in hub ("Just this PC")
+        shell: powershell
+        run: python installer\runtime\build_runtime.py --target windows-x86_64
+
       - name: Install Inno Setup
         shell: powershell
         run: choco install innosetup --yes --no-progress

@@ -9,6 +9,8 @@ Tests need a reachable Postgres with the pgvector extension. Point
 
 Each test runs inside its own schema (``search_path``) so tests never see each
 other's rows; the schema is dropped afterwards.
+
+Local mode (no server): ``TEST_DATABASE_URL=sqlite: pytest`` gives each test its own SQLite file.
 """
 from __future__ import annotations
 
@@ -32,6 +34,18 @@ def _admin_conn():
 
 @pytest.fixture(autouse=True)
 def isolated_db(tmp_path, monkeypatch):
+    if TEST_URL.startswith("sqlite"):
+        # Local mode: each test gets its own SQLite file.
+        monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'wolf-leader.db'}")
+        monkeypatch.setenv("IDE_STORAGE_PROJECTS_DIR", str(tmp_path / "projects"))
+        monkeypatch.setenv("IDE_STORAGE_VAULT_DIR", str(tmp_path / "vault"))
+        monkeypatch.setenv("IDE_STORAGE_WIKI_CONTENT_DIR", str(tmp_path / "wiki"))
+        monkeypatch.setenv("IDE_STORAGE_EMBEDDINGS_ENABLED", "0")
+        from ide_storage.db import init_db
+
+        init_db()
+        yield
+        return
     schema = "t_" + uuid.uuid4().hex[:12]
     try:
         admin = _admin_conn()

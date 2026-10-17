@@ -9,7 +9,7 @@ enum SetupPath: String, Codable, CaseIterable {
     case updateThisMac
     /// New user; host the hub on an always-on computer (NAS, home server, LXC).
     case newOnServer
-    /// New user; host the hub on this Mac with Docker (experimental).
+    /// New user; the hub runs inside Wolf Leader on this Mac (built in, no Docker).
     case newOnThisMac
 
     /// Mode string install.sh understands (see installer/CONFIG.md).

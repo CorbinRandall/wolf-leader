@@ -59,7 +59,10 @@ def relink_chat(
         project_id = guess_project_id(text, db_path=db_path)
 
     if project_id is None:
-        project_id = CATCH_ALL_PROJECT_ID
+        # The original hub filed unmatched chats under its project 1. A new hub has no such
+        # project; there the chat stays loose (and can go to One-offs).
+        cur.execute("SELECT 1 FROM projects WHERE id = ?", (CATCH_ALL_PROJECT_ID,))
+        project_id = CATCH_ALL_PROJECT_ID if cur.fetchone() else None
 
     if project_id == current:
         return None

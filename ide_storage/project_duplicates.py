@@ -199,7 +199,7 @@ def merge_projects(target_id: int, source_ids: list[int]) -> dict[str, Any]:
         # duplicates, then move the remaining source rows without losing v2 knowledge.
         cur.execute(
             f"""
-            DELETE FROM file_chunks s
+            DELETE FROM file_chunks AS s
             WHERE s.project_id IN ({source_placeholders})
               AND EXISTS (SELECT 1 FROM file_chunks t WHERE t.project_id = ?
                           AND t.path = s.path AND t.chunk_index = s.chunk_index)
@@ -214,7 +214,7 @@ def merge_projects(target_id: int, source_ids: list[int]) -> dict[str, Any]:
 
         cur.execute(
             f"""
-            UPDATE file_chunks fc
+            UPDATE file_chunks AS fc
             SET fs_catalog_id = t.id
             FROM fs_catalog s, fs_catalog t
             WHERE fc.fs_catalog_id = s.id
@@ -226,7 +226,7 @@ def merge_projects(target_id: int, source_ids: list[int]) -> dict[str, Any]:
         )
         cur.execute(
             f"""
-            DELETE FROM fs_catalog s
+            DELETE FROM fs_catalog AS s
             WHERE s.project_id IN ({source_placeholders})
               AND EXISTS (SELECT 1 FROM fs_catalog t WHERE t.project_id = ?
                           AND t.root_path = s.root_path AND t.rel_path = s.rel_path)

@@ -4,6 +4,12 @@ from __future__ import annotations
 from typing import Any
 
 from ide_storage import localtime as LT
+from ide_storage.conversation_search import (
+    enrich_hits,
+    filter_hits_by_scope,
+    fuzzy_search,
+    has_scope,
+)
 from ide_storage.db import db_conn
 from ide_storage.embed_index import knn
 from ide_storage.embeddings import embed_one, embeddings_available
@@ -55,7 +61,7 @@ def reciprocal_rank_fusion(
 
 
 ALL_KINDS = frozenset({"memory", "project", "chat", "message", "howl", "catalog", "chunk"})
-VECTOR_KINDS = ("memory", "project", "chat", "howl", "catalog", "chunk")
+VECTOR_KINDS = ("memory", "project", "chat", "howl", "catalog", "chunk", "convo")
 
 
 def _parse_kinds(kinds_param: str | None) -> frozenset[str] | None:
@@ -64,6 +70,22 @@ def _parse_kinds(kinds_param: str | None) -> frozenset[str] | None:
         return None
     parsed = frozenset(k.strip() for k in kinds_param.split(",") if k.strip() in ALL_KINDS)
     return parsed if parsed else None
+
+
+def _all_words_clause(query: str, columns: list[str]) -> tuple[str, list[str]]:
+    """SQL that matches when every word of ``query`` appears in one of ``columns``.
+
+    Word order does not matter, so "lid display" finds "display ... lid". A
+    single word behaves exactly like the old one-pattern LIKE.
+    """
+    words = query.split() or [query]
+    clauses: list[str] = []
+    params: list[str] = []
+    for word in words:
+        pattern = f"%{word}%"
+        clauses.append("(" + " OR ".join(f"{col} LIKE ?" for col in columns) + ")")
+        params.extend([pattern] * len(columns))
+    return " AND ".join(clauses), params
 
 
 def keyword_search(
@@ -78,21 +100,24 @@ def keyword_search(
     results: list[dict[str, Any]] = []
     chat_filter = "" if include_archived else " AND COALESCE(c.status, 'active') = 'active'"
     want = kinds or ALL_KINDS
+    mem_where, mem_params = _all_words_clause(
+        query, ["m.content", "COALESCE(m.semantic_descriptor, '')"]
+    )
 
     with db_conn() as conn:
         cur = conn.cursor()
 
         if "memory" in want:
             cur.execute(
-                """
+                f"""
                 SELECT m.id, printf('[%s] %s', m.type, substr(m.content, 1, 120)) AS title,
-                       m.content, m.project_id, 'memory' AS kind, m.type AS memory_type
+                       m.content, m.project_id, m.created_at, 'memory' AS kind, m.type AS memory_type
                 FROM memories m
-                WHERE (m.content LIKE ? OR COALESCE(m.semantic_descriptor, '') LIKE ?)
+                WHERE {mem_where}
                   AND COALESCE(m.status, 'active') = 'active'
                 ORDER BY m.updated_at DESC LIMIT ?
                 """,
-                (pattern, pattern, limit),
+                (*mem_params, limit),
             )
             for row in cur.fetchall():
                 item = dict(row)
@@ -128,15 +153,16 @@ def keyword_search(
 
         if "chat" in want:
             title_len = 80 if hub_mode else 200
+            chat_where, chat_params = _all_words_clause(query, ["c.title", "c.content"])
             cur.execute(
                 f"""
                 SELECT c.id, c.title, substr(c.content, 1, {title_len}) AS content,
                        c.updated_at, 'chat' AS kind
                 FROM chats c
-                WHERE (c.title LIKE ? OR c.content LIKE ?){chat_filter}
+                WHERE {chat_where}{chat_filter}
                 ORDER BY c.updated_at DESC LIMIT ?
                 """,
-                (pattern, pattern, limit),
+                (*chat_params, limit),
             )
             for row in cur.fetchall():
                 item = dict(row)
@@ -144,16 +170,17 @@ def keyword_search(
                 results.append(item)
 
         if "message" in want and not hub_mode:
+            msg_where, msg_params = _all_words_clause(query, ["m.content"])
             cur.execute(
                 f"""
                 SELECT m.id, m.chat_id, m.role, substr(m.content, 1, 200) AS content,
                        m.created_at, c.title AS chat_title, 'message' AS kind
                 FROM messages m
                 JOIN chats c ON c.id = m.chat_id
-                WHERE m.content LIKE ?{chat_filter}
+                WHERE {msg_where}{chat_filter}
                 ORDER BY m.created_at DESC LIMIT ?
                 """,
-                (pattern, limit),
+                (*msg_params, limit),
             )
             for row in cur.fetchall():
                 item = dict(row)
@@ -161,16 +188,17 @@ def keyword_search(
                 results.append(item)
 
         if "howl" in want:
+            howl_where, howl_params = _all_words_clause(query, ["h.summary", "COALESCE(h.actions, '')"])
             cur.execute(
-                """
+                f"""
                 SELECT h.id, h.project_id, substr(h.summary, 1, 200) AS content,
                        h.created_at, h.git_commit, p.slug AS slug,
                        'howl' AS kind
                 FROM howls h LEFT JOIN projects p ON p.id = h.project_id
-                WHERE h.summary LIKE ? OR COALESCE(h.actions, '') LIKE ?
+                WHERE {howl_where}
                 ORDER BY h.created_at DESC LIMIT ?
                 """,
-                (pattern, pattern, limit),
+                (*howl_params, limit),
             )
             for row in cur.fetchall():
                 item = dict(row)
@@ -241,33 +269,62 @@ def hybrid_search(
     include_archived: bool = False,
     hub_mode: bool = False,
     kinds: frozenset[str] | None = None,
+    project_id: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
 ) -> dict[str, Any]:
     q = query.strip()
     if not q:
         return {"query": query, "results": [], "count": 0, "mode": "empty"}
 
+    # Scoped searches filter after the legs run, so ask each leg for extra rows.
+    scoped = has_scope(project_id, date_from, date_to)
+    fetch = limit * 5 if scoped else limit
+
     keyword_hits = keyword_search(
-        q, limit=limit, include_archived=include_archived, hub_mode=hub_mode, kinds=kinds
+        q, limit=fetch, include_archived=include_archived, hub_mode=hub_mode, kinds=kinds
     )
     vector_hits = vector_search(
-        q, limit=limit, kinds=kinds, include_archived=include_archived
+        q, limit=fetch, kinds=kinds, include_archived=include_archived
     )
 
-    if vector_hits:
-        merged = reciprocal_rank_fusion(keyword_hits, vector_hits)[:limit]
+    fuzzy_hits: list[dict[str, Any]] = []
+    if not hub_mode and len(keyword_hits) < 3:
+        # Typo fallback: only when the exact legs found little.
+        fuzzy_hits = fuzzy_search(q, limit=fetch, include_archived=include_archived, kinds=kinds)
+        seen = {result_key(h) for h in keyword_hits}
+        keyword_hits = keyword_hits + [h for h in fuzzy_hits if result_key(h) not in seen]
+
+    if vector_hits and fuzzy_hits:
+        # Word matches (even typo-tolerant ones) come first; meaning-only hits fill in after.
+        seen = {result_key(h) for h in keyword_hits}
+        merged = keyword_hits + [h for h in vector_hits if result_key(h) not in seen]
+        mode = "hybrid"
+    elif vector_hits:
+        merged = reciprocal_rank_fusion(keyword_hits, vector_hits)
         mode = "hybrid"
     else:
-        merged = keyword_hits[:limit]
+        merged = keyword_hits
         for i, item in enumerate(merged):
             item = dict(item)
             item["rank"] = 1.0 / (RRF_K + i + 1)
             merged[i] = item
         mode = "keyword"
 
+    if scoped:
+        merged = filter_hits_by_scope(
+            merged, project_id=project_id, date_from=date_from, date_to=date_to
+        )
+    merged = merged[:limit]
+    if not hub_mode:
+        merged = enrich_hits(merged, q)
+
     return {
         "query": query,
         "results": merged,
         "count": len(merged),
         "mode": mode,
+        "fuzzy": bool(fuzzy_hits),
+        "filters": {"project_id": project_id, "date_from": date_from, "date_to": date_to},
         "embeddings": embeddings_available(),
     }

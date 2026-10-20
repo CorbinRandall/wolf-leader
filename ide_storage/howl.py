@@ -392,7 +392,10 @@ def run_eat(
     device_name: str | None = None,
     since: str | None = None,
     query: str | None = None,
+    detail: str = "full",
 ) -> dict[str, Any]:
+    """Pull a project's context. detail="index" returns a short table of contents instead of every
+    memory and session in full; the agent then opens only what the task needs."""
     from ide_storage.hub import resolve_project
 
     project = None
@@ -528,14 +531,100 @@ def run_eat(
             "wiki": f"{_public_base()}/wiki/projects/{slug_}",
         },
     }
+    summary = _eat_paragraph(brief)
+    if detail == "index":
+        brief = _index_brief(brief, pid, device_name)
     return {
         "ok": True,
         "kind": "eat",
+        "detail": "index" if detail == "index" else "full",
         "project_id": pid,
         "slug": slug_,
         "brief": brief,
         "offers": offers,
-        "summary": _eat_paragraph(brief),
+        "summary": summary,
+    }
+
+
+# Memory types an agent needs on every task; the rest are listed as one-line headlines.
+_INDEX_FULL_TYPES = ("active_work", "constraint")
+_INDEX_PER_TYPE = 12
+
+
+def _headline(text: Any, limit: int = 140) -> str:
+    line = " ".join(str(text or "").split())
+    return line if len(line) <= limit else line[:limit - 1].rstrip() + "…"
+
+
+def _attachment_headlines(pid: int) -> list[dict[str, Any]]:
+    try:
+        from ide_storage.attachments import list_attachments
+
+        return [{"id": a["id"], "filename": a["filename"], "caption": a.get("caption"), "tags": a["tags"]}
+                for a in list_attachments(pid)[:20]]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _index_brief(brief: dict[str, Any], pid: int, device_name: str | None) -> dict[str, Any]:
+    """Shrink a full brief to a table of contents: ids and headlines, plus where to get the rest."""
+    try:
+        from ide_storage.progress import north_star
+
+        star = (north_star(pid).get("current") or {}).get("body")
+    except Exception:  # noqa: BLE001 - the index is still useful without it
+        star = None
+
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for m in brief.get("memories") or []:
+        groups.setdefault(m.get("type") or "note", []).append(m)
+    memories: dict[str, Any] = {}
+    for typ, items in groups.items():
+        if typ in _INDEX_FULL_TYPES:
+            memories[typ] = [{"id": m["id"], "content": m.get("content")} for m in items]
+        else:
+            memories[typ] = {
+                "count": len(items),
+                "items": [{"id": m["id"], "headline": _headline(m.get("content"))} for m in items[:_INDEX_PER_TYPE]],
+            }
+
+    left = brief.get("left_off") or {}
+    base = _public_base()
+    return {
+        "project": brief["project"],
+        "north_star": star,
+        "left_off": {
+            "chat_id": left.get("chat_id"),
+            "title": left.get("chat_title"),
+            "summary": _headline(left.get("summary"), 400),
+            "when": left.get("occurred_at"),
+        } if left else None,
+        "memories": memories,
+        "sessions": [
+            {"chat_id": c.get("id"), "title": c.get("title"), "when": c.get("occurred_at")}
+            for c in (brief.get("sessions") or [])[:8]
+        ],
+        "howls": [
+            {"when": h.get("created_at"), "device": h.get("device_name"),
+             "commit": str(h.get("git_commit") or "")[:8] or None, "summary": _headline(h.get("summary"), 160)}
+            for h in (brief.get("howls") or [])[:3]
+        ],
+        "related": [
+            {"kind": r.get("kind"), "id": r.get("id"), "title": _headline(r.get("title"), 90), "slug": r.get("slug")}
+            for r in brief.get("related") or []
+        ],
+        "paths": [p for p in brief.get("paths") or [] if not device_name or p.get("device_name") == device_name],
+        "search": brief.get("search") or [],
+        "open_jobs": brief.get("open_jobs") or [],
+        "ingested_files": len(brief.get("ingested_files") or []),
+        "attachments": _attachment_headlines(pid),
+        "links": brief.get("links"),
+        "drill_down": {
+            "memories": "get_memories(ids=[...]) or GET " + base + "/api/memories/by-id?ids=1,2",
+            "search": "search(query) or GET " + base + "/api/search?q=...&project_id=" + str(pid),
+            "session": "get_session(chat_id) or GET " + base + "/api/chats/<chat_id>",
+            "everything": "wolfeat(detail='full')",
+        },
     }
 
 

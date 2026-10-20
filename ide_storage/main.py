@@ -1859,6 +1859,14 @@ async def create_memory(body: MemoryCreate):
     return result
 
 
+@app.get("/api/memories/by-id")
+async def memories_by_id(ids: str):
+    """Full text of specific memories, for agents drilling down from an index recall."""
+    from .memory_ops import memories_by_ids
+
+    return {"memories": memories_by_ids([int(i) for i in ids.split(",") if i.strip().isdigit()])}
+
+
 @app.get("/api/memories")
 async def list_memories(
     project_id: Optional[int] = None,

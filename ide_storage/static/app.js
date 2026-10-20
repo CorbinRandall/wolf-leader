@@ -1002,6 +1002,8 @@ async function selectProject(id) {
   $("#project-md").value = mdData.content || "";
   $("#project-md-preview").innerHTML = md(mdData.content);
 
+  loadAttachments(id);
+
   const memoryRows = memories.memories || [];
   const memoryLabels = { decision: "Decisions", constraint: "Constraints", active_work: "Active work", problem: "Problems", goal: "Goals", caveat: "Caveats", note: "Notes" };
   const grouped = Object.groupBy ? Object.groupBy(memoryRows, (m) => m.type || "note") : memoryRows.reduce((a,m) => ((a[m.type || "note"] ||= []).push(m),a),{});
@@ -1497,3 +1499,53 @@ $("#search").addEventListener("keydown", (e) => {
     else hideViews(), $("#empty-state").classList.remove("hidden");
   }
 })();
+
+
+async function loadAttachments(projectId) {
+  const el = $("#attachments-list");
+  const data = await api(`/api/projects/${projectId}/attachments`).catch(() => ({ attachments: [] }));
+  const rows = data.attachments || [];
+  el.innerHTML = rows.length
+    ? rows.map((a) => {
+      const isImage = (a.content_type || "").startsWith("image/");
+      const preview = isImage
+        ? `<img src="${API}${a.url}" alt="${escapeHtml(a.caption || a.filename)}" loading="lazy">`
+        : `<span class="attachment-file">${escapeHtml(a.filename)}</span>`;
+      return `<figure class="attachment-card">
+        <a href="${API}${a.url}" target="_blank" rel="noopener">${preview}</a>
+        <figcaption>
+          <span class="attachment-caption">${escapeHtml(a.caption || a.filename)}</span>
+          ${a.tags.length ? `<span class="muted">${a.tags.map(escapeHtml).join(", ")}</span>` : ""}
+          <button type="button" class="btn-icon del-attachment" data-aid="${a.id}" title="Delete">×</button>
+        </figcaption>
+      </figure>`;
+    }).join("")
+    : `<p class="muted">No files yet. Add screenshots or mockups here, or pass --attach to /wolfhowl.</p>`;
+  $$(".del-attachment").forEach((b) => b.addEventListener("click", async () => {
+    if (!confirm("Delete this file?")) return;
+    await api(`/api/attachments/${b.dataset.aid}`, { method: "DELETE" });
+    loadAttachments(projectId);
+  }));
+}
+
+$("#attachment-input")?.addEventListener("change", async (event) => {
+  const projectId = state.activeProjectId;
+  const files = [...(event.target.files || [])];
+  event.target.value = "";
+  if (!projectId || !files.length) return;
+  for (const file of files) {
+    const caption = prompt(`Caption for ${file.name}`, "") ?? "";
+    const content_base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    await api(`/api/projects/${projectId}/attachments`, {
+      method: "POST",
+      body: JSON.stringify({ filename: file.name, content_base64, caption }),
+    });
+  }
+  loadAttachments(projectId);
+});
+

@@ -357,7 +357,37 @@ def post_legacy_save(api: str, body: dict) -> int:
     return 0 if report.get("ok") else 1
 
 
-def post_howl(api: str, body: dict, workspace: str) -> int:
+def upload_attachments(api: str, report: dict, paths: list[str], captions: list[str], tags: list[str]) -> list[dict]:
+    """Keep files with the project the howl was saved to. One failed file never undoes the save."""
+    import base64
+
+    project_id = report.get("project_id") or (report.get("project") or {}).get("id")
+    out: list[dict] = []
+    for i, raw in enumerate(paths):
+        path = Path(raw).expanduser()
+        if not project_id:
+            out.append({"path": raw, "ok": False, "error": "the save did not report a project id"})
+            continue
+        try:
+            body = {
+                "filename": path.name,
+                "content_base64": base64.b64encode(path.read_bytes()).decode("ascii"),
+                "caption": captions[i] if i < len(captions) else "",
+                "tags": tags or None,
+                "chat_id": report.get("chat_id"),
+            }
+            row = api_json("POST", f"{api}/api/projects/{project_id}/attachments", body, timeout=120)
+            out.append({"path": raw, "ok": True, "id": row.get("id"), "url": f"{api}{row.get('url')}"})
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            hint = " (this hub is older than file attachments)" if exc.code in (404, 405) else ""
+            out.append({"path": raw, "ok": False, "error": f"{exc.code} {detail[:200]}{hint}"})
+        except Exception as exc:  # noqa: BLE001
+            out.append({"path": raw, "ok": False, "error": str(exc)})
+    return out
+
+
+def post_howl(api: str, body: dict, workspace: str, attach: dict | None = None) -> int:
     try:
         report = api_json("POST", f"{api}/api/howl", body)
     except urllib.error.HTTPError as exc:
@@ -370,6 +400,8 @@ def post_howl(api: str, body: dict, workspace: str) -> int:
         print(f"wolfhowl: cannot reach Wolf Leader at {api}: {exc.reason}", file=sys.stderr)
         return 1
     wire_remote(report, workspace)
+    if attach and attach.get("paths") and report.get("ok"):
+        report["attachments"] = upload_attachments(api, report, attach["paths"], attach["captions"], attach["tags"])
     print(json.dumps(report, indent=2))
     if report.get("needs_project_choice"):
         return 3
@@ -387,6 +419,12 @@ def main() -> int:
     ap.add_argument("--description", default=None, help="one-line description for a new project")
     ap.add_argument("--ingest", action="store_true", help="ingest cited file bodies now (only if the user already said yes)")
     ap.add_argument("--cite", action="append", default=[], help="file path this chat cited/changed (repeatable)")
+    ap.add_argument("--attach", action="append", default=[], metavar="PATH",
+                    help="image or file to keep with the project, e.g. screenshots (repeatable)")
+    ap.add_argument("--attach-caption", action="append", default=[], metavar="TEXT",
+                    help="caption for the matching --attach, in the same order (repeatable)")
+    ap.add_argument("--attach-tag", action="append", default=[], metavar="TAG",
+                    help="tag added to every --attach file, e.g. reddit-post (repeatable)")
     ap.add_argument("--no-catalog", action="store_true")
     ap.add_argument("--no-share", action="store_true", help="skip mirroring files to the share")
     ap.add_argument("--git-init", action="store_true", help="create a git repo here (only after the user agrees)")
@@ -517,7 +555,7 @@ def main() -> int:
         body["content"] = args.content
         body["title"] = args.title or "wolfhowl"
 
-    code = post_howl(api, body, workspace)
+    code = post_howl(api, body, workspace, {"paths": args.attach, "captions": args.attach_caption, "tags": args.attach_tag})
     if code == 0 and args.push:
         # Push last: the hub may have just handed us an origin on the share.
         try:

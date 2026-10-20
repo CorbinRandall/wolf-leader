@@ -769,3 +769,18 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+def memories_by_ids(ids: list[int]) -> list[dict]:
+    """Full memories for the given ids (at most 50), in the order asked."""
+    ids = [int(i) for i in ids][:50]
+    if not ids:
+        return []
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT id, project_id, type, content, status, created_at, updated_at FROM memories WHERE id IN ({','.join('?' * len(ids))})",
+            ids,
+        )
+        rows = {int(r["id"]): dict(r) for r in cur.fetchall()}
+    return [rows[i] for i in ids if i in rows]

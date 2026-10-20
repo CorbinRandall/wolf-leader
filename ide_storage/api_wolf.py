@@ -6,6 +6,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ide_storage.branding import PRODUCT_NAME
@@ -203,11 +204,12 @@ async def get_eat(
     device_name: Optional[str] = None,
     since: Optional[str] = None,
     q: Optional[str] = None,
+    detail: str = "full",
 ):
     from ide_storage.howl import run_eat
 
     result = run_eat(slug=slug, project_id=project_id, workspace_path=workspace_path or path,
-                     device_name=device_name, since=since, query=q)
+                     device_name=device_name, since=since, query=q, detail=detail)
     if not result.get("ok"):
         raise HTTPException(status_code=404, detail=result)
     return result
@@ -825,3 +827,59 @@ async def wiki_status():
     out = wiki_out_dir()
     return {"enabled": wiki_enabled(), "built": out is not None, "out": str(out) if out else None,
             "content_dir": str(CONTENT_DIR), "url": f"{_public()}/wiki/"}
+
+
+# ------------------------------------------------------------ attachments
+class AttachmentCreate(BaseModel):
+    filename: str
+    content_base64: str
+    caption: Optional[str] = ""
+    tags: Optional[List[str]] = None
+    chat_id: Optional[int] = None
+
+
+class AttachmentUpdate(BaseModel):
+    caption: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+@router.get("/projects/{project_id}/attachments")
+async def get_attachments(project_id: int, tag: Optional[str] = None):
+    from ide_storage.attachments import list_attachments
+
+    return {"attachments": list_attachments(project_id, tag=tag)}
+
+
+@router.post("/projects/{project_id}/attachments")
+async def post_attachment(project_id: int, body: AttachmentCreate):
+    from ide_storage.attachments import add_attachment_base64
+
+    return _progress_call(add_attachment_base64, project_id, body.filename, body.content_base64,
+                          caption=body.caption or "", tags=body.tags, chat_id=body.chat_id)
+
+
+@router.get("/attachments/{attachment_id}")
+async def get_attachment_file(attachment_id: int):
+    from ide_storage.attachments import attachment_file
+
+    row = attachment_file(attachment_id)
+    if not row or not os.path.isfile(row["path"]):
+        raise HTTPException(status_code=404, detail="attachment not found")
+    inline = (row.get("content_type") or "").startswith("image/") or row.get("content_type") == "application/pdf"
+    return FileResponse(row["path"], media_type=row.get("content_type") or "application/octet-stream",
+                        filename=row["filename"], content_disposition_type="inline" if inline else "attachment")
+
+
+@router.put("/attachments/{attachment_id}")
+async def put_attachment(attachment_id: int, body: AttachmentUpdate):
+    from ide_storage.attachments import update_attachment
+
+    return _progress_call(update_attachment, attachment_id, caption=body.caption, tags=body.tags)
+
+
+@router.delete("/attachments/{attachment_id}")
+async def remove_attachment(attachment_id: int):
+    from ide_storage.attachments import delete_attachment
+
+    return _progress_call(delete_attachment, attachment_id)
+

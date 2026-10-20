@@ -59,6 +59,7 @@ One optional helper exists for someone who wants a project's folder versioned on
 ## Other options
 
 - `--cite PATH` (repeatable): files this chat attached or changed. Add `--ingest` only after the user agrees to index their contents.
+- `--attach PATH` (repeatable): keep an image or file with the project, such as screenshots or mockups. Pair each with `--attach-caption "..."` in the same order, and add `--attach-tag TAG` to label them all (for example `reddit-post`). They show under **Files & images** on the project page; agents list them with the `list_attachments` tool.
 - `--title "..."`: override the title taken from the first user message.
 - `--no-share`, `--no-catalog`: skip the share mirror or file catalog.
 

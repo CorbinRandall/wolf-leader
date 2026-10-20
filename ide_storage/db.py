@@ -160,6 +160,7 @@ _HAS_ID_TABLES = {
     "fs_catalog",
     "file_chunks",
     "knowledge_revisions",
+    "attachments",
 }
 
 
@@ -546,6 +547,21 @@ SCHEMA_STATEMENTS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_snippets_project ON snippets(project_id)",
+    """
+    CREATE TABLE IF NOT EXISTS attachments (
+        id BIGSERIAL PRIMARY KEY,
+        project_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        filename TEXT NOT NULL,
+        path TEXT NOT NULL,
+        content_type TEXT,
+        size_bytes BIGINT,
+        caption TEXT,
+        tags TEXT,
+        chat_id BIGINT,
+        created_at TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_attachments_project ON attachments(project_id)",
     """
     CREATE TABLE IF NOT EXISTS project_paths (
         id BIGSERIAL PRIMARY KEY,

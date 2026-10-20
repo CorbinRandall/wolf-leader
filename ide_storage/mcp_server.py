@@ -205,6 +205,35 @@ def search(query: str, limit: int = 15) -> dict:
 
 
 @mcp.tool
+def get_memories(ids: list[int]) -> dict:
+    """Full text of specific memories by id (from an index recall's headlines)."""
+    from .memory_ops import memories_by_ids
+
+    return {"memories": memories_by_ids(ids)}
+
+
+@mcp.tool
+def list_attachments(slug: Optional[str] = None, project_id: Optional[int] = None, tag: Optional[str] = None,
+                     ctx: Context = None) -> dict:
+    """Files saved with a project (screenshots, mockups, PDFs): caption, tags and a download URL each."""
+    from .attachments import list_attachments as _list
+    from .hub import resolve_project
+
+    active = _get_active(ctx)
+    pid = project_id
+    if not pid and slug:
+        pid = (resolve_project(slug=slug) or {}).get("id")
+    pid = pid or active.get("project_id")
+    if not pid:
+        return {"ok": False, "error": "No project set — pass slug or call set_project first"}
+    base = os.environ.get("IDE_STORAGE_PUBLIC_URL", "").rstrip("/")
+    rows = _list(int(pid), tag=tag)
+    for r in rows:
+        r["url"] = base + r["url"]
+    return {"ok": True, "project_id": pid, "attachments": rows}
+
+
+@mcp.tool
 def get_session(chat_id: Optional[int] = None, session_id: Optional[str] = None) -> dict:
     """Fetch a stored chat session with all messages."""
     with db_conn() as conn:
@@ -378,11 +407,14 @@ def wolfeat(
     workspace_path: Optional[str] = None,
     device_name: Optional[str] = None,
     query: Optional[str] = None,
+    detail: str = "full",
     ctx: Context = None,
 ) -> dict:
     """
     Pull the latest context for a project onto this machine: brief, memories, howls (with git SHAs),
     related notes, open jobs, plus offers[] (git pull, register path, read files, model pull).
+    detail="index" returns a short table of contents (ids and one-line headlines); open what the
+    task needs with get_memories, search or get_session.
     """
     from .howl import run_eat
 
@@ -393,6 +425,7 @@ def wolfeat(
         workspace_path=workspace_path or active.get("path"),
         device_name=device_name,
         query=query,
+        detail=detail,
     )
     if result.get("ok"):
         active["project_id"] = result["project_id"]

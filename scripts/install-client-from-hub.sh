@@ -77,7 +77,9 @@ fi
 rc=0
 for client in "${clients[@]}"; do
   if [[ "$client" == cursor ]]; then
-    bash "$TMP/scripts/install-cursor-client.sh" "${INSTALL_ARGS[@]}" || rc=1
+    # Expand only when set: bash 3.2 (stock macOS) treats "${arr[@]}" on an
+    # empty array as unbound under set -u.
+    bash "$TMP/scripts/install-cursor-client.sh" ${INSTALL_ARGS[@]+"${INSTALL_ARGS[@]}"} || rc=1
   elif [[ "$client" == codex ]]; then
     bash "$TMP/scripts/install-codex-client.sh" || rc=1
   else

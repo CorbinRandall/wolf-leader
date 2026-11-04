@@ -2,14 +2,15 @@ import AppKit
 import SwiftUI
 
 enum MainSection: String, CaseIterable, Identifiable, Hashable {
-    case projects, library, ask, shares, settings
+    case chats, projects, library, ask, shares, settings
 
     var id: String { rawValue }
 
-    static let primary: [MainSection] = [.projects, .library, .ask]
+    static let primary: [MainSection] = [.chats, .projects, .library, .ask]
 
     var label: String {
         switch self {
+        case .chats: return "Chats"
         case .projects: return "Projects"
         case .library: return "Library"
         case .ask: return "Search"
@@ -20,6 +21,7 @@ enum MainSection: String, CaseIterable, Identifiable, Hashable {
 
     var symbol: String {
         switch self {
+        case .chats: return "bubble.left.and.bubble.right"
         case .projects: return "folder"
         case .library: return "rectangle.3.group"
         case .ask: return "sparkle.magnifyingglass"
@@ -73,6 +75,10 @@ struct MainView: View {
                     }
                     .padding(.vertical, 4)
                     .selectionDisabled()
+                }
+                Section {
+                    Label(MainSection.chats.label, systemImage: MainSection.chats.symbol)
+                        .tag(SidebarItem.section(.chats))
                 }
                 // Every view inside a section is one click away, no menu diving.
                 Section("Projects") {
@@ -158,6 +164,8 @@ struct MainView: View {
     @ViewBuilder
     private var detail: some View {
         switch nav.route.section {
+        case .chats:
+            ChatsView()
         case .projects:
             ProjectsView(openSettings: { nav.open(section: .settings) })
         case .library:

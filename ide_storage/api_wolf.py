@@ -232,6 +232,9 @@ async def ensure_project(body: EnsureProjectBody):
     try:
         p = create_project_for_path(body.path, name=body.name, slug=body.slug,
                                     device_name=body.device_name, description=body.description)
+    except ValueError as exc:
+        # A tool's or app's own folder (~/.codex, ~/Library/Application Support/…) isn't a project.
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         logger.exception("ensure project failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc

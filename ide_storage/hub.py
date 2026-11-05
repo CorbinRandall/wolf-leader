@@ -102,9 +102,13 @@ def create_project_for_path(
     Returns the existing project only when that exact folder is already its own. A project that
     merely sits in a parent folder does not count: a new folder is a new project.
     """
-    from .paths import _norm, project_paths, register_project_path, to_hub_path, variants
+    from .paths import _norm, not_a_project_folder, project_paths, register_project_path, to_hub_path, variants
 
     existing = resolve_project(path=path)
+    if not existing:
+        why = not_a_project_folder(path)
+        if why:
+            raise ValueError(f"{path} is {why}, not a project. Pick an existing project or name a new one.")
     if existing:
         mine = {_norm(v) for v in variants(path)}
         theirs = {_norm(p["path"]) for p in project_paths(int(existing["id"]))}

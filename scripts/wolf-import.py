@@ -286,13 +286,38 @@ def export_sessions(paths: list[Path]) -> list[dict]:
     return out
 
 
+AI_TOOL_FOLDERS = (".codex", ".claude", ".cursor", ".gemini", ".grok", ".kiro", ".copilot", ".opencode",
+              ".config", ".cache", ".npm", ".local", ".vscode", ".agents")
+
+
 def is_broad(folder: str | None) -> bool:
+    """A folder that isn't a project (home, Downloads, a tool's own folder, the Codex app's scratch
+    folder): its sessions are filed by what was said, never grouped into a project named after it.
+    Mirrors ide_storage.paths.not_a_project_folder, which the hub enforces too."""
     if not folder:
         return True
-    n = folder.rstrip("/").lower()
-    return n in ("", "/", "/root", "/tmp") or bool(re.fullmatch(r"/(users|home)/[^/]+", n)) or "/var/folders/" in n \
-        or n.startswith("/private/var/") or "/documents/codex/20" in n \
-        or bool(re.fullmatch(r"/(users|home)/[^/]+/(downloads|desktop|documents|applications|projects)", n))
+    n = folder.replace("\\", "/").rstrip("/").lower()
+    n = re.sub(r"^[a-z]:", "", n)
+    if n in ("", "/", "/root", "/tmp") or "/var/folders/" in n or n.startswith("/private/var/"):
+        return True
+    m = re.fullmatch(r"/(users|home)/[^/]+(/.*)?", n)
+    if not m:
+        return any(f"/{t}" == n[-len(t) - 1:] or f"/{t}/" in n + "/" for t in AI_TOOL_FOLDERS)
+    rest = (m.group(2) or "").strip("/")
+    return (not rest or rest.split("/")[0] in AI_TOOL_FOLDERS
+            or rest in ("downloads", "desktop", "documents", "applications", "projects", "library")
+            or rest == "documents/codex" or rest.startswith("documents/codex/"))
+
+
+def is_automated(folder: str | None, said: str) -> bool:
+    """An app using an AI behind the scenes, not a person's conversation: run from an app's
+    private data or a temp folder (e.g. MacParakeet's ~/Library/Application Support/MacParakeet/
+    LocalCLI calls Codex to tidy dictation), or opening with a machine-written role prompt."""
+    n = (folder or "").replace("\\", "/").lower()
+    if re.search(r"/library/(application support|containers|group containers|caches)/", n + "/") \
+            or re.search(r"/appdata/(roaming|local)/", n + "/") or "/var/folders/" in n or n.startswith("/private/var/"):
+        return True
+    return bool(re.match(r"you are an? (helpful |)(assistant|transcription|text|formatting|writing)\b", said.strip().lower()))
 
 
 def scan(api: str, exports: list[str] | None = None) -> dict:
@@ -309,6 +334,8 @@ def scan(api: str, exports: list[str] | None = None) -> dict:
         if not said:
             continue
         folder = folder or s.get("folder_hint")
+        if is_automated(folder, said):
+            continue
         title = s.get("name_hint") or said[:90] + ("…" if len(said) > 90 else "")
         sessions.append({**s, "title": title, "said": said[:400], "folder": folder, "started": started,
                          "ended": iso(path.stat().st_mtime), "size": size})

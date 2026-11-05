@@ -8,6 +8,7 @@ struct ChatView: View {
     @EnvironmentObject private var nav: Navigator
     @Environment(\.palette) private var p
     @ObservedObject var session: ChatSession
+    @ObservedObject private var rules = ChatRules.shared
     let back: () -> Void
     @State private var draft = ""
     @State private var choosingProject = false
@@ -65,18 +66,26 @@ struct ChatView: View {
                 .help(record.projectID == nil ? "Connect this chat to a project. Wolf Leader files it there." : "Move this chat to another project")
                 saveBadge
                 Menu {
-                    ForEach(PermissionMode.allCases) { mode in
-                        Button { session.setMode(mode) } label: {
-                            if mode == record.mode { Label(mode.label, systemImage: "checkmark") } else { Text(mode.label) }
+                    if rules.neverAsk {
+                        Text("Never ask is on for every chat: agents act without asking.")
+                        Button("Change in Settings > Rules…") { nav.open(settingsTab: "rules") }
+                    } else {
+                        ForEach(PermissionMode.allCases) { mode in
+                            Button { session.setMode(mode) } label: {
+                                if mode == record.mode { Label(mode.label, systemImage: "checkmark") } else { Text(mode.label) }
+                            }
+                            .help(mode.help)
                         }
-                        .help(mode.help)
+                        Divider()
+                        Button("Rules for every chat…") { nav.open(settingsTab: "rules") }
                     }
                 } label: {
-                    Label(record.mode.label, systemImage: record.mode == .auto ? "bolt.fill" : "hand.raised")
+                    Label(rules.neverAsk ? "Never asks" : record.mode.label,
+                          systemImage: rules.neverAsk || record.mode == .auto ? "bolt.fill" : "hand.raised")
                         .font(.system(size: 11, weight: .semibold))
                 }
                 .menuStyle(.borderlessButton).fixedSize()
-                .help(record.mode.help)
+                .help(rules.neverAsk ? "Every chat runs without asking (Settings > Rules)." : record.mode.help)
             }
             Text(folderLine).font(DS.Font.micro).foregroundStyle(p.textFaint).lineLimit(1).truncationMode(.middle)
                 .help(record.cwd)

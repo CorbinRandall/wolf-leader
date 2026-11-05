@@ -59,6 +59,24 @@ def test_delete_leaves_a_tombstone_every_device_sees():
     assert client.get("/api/app-chats/chat-3").json()["deleted"] is False
 
 
+def test_chat_rules_default_to_never_asking_and_the_library_skills():
+    client = _client()
+    rules = client.get("/api/chat-rules").json()
+    assert rules["never_ask"] is True and rules["default_mode"] == "auto"
+    assert "wolfhowl" not in rules["skills"] and "wolfhowl" in rules["library"]
+    assert set(rules["skills"]) == set(rules["library"]) - {"wolfhowl", "wolfeat"}
+
+    saved = client.put("/api/chat-rules", json={
+        "never_ask": False, "default_mode": "edits", "rules": "Reply in plain English.",
+        "skills": [rules["library"][0], "no-such-skill"],
+    }).json()
+    assert saved["never_ask"] is False and saved["default_mode"] == "edits"
+    assert saved["rules"] == "Reply in plain English."
+    assert saved["skills"] == [rules["library"][0]]  # skills not in the library drop out
+    assert client.get("/api/chat-rules").json()["rules"] == "Reply in plain English."
+    assert client.put("/api/chat-rules", json={"default_mode": "yolo"}).status_code == 422
+
+
 def test_bad_since_and_missing_chat():
     client = _client()
     assert client.get("/api/app-chats", params={"since": "yesterday"}).status_code == 400

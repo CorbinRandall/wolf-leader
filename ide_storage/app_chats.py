@@ -140,6 +140,67 @@ def put_app_chat(chat_id: str, body: PutBody) -> Dict[str, Any]:
     return {"ok": True, "id": chat_id, "server_updated": now}
 
 
+# ---------------------------------------------------------------- rules for every chat
+# One set of rules for every chat, every agent, every device: whether agents may act without
+# asking, what new chats start in, instructions every agent gets, and which skills from the
+# hub's library every chat starts with.
+
+rules_router = APIRouter(prefix="/api/chat-rules", tags=["app-chats"])
+_RULES_KEY = "chat_rules"
+_DEFAULT_SKIP = {"wolfhowl", "wolfeat"}  # saving and recall happen on their own in the app
+
+
+class ChatRules(BaseModel):
+    never_ask: bool = True
+    default_mode: str = Field(default="auto", pattern="^(ask|edits|auto)$")
+    rules: str = Field(default="", max_length=20000)
+    # None = not chosen yet: every skill except wolfhowl/wolfeat.
+    skills: Optional[list[str]] = None
+
+
+def _read_rules() -> Dict[str, Any]:
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT value, updated_at FROM app_settings WHERE key = ?", (_RULES_KEY,))
+        row = cur.fetchone()
+    saved: Dict[str, Any] = {}
+    if row:
+        try:
+            saved = json.loads(row["value"]) or {}
+        except (TypeError, ValueError):
+            saved = {}
+    rules = ChatRules(**{k: v for k, v in saved.items() if k in ChatRules.model_fields}).model_dump()
+    from ide_storage.skill_registry import list_skills
+
+    library = [s["name"] for s in list_skills()]
+    if rules["skills"] is None:
+        rules["skills"] = [n for n in library if n not in _DEFAULT_SKIP]
+    rules["skills"] = [n for n in rules["skills"] if n in library]
+    rules["library"] = library
+    rules["updated_at"] = row["updated_at"] if row else None
+    return rules
+
+
+@rules_router.get("")
+def get_chat_rules() -> Dict[str, Any]:
+    return _read_rules()
+
+
+@rules_router.put("")
+def put_chat_rules(body: ChatRules) -> Dict[str, Any]:
+    with db_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)
+            ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            (_RULES_KEY, json.dumps(body.model_dump()), _now()),
+        )
+        conn.commit()
+    return _read_rules()
+
+
 @router.delete("/{chat_id}")
 def delete_app_chat(chat_id: str, device: Optional[str] = None) -> Dict[str, Any]:
     """Leave a tombstone so every device removes the chat. The save_session copy stays in the project."""

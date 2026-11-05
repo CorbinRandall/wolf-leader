@@ -160,6 +160,7 @@ struct MainView: View {
         .task(id: store.config.hubURL) {
             // Chats follow you: every device on this hub sees and continues the same chats.
             ChatSync.shared.start(hubURL: store.config.hubURL, device: store.config.deviceName)
+            ChatRules.shared.start(hubURL: store.config.hubURL)
             // Who uses this Mac: guess from its name ("Corbin's Mac Studio") when it's one of the hub's people.
             if store.config.person == nil, let owners = try? await store.hub.owners() {
                 let name = store.config.deviceName.lowercased()

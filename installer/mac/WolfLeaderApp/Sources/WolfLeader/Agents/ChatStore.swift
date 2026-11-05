@@ -43,7 +43,9 @@ final class ChatStore: ObservableObject {
 
     /// A new chat. In a project, the agent works in the project's copy from the server; without
     /// one, in a scratch folder of its own until it's connected to a project.
-    func create(project: ProjectRef?, agent: AgentKind, mode: PermissionMode = .ask) -> ChatRecord {
+    func create(project: ProjectRef?, agent: AgentKind, mode: PermissionMode? = nil) -> ChatRecord {
+        // New chats start the way the rules for every chat say (Full auto unless changed).
+        let mode = mode ?? ChatRules.shared.defaultMode
         let now = Date()
         let id = UUID().uuidString.lowercased()
         let cwd = project.map { ProjectWorkspace.folder(slug: $0.slug).path } ?? ProjectWorkspace.looseFolder(chatID: id).path
@@ -192,6 +194,13 @@ final class ChatSession: ObservableObject, Identifiable {
         let hub = config.hub
         self.hub = hub
         let person = config.config.person
+        // "Never ask" applies to every chat, old ones too. The mode is fixed when an agent
+        // starts, so an agent started in another mode starts again.
+        if ChatRules.shared.neverAsk, record.mode != .auto {
+            record.mode = .auto
+            driver?.stop()
+            driver = nil
+        }
         // Everything said before this message, for an agent that hasn't seen it yet.
         let earlier = record.items
         append(ChatItem(id: UUID().uuidString, kind: .user, text: text))
@@ -211,6 +220,8 @@ final class ChatSession: ObservableObject, Identifiable {
                                                                 excludingSession: record.hubSessionID) {
                         parts.append(context)
                     }
+                    // Your rules and skills for every chat, whichever agent runs it.
+                    if let rules = await ChatRules.shared.contextBlock(hub: hub) { parts.append(rules) }
                 }
                 if record.needsHandoff == true, let handoff = WolfChatSync.handoff(earlier, agentName: record.agent?.name ?? "the agent") {
                     parts.append(handoff)
@@ -372,7 +383,13 @@ final class ChatSession: ObservableObject, Identifiable {
             if let output, !output.isEmpty { record.items[index].output = output }
             if let status { record.items[index].status = status }
         case .approval(let id, let title, let detail):
-            append(ChatItem(id: id, kind: .approval, text: title, detail: detail, status: .pending))
+            if ChatRules.shared.neverAsk || record.mode == .auto {
+                // "Never ask": approve it for good, so the agent doesn't ask about this again.
+                append(ChatItem(id: id, kind: .approval, text: title, detail: detail, status: .allowed))
+                DispatchQueue.main.async { [weak self] in self?.driver?.answer(approval: id, allow: true, always: true) }
+            } else {
+                append(ChatItem(id: id, kind: .approval, text: title, detail: detail, status: .pending))
+            }
         case .note(let text):
             append(ChatItem(id: UUID().uuidString, kind: .note, text: text))
         case .turnFinished(let error):

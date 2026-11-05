@@ -7,6 +7,8 @@ struct Route: Hashable {
     var projectsTab: String = "focus"
     var libraryTab: String = "skills"
     var projectID: Int?
+    /// A chat open inside the project.
+    var chatID: String?
 }
 
 /// One history for the whole window, like a browser: every section change, every switch between
@@ -61,6 +63,7 @@ final class Navigator: ObservableObject {
         var next = route
         next.section = section
         next.projectID = nil
+        next.chatID = nil
         go(next)
     }
 
@@ -69,6 +72,7 @@ final class Navigator: ObservableObject {
         next.section = .projects
         next.projectsTab = projectsTab
         next.projectID = nil
+        next.chatID = nil
         go(next)
     }
 
@@ -77,6 +81,7 @@ final class Navigator: ObservableObject {
         next.section = .library
         next.libraryTab = libraryTab
         next.projectID = nil
+        next.chatID = nil
         go(next)
     }
 
@@ -84,7 +89,26 @@ final class Navigator: ObservableObject {
         var next = route
         next.section = .projects
         next.projectID = id
+        next.chatID = nil
         go(next)
+    }
+
+    /// Open a chat on its project's page.
+    func open(chat id: String, project: Int) {
+        var next = route
+        next.section = .projects
+        next.projectID = project
+        next.chatID = id
+        go(next)
+    }
+
+    /// Leave a chat for its project page. If you came from there, that is simply "back".
+    func closeChat() {
+        if let previous = backStack.last, previous.section == .projects, previous.projectID == route.projectID, previous.chatID == nil {
+            goBack()
+        } else {
+            open(project: route.projectID)
+        }
     }
 
     /// Run a search from anywhere: open the results page with this text.

@@ -165,7 +165,7 @@ struct MainView: View {
     private var detail: some View {
         switch nav.route.section {
         case .chats:
-            ChatsView()
+            AllChatsView()
         case .projects:
             ProjectsView(openSettings: { nav.open(section: .settings) })
         case .library:

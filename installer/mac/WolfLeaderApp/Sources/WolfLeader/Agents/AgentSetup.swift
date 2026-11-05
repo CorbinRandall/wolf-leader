@@ -137,7 +137,8 @@ final class AgentRegistry: ObservableObject {
                 break
             }
         }
-        await MainActor.run { signedIn = result }
+        let checked = result
+        await MainActor.run { signedIn = checked }
     }
 
     /// Output of a short command (stdout and stderr), or "" after 8 seconds.
@@ -259,9 +260,7 @@ extension AgentLocator {
         let parts = output.components(separatedBy: marker)
         guard parts.count >= 3 else { return }
         let dirs = parts[1].split(separator: ":").map(String.init).filter { $0.hasPrefix("/") }
-        shellPathLock.lock()
-        shellDirs = dirs
-        shellPathLock.unlock()
+        shellPathLock.withLock { shellDirs = dirs }
     }
 
     /// The newest Claude Code that the Claude desktop app keeps for itself.

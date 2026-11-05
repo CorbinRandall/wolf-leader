@@ -53,20 +53,21 @@ enum WolfChatSync {
         let lastReply = chat.items.last { $0.kind == .agent }?.text ?? ""
         let agentName = chat.agent?.name ?? chat.agentID
         let summary = """
-        \(agentName) chat in Wolf Leader, project \(chat.projectName).
+        \(agentName) chat in Wolf Leader\(chat.projectName.map { ", project \($0)" } ?? "").
         Asked: \(AgentText.oneLine(chat.items.first { $0.kind == .user }?.text ?? "", limit: 600))
         Latest reply: \(AgentText.oneLine(lastReply, limit: 1500))
         """
         let iso = ISO8601DateFormatter()
-        let arguments: [String: Any] = [
+        var arguments: [String: Any] = [
             "title": "\(agentName): \(chat.title)",
             "content": summary,
             "session_id": chat.hubSessionID,
             "workspace_path": chat.cwd,
-            "project_id": chat.projectID,
             "messages_json": String(decoding: try JSONSerialization.data(withJSONObject: messages), as: UTF8.self),
             "occurred_at": iso.string(from: chat.created),
         ]
+        // With a project the chat is filed (or moved) there; without one the hub keeps it as a loose session.
+        if let projectID = chat.projectID { arguments["project_id"] = projectID }
         let reply = try await HubMCP.shared.call(tool: "save_session", arguments: arguments, hubURL: hubURL)
         if reply["ok"] as? Bool == false { throw AgentError.failed(reply["error"] as? String ?? "The hub didn't save the chat.") }
     }

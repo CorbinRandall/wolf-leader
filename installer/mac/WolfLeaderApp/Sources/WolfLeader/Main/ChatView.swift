@@ -7,9 +7,9 @@ struct ChatView: View {
     @EnvironmentObject private var store: ConfigStore
     @Environment(\.palette) private var p
     @ObservedObject var session: ChatSession
-    let entry: ProjectEntry
     let back: () -> Void
     @State private var draft = ""
+    @State private var choosingProject = false
     @FocusState private var composing: Bool
 
     private var record: ChatRecord { session.record }
@@ -25,6 +25,11 @@ struct ChatView: View {
         }
         .background(p.background)
         .onAppear { composing = true }
+        .sheet(isPresented: $choosingProject) {
+            ProjectPickerSheet(current: record.projectID) { session.attach(to: $0, config: store) }
+                .environment(\.palette, p)
+                .environmentObject(store)
+        }
     }
 
     // MARK: Header
@@ -34,7 +39,7 @@ struct ChatView: View {
             Button(action: back) {
                 HStack(spacing: 4) {
                     Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
-                    Text(entry.name)
+                    Text(record.projectName ?? "Chats")
                 }
                 .font(DS.Font.bodySmall.weight(.medium)).foregroundStyle(p.accent)
             }
@@ -44,6 +49,15 @@ struct ChatView: View {
                 Text(record.title).font(DS.Font.section).foregroundStyle(p.text).lineLimit(1)
                 if let agent { MainTag(text: "\(agent.name) · \(agent.company)") }
                 Spacer(minLength: 8)
+                Button {
+                    choosingProject = true
+                } label: {
+                    Label(record.projectName.map { "In \($0)" } ?? "Add to a project…",
+                          systemImage: record.projectID == nil ? "folder.badge.plus" : "folder")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(.borderless)
+                .help(record.projectID == nil ? "Connect this chat to a project. Wolf Leader files it there." : "Move this chat to another project")
                 saveBadge
                 Menu {
                     ForEach(PermissionMode.allCases) { mode in
@@ -59,10 +73,16 @@ struct ChatView: View {
                 .menuStyle(.borderlessButton).fixedSize()
                 .help(record.mode.help)
             }
-            Text(record.cwd).font(DS.Font.micro.monospaced()).foregroundStyle(p.textFaint)
-                .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+            Text(folderLine).font(DS.Font.micro).foregroundStyle(p.textFaint).lineLimit(1).truncationMode(.middle)
+                .help(record.cwd)
         }
         .padding(.horizontal, DS.Spacing.lg).padding(.vertical, 14)
+    }
+
+    private var folderLine: String {
+        if ProjectWorkspace.isWorkspace(record.cwd) { return "Works in \(record.projectName ?? "the project")'s folder on the server" }
+        if record.cwd.hasPrefix(ProjectWorkspace.looseRoot.path) { return "Works in a scratch folder until it's added to a project" }
+        return "Works in \(record.cwd)"
     }
 
     @ViewBuilder
@@ -88,7 +108,7 @@ struct ChatView: View {
                     if session.busy && !session.pendingApprovals {
                         HStack(spacing: 8) {
                             ProgressView().controlSize(.small)
-                            Text(session.connecting ? "Starting \(agent?.name ?? "the agent")…" : "Working…")
+                            Text(session.preparing ?? (session.connecting ? "Starting \(agent?.name ?? "the agent")…" : "Working…"))
                                 .font(DS.Font.caption).foregroundStyle(p.textMuted)
                         }
                     }
@@ -107,9 +127,11 @@ struct ChatView: View {
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 8) {
             Image(systemName: agent?.symbol ?? "bubble.left").font(.system(size: 24, weight: .semibold)).foregroundStyle(p.accent)
-            Text("Ask \(agent?.name ?? "the agent") anything about \(entry.name).")
+            Text(record.projectName.map { "Ask \(agent?.name ?? "the agent") anything about \($0)." } ?? "Ask \(agent?.name ?? "the agent") anything.")
                 .font(DS.Font.section).foregroundStyle(p.text)
-            Text("It starts with this project's notes from Wolf Leader, and the whole chat is saved back to the project after every reply.")
+            Text(record.projectID == nil
+                 ? "This chat is saved to Wolf Leader after every reply. Add it to a project any time, and Wolf Leader files it there."
+                 : "It starts with this project's notes, works in the project's folder on the server, and is saved back to the project after every reply.")
                 .font(DS.Font.bodySmall).foregroundStyle(p.textMuted)
             if !installed, let agent {
                 WLStatusPill(text: "\(agent.name) isn't installed", kind: .warn)
@@ -151,7 +173,7 @@ struct ChatView: View {
         let text = draft
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !session.busy else { return }
         draft = ""
-        session.send(text, config: store, projectKey: entry.project.key)
+        session.send(text, config: store)
         composing = true
     }
 }

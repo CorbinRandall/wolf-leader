@@ -41,9 +41,13 @@ final class ChatStore: ObservableObject {
 
     func isRunning(_ id: String) -> Bool { sessions[id]?.busy ?? false }
 
-    func create(projectID: Int, projectName: String, agent: AgentKind, cwd: String, mode: PermissionMode) -> ChatRecord {
+    /// A new chat. In a project, the agent works in the project's copy from the server; without
+    /// one, in a scratch folder of its own until it's connected to a project.
+    func create(project: ProjectRef?, agent: AgentKind, mode: PermissionMode = .ask) -> ChatRecord {
         let now = Date()
-        let record = ChatRecord(id: UUID().uuidString.lowercased(), projectID: projectID, projectName: projectName,
+        let id = UUID().uuidString.lowercased()
+        let cwd = project.map { ProjectWorkspace.folder(slug: $0.slug).path } ?? ProjectWorkspace.looseFolder(chatID: id).path
+        let record = ChatRecord(id: id, projectID: project?.id, projectName: project?.name, projectSlug: project?.slug,
                                 agentID: agent.id, title: "New chat", cwd: cwd, mode: mode, agentSessionID: nil,
                                 items: [], created: now, updated: now)
         write(record)
@@ -75,6 +79,21 @@ final class ChatStore: ObservableObject {
     }
 }
 
+/// The project a chat belongs to.
+struct ProjectRef: Hashable {
+    var id: Int
+    var name: String
+    var slug: String
+
+    init(id: Int, name: String, slug: String?) {
+        self.id = id
+        self.name = name
+        self.slug = slug ?? String(id)
+    }
+
+    init(_ project: HubProject) { self.init(id: project.id, name: project.name, slug: project.slug) }
+}
+
 /// One open chat: its record, the running agent, and what's happening right now.
 @MainActor
 final class ChatSession: ObservableObject, Identifiable {
@@ -83,12 +102,15 @@ final class ChatSession: ObservableObject, Identifiable {
     @Published private(set) var record: ChatRecord
     @Published private(set) var busy = false
     @Published private(set) var connecting = false
+    /// What's happening before the agent starts, e.g. bringing the project in from the server.
+    @Published private(set) var preparing: String?
     @Published private(set) var saveState: SaveState = .idle
 
     nonisolated let id: String
     private weak var store: ChatStore?
     private var driver: AgentDriver?
     private var hubURL = ""
+    private var hub: HubClient?
 
     init(record: ChatRecord, store: ChatStore) {
         self.record = record
@@ -100,11 +122,12 @@ final class ChatSession: ObservableObject, Identifiable {
 
     // MARK: Talking to the agent
 
-    func send(_ text: String, config: ConfigStore, projectKey: String) {
+    func send(_ text: String, config: ConfigStore) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !busy else { return }
         hubURL = config.config.hubURL
         let hub = config.hub
+        self.hub = hub
         append(ChatItem(id: UUID().uuidString, kind: .user, text: text))
         if record.title == "New chat" { record.title = AgentText.oneLine(text, limit: 60) }
         busy = true
@@ -113,8 +136,9 @@ final class ChatSession: ObservableObject, Identifiable {
             do {
                 if driver == nil { try await connect() }
                 var prompt = text
-                if !record.contextSent,
-                   let context = await WolfChatSync.context(hub: hub, projectID: record.projectID, projectKey: projectKey, projectName: record.projectName) {
+                if !record.contextSent, let projectID = record.projectID, let name = record.projectName,
+                   let context = await WolfChatSync.context(hub: hub, projectID: projectID,
+                                                            projectKey: record.projectSlug ?? String(projectID), projectName: name) {
                     prompt = context + "\n\n" + text
                 }
                 record.contextSent = true
@@ -141,6 +165,21 @@ final class ChatSession: ObservableObject, Identifiable {
         if !busy { driver?.stop(); driver = nil }
     }
 
+    /// Connect a chat to a project (or move it to another one). The hub refiles it, and the next
+    /// message brings in that project's notes.
+    func attach(to project: ProjectRef, config: ConfigStore) {
+        guard project.id != record.projectID else { return }
+        hubURL = config.config.hubURL
+        hub = config.hub
+        record.projectID = project.id
+        record.projectName = project.name
+        record.projectSlug = project.slug
+        record.contextSent = false
+        append(ChatItem(id: UUID().uuidString, kind: .note, text: "Connected to \(project.name). The next message brings in its notes."))
+        persist()
+        saveToHub()
+    }
+
     func shutdown() {
         driver?.stop()
         driver = nil
@@ -150,6 +189,12 @@ final class ChatSession: ObservableObject, Identifiable {
     private func connect() async throws {
         guard let agent = record.agent else { throw AgentError.failed("This chat's agent isn't known to this version of Wolf Leader.") }
         guard let executable = AgentLocator.find(agent.binary) else { throw AgentError.notInstalled(agent) }
+        if ProjectWorkspace.isWorkspace(record.cwd), let slug = record.projectSlug, let hub {
+            preparing = "Bringing \(record.projectName ?? "the project") in from the server…"
+            let note = await ProjectWorkspace.prepare(hub: hub, slug: slug, path: record.cwd)
+            preparing = nil
+            if let note { append(ChatItem(id: UUID().uuidString, kind: .note, text: note)) }
+        }
         connecting = true
         defer { connecting = false }
         let driver: AgentDriver
@@ -221,6 +266,20 @@ final class ChatSession: ObservableObject, Identifiable {
         for index in record.items.indices where record.items[index].status == .pending { record.items[index].status = .denied }
         persist()
         saveToHub()
+        sendFilesToServer()
+    }
+
+    /// The agent's changes go back to the project's folder on the server after every reply.
+    private func sendFilesToServer() {
+        guard ProjectWorkspace.isWorkspace(record.cwd) else { return }
+        let path = record.cwd
+        let message = "Wolf Leader: \(record.agent?.name ?? "agent") chat, \(record.title)"
+        Task {
+            if let note = await ProjectWorkspace.sync(path: path, message: message) {
+                append(ChatItem(id: UUID().uuidString, kind: .note, text: note))
+                persist()
+            }
+        }
     }
 
     private func index(_ id: String, _ kind: ChatItem.Kind) -> Int? {

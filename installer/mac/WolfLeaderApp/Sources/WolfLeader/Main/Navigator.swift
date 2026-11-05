@@ -93,19 +93,21 @@ final class Navigator: ObservableObject {
         go(next)
     }
 
-    /// Open a chat on its project's page.
-    func open(chat id: String, project: Int) {
+    /// Open a chat: on its project's page, or on the Chats page if it isn't in a project yet.
+    func open(chat id: String, project: Int?) {
         var next = route
-        next.section = .projects
+        next.section = project == nil ? .chats : .projects
         next.projectID = project
         next.chatID = id
         go(next)
     }
 
-    /// Leave a chat for its project page. If you came from there, that is simply "back".
+    /// Leave a chat for the page it was opened from. If you came from there, that is simply "back".
     func closeChat() {
-        if let previous = backStack.last, previous.section == .projects, previous.projectID == route.projectID, previous.chatID == nil {
+        if let previous = backStack.last, previous.section == route.section, previous.projectID == route.projectID, previous.chatID == nil {
             goBack()
+        } else if route.section == .chats {
+            open(section: .chats)
         } else {
             open(project: route.projectID)
         }

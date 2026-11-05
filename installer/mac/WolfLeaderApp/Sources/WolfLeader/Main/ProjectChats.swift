@@ -8,25 +8,17 @@ struct ProjectChatsGroup: View {
     @EnvironmentObject private var nav: Navigator
     @ObservedObject private var chats = ChatStore.shared
     let entry: ProjectEntry
-    let folders: [HubProjectFolder]
-    /// Links a folder to the project on the hub (used when the project has none on this Mac yet).
-    let linkFolder: (String) -> Void
     @State private var showAll = false
     @State private var removing: ChatRecord?
 
     private var mine: [ChatRecord] { chats.chats(projectID: entry.id) }
 
     var body: some View {
-        WLGroup(title: "Chats", subtitle: "Talk to any AI agent about this project. Each chat starts with the project's notes and is saved here.",
+        WLGroup(title: "Chats", subtitle: "Talk to any AI agent about this project. Each chat starts with the project's notes, works in the project's folder on the server, and is saved here.",
                 icon: "bubble.left.and.bubble.right") {
-            HStack(spacing: 8) {
-                NewChatMenu { start($0) }
-                if workingFolder == nil {
-                    Text("You'll pick the project's folder first.").font(DS.Font.micro).foregroundStyle(p.textFaint)
-                } else if let folder = workingFolder {
-                    Text("Runs in \(folder)").font(DS.Font.micro.monospaced()).foregroundStyle(p.textFaint)
-                        .lineLimit(1).truncationMode(.middle)
-                }
+            NewChatMenu { agent in
+                let chat = chats.create(project: ProjectRef(entry.project), agent: agent)
+                nav.open(chat: chat.id, project: entry.id)
             }
             if !mine.isEmpty { WLDivider() }
             let shown = showAll ? mine : Array(mine.prefix(6))
@@ -45,32 +37,6 @@ struct ProjectChatsGroup: View {
         } message: {
             Text("The copy saved in Wolf Leader stays in this project's logbook.")
         }
-    }
-
-    /// The first of the project's folders that exists on this Mac.
-    private var workingFolder: String? {
-        let candidates = folders.filter { $0.kind != "compose" }.map(\.path) + [entry.project.path].compactMap { $0 }
-        return candidates.first { path in
-            var isDir: ObjCBool = false
-            return FileManager.default.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue
-        }
-    }
-
-    private func start(_ agent: AgentKind) {
-        var folder = workingFolder
-        if folder == nil {
-            let panel = NSOpenPanel()
-            panel.canChooseDirectories = true
-            panel.canChooseFiles = false
-            panel.prompt = "Use this folder"
-            panel.message = "Where does \(entry.name) live on this Mac? It's linked to the project, and agents work there."
-            guard panel.runModal() == .OK, let url = panel.url else { return }
-            folder = url.path
-            linkFolder(url.path)
-        }
-        guard let folder else { return }
-        let chat = chats.create(projectID: entry.id, projectName: entry.name, agent: agent, cwd: folder, mode: .ask)
-        nav.open(chat: chat.id, project: entry.id)
     }
 }
 
@@ -145,25 +111,30 @@ struct AllChatsView: View {
     @EnvironmentObject private var nav: Navigator
     @ObservedObject private var chats = ChatStore.shared
 
-    private var groups: [(projectID: Int, name: String, chats: [ChatRecord])] {
-        var order: [Int] = []
-        var byProject: [Int: [ChatRecord]] = [:]
+    /// Chats not in a project come first, then each project's, most recent first.
+    private var groups: [(projectID: Int?, name: String, chats: [ChatRecord])] {
+        var order: [Int?] = []
+        var byProject: [Int?: [ChatRecord]] = [:]
         for chat in chats.records {
             if byProject[chat.projectID] == nil { order.append(chat.projectID) }
             byProject[chat.projectID, default: []].append(chat)
         }
-        return order.map { id in (id, byProject[id]?.first?.projectName ?? "Project", byProject[id] ?? []) }
+        order.sort { a, _ in a == nil }
+        return order.map { id in (id, id == nil ? "Not in a project yet" : byProject[id]?.first?.projectName ?? "Project", byProject[id] ?? []) }
     }
 
     var body: some View {
         MainPage {
             WLPageHeader(eyebrow: "Chats", title: "Recent chats",
-                         subtitle: "Every chat with every agent, filed under its project. Start a new one from a project's page.")
+                         subtitle: "Every chat with every agent. Start one here and add it to a project any time, or start it from a project's page.") {
+                NewChatMenu { agent in
+                    let chat = chats.create(project: nil, agent: agent)
+                    nav.open(chat: chat.id, project: nil)
+                }
+            }
             if chats.records.isEmpty {
                 MainNotice(symbol: "bubble.left.and.bubble.right", title: "No chats yet",
-                           message: "Open a project and choose New chat. Claude, Codex and the other agents all work there.") {
-                    Button("Open projects") { nav.open(projectsTab: "focus") }.buttonStyle(PrimaryButtonStyle())
-                }
+                           message: "Choose New chat to talk to Claude, Codex or another agent. Add the chat to a project whenever you like.")
             }
             ForEach(groups, id: \.projectID) { group in
                 WLGroup(title: group.name) {
@@ -171,9 +142,79 @@ struct AllChatsView: View {
                         if chat.id != group.chats.first?.id { WLDivider() }
                         ChatRow(chat: chat) { nav.open(chat: chat.id, project: group.projectID) }
                     }
-                    Button("Open project") { nav.open(project: group.projectID) }.buttonStyle(OutlineButtonStyle())
+                    if let id = group.projectID {
+                        Button("Open project") { nav.open(project: id) }.buttonStyle(OutlineButtonStyle())
+                    }
                 }
             }
+        }
+    }
+}
+
+/// Pick the project a chat belongs to.
+struct ProjectPickerSheet: View {
+    @EnvironmentObject private var store: ConfigStore
+    @Environment(\.palette) private var p
+    @Environment(\.dismiss) private var dismiss
+    let current: Int?
+    let choose: (ProjectRef) -> Void
+    @State private var projects: [HubProject] = []
+    @State private var query = ""
+    @State private var loading = true
+    @State private var error: String?
+
+    private var shown: [HubProject] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        let open = projects.filter { !["done", "archived"].contains($0.status) }
+        guard !q.isEmpty else { return open }
+        return projects.filter { ($0.name + " " + ($0.slug ?? "") + " " + ($0.description ?? "")).lowercased().contains(q) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(current == nil ? "Add this chat to a project" : "Move this chat to another project")
+                    .font(DS.Font.section).foregroundStyle(p.text)
+                Spacer()
+                Button("Cancel") { dismiss() }.buttonStyle(OutlineButtonStyle()).keyboardShortcut(.cancelAction)
+            }
+            Text("Wolf Leader files the chat there, and the next message brings in that project's notes.")
+                .font(DS.Font.caption).foregroundStyle(p.textMuted)
+            TextField("Search projects", text: $query).mainField()
+            if loading { ProgressView() }
+            if let error { WLStatusPill(text: error, kind: .bad) }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(shown) { project in
+                        Button {
+                            choose(ProjectRef(project))
+                            dismiss()
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(project.name).font(DS.Font.bodySmall.weight(.semibold)).foregroundStyle(p.text)
+                                    if let description = project.description, !description.isEmpty {
+                                        Text(description).font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(1)
+                                    }
+                                }
+                                Spacer()
+                                if project.id == current { Image(systemName: "checkmark").foregroundStyle(p.accent) }
+                            }
+                            .padding(.horizontal, 10).padding(.vertical, 7)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(project.id == current)
+                    }
+                }
+            }
+        }
+        .padding(20)
+        .frame(width: 520, height: 560)
+        .background(p.background)
+        .task {
+            do { projects = try await store.hub.projects() } catch { self.error = error.localizedDescription }
+            loading = false
         }
     }
 }

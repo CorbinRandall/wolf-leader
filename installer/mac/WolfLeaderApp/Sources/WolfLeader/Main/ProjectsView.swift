@@ -45,7 +45,7 @@ struct ProjectsView: View {
     var body: some View {
         Group {
             if let openID, let entry = model.entry(openID), let chatID = nav.route.chatID, let session = ChatStore.shared.session(chatID) {
-                ChatView(session: session, entry: entry, back: { nav.closeChat() })
+                ChatView(session: session, back: { nav.closeChat() })
                     .id(chatID)
             } else if let openID, let entry = model.entry(openID) {
                 ProjectPage(entry: entry, model: model, back: { nav.closeProject() }, prompt: { promptFor = $0 },

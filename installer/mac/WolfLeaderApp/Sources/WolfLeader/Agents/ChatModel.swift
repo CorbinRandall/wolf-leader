@@ -39,12 +39,14 @@ struct ChatItem: Identifiable, Codable, Hashable {
     var at = Date()
 }
 
-/// A chat with one agent, inside one project. Stored on this Mac so it can be picked up again,
-/// and saved to the hub after every turn.
+/// A chat with one agent, in a project or not yet in one. Stored on this Mac so it can be picked
+/// up again, and saved to the hub after every turn.
 struct ChatRecord: Identifiable, Codable, Hashable {
     var id: String
-    var projectID: Int
-    var projectName: String
+    /// nil until the chat is connected to a project; until then the hub keeps it as a loose session.
+    var projectID: Int?
+    var projectName: String?
+    var projectSlug: String?
     var agentID: String
     var title: String
     var cwd: String

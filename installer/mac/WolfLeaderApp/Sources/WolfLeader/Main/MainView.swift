@@ -165,7 +165,11 @@ struct MainView: View {
     private var detail: some View {
         switch nav.route.section {
         case .chats:
-            AllChatsView()
+            if let chatID = nav.route.chatID, let session = ChatStore.shared.session(chatID) {
+                ChatView(session: session, back: { nav.closeChat() }).id(chatID)
+            } else {
+                AllChatsView()
+            }
         case .projects:
             ProjectsView(openSettings: { nav.open(section: .settings) })
         case .library:

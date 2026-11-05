@@ -63,7 +63,7 @@ struct ProjectPage: View {
             if let notice { WLStatusPill(text: notice, kind: .good) }
             if let error = model.error { WLStatusPill(text: error, kind: .bad) }
 
-            ProjectChatsGroup(entry: entry, folders: folders, linkFolder: { linkFolder($0) })
+            ProjectChatsGroup(entry: entry)
 
             northStarCard
             stands

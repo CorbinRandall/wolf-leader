@@ -13,7 +13,7 @@ struct SettingsView: View {
         [
             WLTab(id: .general, title: "General", icon: "slider.horizontal.3"),
             WLTab(id: .hub, title: "Hub", icon: "server.rack"),
-            WLTab(id: .updates, title: "Updates", icon: "arrow.triangle.2.circlepath", attention: updates.hasUpdate),
+            WLTab(id: .updates, title: "Updates", icon: "arrow.triangle.2.circlepath", attention: updates.needsAttention),
             WLTab(id: .about, title: "About", icon: "info.circle"),
         ]
     }
@@ -431,6 +431,11 @@ private struct SettingsUpdatesGroup: View {
 
     var body: some View {
         WLGroup(title: "Updates", subtitle: "Keep the skills, rule and this app current.", icon: "arrow.triangle.2.circlepath") {
+            if let done = updates.justUpdated {
+                Text(done)
+                    .font(DS.Font.caption.weight(.medium))
+                    .foregroundStyle(p.good)
+            }
             WLRow(title: statusTitle, detail: statusDetail) {
                 HStack(spacing: 8) {
                     if let pill = statusPill { WLStatusPill(text: pill.0, kind: pill.1) }
@@ -475,11 +480,7 @@ private struct SettingsUpdatesGroup: View {
                 .disabled(working || updates.repo == nil)
             }
             WLDivider()
-            WLRow(title: "App", detail: "New versions of this app are published on GitHub.") {
-                Button("Get the new app") { MainLinks.open(updates.releasesURL) }
-                    .buttonStyle(updates.hasUpdate ? OutlineButtonStyle(tint: p.warn) : OutlineButtonStyle(tint: p.textMuted))
-                    .disabled(updates.releasesURL == nil)
-            }
+            AppUpdateRow()
             if let note = updates.updateNote {
                 Text(note)
                     .font(DS.Font.caption.weight(.medium))
@@ -525,6 +526,82 @@ private struct SettingsUpdatesGroup: View {
         case .some(true): return p.good
         case .some(false): return p.bad
         case .none: return p.textMuted
+        }
+    }
+}
+
+/// "Update app": downloads the new version, swaps it in and reopens. No trip to GitHub.
+struct AppUpdateRow: View {
+    @EnvironmentObject private var updates: UpdateChecker
+    @Environment(\.palette) private var p
+
+    private var title: String {
+        switch updates.appPhase {
+        case .downloading(let f): return f.map { "Downloading… \(Int($0 * 100))%" } ?? "Downloading…"
+        case .building: return "Building the new app on this Mac…"
+        case .installing: return "Installing…"
+        case .relaunching(let v): return "Reopening as \(v)…"
+        case .idle, .failed: break
+        }
+        switch updates.channel {
+        case .release:
+            if updates.appUpdateAvailable, let r = updates.latestRelease { return "Version \(r.version) is available" }
+            return "App \(BuildInfo.version) · latest release"
+        case .source:
+            if case .available(let n) = updates.status { return "\(n) new commit\(n == 1 ? "" : "s") on \(updates.branch)" }
+            return "App built from \(updates.branch)"
+        }
+    }
+
+    private var detail: String {
+        if case .failed(let why) = updates.appPhase { return why }
+        if case .building = updates.appPhase { return "This takes a few minutes the first time. The log is below." }
+        switch updates.channel {
+        case .release:
+            return "Downloads the new version from GitHub, swaps it in and reopens. Settings, chats and projects stay."
+        case .source:
+            return "Downloads \(updates.branch) from GitHub, builds it here, swaps it in and reopens. Settings, chats and projects stay."
+        }
+    }
+
+    private var buttonTitle: String {
+        switch updates.channel {
+        case .release:
+            if let r = updates.latestRelease, updates.appUpdateAvailable { return "Update to \(r.version)" }
+            return "Up to date"
+        case .source:
+            return updates.appUpdateAvailable ? "Update & reopen" : "Rebuild"
+        }
+    }
+
+    /// Release builds only install a newer release; source builds can always rebuild.
+    private var canStart: Bool {
+        guard !updates.busy, updates.repo != nil else { return false }
+        return updates.channel == .source || updates.appUpdateAvailable
+    }
+
+    var body: some View {
+        WLRow(title: title, detail: detail) {
+            HStack(spacing: 8) {
+                if case .downloading(let f?) = updates.appPhase {
+                    ProgressView(value: f).frame(width: 80)
+                } else if updates.appPhase.active {
+                    ProgressView().controlSize(.small)
+                }
+                if updates.channel == .release, let page = updates.latestRelease?.page {
+                    Button("Notes") { MainLinks.open(page) }
+                        .buttonStyle(OutlineButtonStyle(tint: p.textMuted))
+                }
+                if updates.appUpdateAvailable {
+                    Button(buttonTitle) { Task { await updates.updateApp() } }
+                        .buttonStyle(PrimaryButtonStyle())
+                        .disabled(!canStart)
+                } else {
+                    Button(buttonTitle) { Task { await updates.updateApp() } }
+                        .buttonStyle(OutlineButtonStyle(tint: p.textMuted))
+                        .disabled(!canStart)
+                }
+            }
         }
     }
 }

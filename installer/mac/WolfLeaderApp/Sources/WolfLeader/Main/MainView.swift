@@ -101,7 +101,7 @@ struct MainView: View {
                         HStack(spacing: 6) {
                             Text(MainSection.settings.label)
                             Spacer(minLength: 0)
-                            if updates.hasUpdate {
+                            if updates.needsAttention {
                                 Circle()
                                     .fill(p.accent)
                                     .frame(width: 7, height: 7)
@@ -117,8 +117,13 @@ struct MainView: View {
             .listStyle(.sidebar)
             .tint(p.accent)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                HubStatusCard(hubOK: hubOK, hubURL: store.config.hubURL) {
-                    nav.open(section: .settings)
+                VStack(spacing: 0) {
+                    if updates.appUpdateAvailable || updates.appPhase.active {
+                        SidebarUpdateCard()
+                    }
+                    HubStatusCard(hubOK: hubOK, hubURL: store.config.hubURL) {
+                        nav.open(section: .settings)
+                    }
                 }
             }
             .navigationSplitViewColumnWidth(min: 170, ideal: 200, max: 240)
@@ -181,6 +186,62 @@ struct MainView: View {
         case .settings:
             SettingsView()
         }
+    }
+}
+
+/// Bottom of the sidebar when a new app is out: one click updates and reopens.
+private struct SidebarUpdateCard: View {
+    @EnvironmentObject private var updates: UpdateChecker
+    @Environment(\.palette) private var p
+    @State private var hovering = false
+
+    private var caption: String {
+        switch updates.appPhase {
+        case .downloading(let f): return f.map { "Downloading update… \(Int($0 * 100))%" } ?? "Downloading update…"
+        case .building: return "Building update…"
+        case .installing: return "Installing update…"
+        case .relaunching: return "Reopening…"
+        case .idle, .failed: break
+        }
+        if case .failed = updates.appPhase { return "Update didn't finish · see Settings > Updates" }
+        if let v = updates.latestRelease?.version, updates.channel == .release { return "Update to \(v)" }
+        return "Update available · click to install"
+    }
+
+    var body: some View {
+        Button {
+            Task { await updates.updateApp() }
+        } label: {
+            HStack(spacing: DS.Spacing.sm) {
+                Group {
+                    if updates.appPhase.active {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                }
+                .foregroundStyle(p.accent)
+                .frame(width: 28, height: 28)
+                .background(RoundedRectangle(cornerRadius: 7).fill(p.accent.opacity(0.12)))
+                Text(caption)
+                    .font(DS.Font.caption.weight(.semibold))
+                    .foregroundStyle(p.text)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+            }
+            .padding(DS.Spacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: DS.Radius.row)
+                    .fill(hovering ? p.surfaceRaised : Color.clear)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: DS.Radius.row))
+        }
+        .buttonStyle(.plain)
+        .disabled(updates.busy)
+        .help("Downloads the new version, swaps it in and reopens Wolf Leader. Settings, chats and projects stay.")
+        .onHover { h in withAnimation(DS.Anim.hover) { hovering = h } }
     }
 }
 

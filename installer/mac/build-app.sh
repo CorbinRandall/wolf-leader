@@ -55,8 +55,9 @@ SHORT_VERSION=$(clean_version "$VERSION")
 [ -n "$SHORT_VERSION" ] || SHORT_VERSION="0.0.0"
 BUILD_NUMBER=$(git rev-list --count HEAD 2>/dev/null || echo 1)
 
-GIT_SHA=$(git rev-parse HEAD 2>/dev/null || true)
-GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
+# WL_GIT_SHA / WL_GIT_BRANCH: set by the app's own updater, which builds from a GitHub zip (no .git).
+GIT_SHA=${WL_GIT_SHA:-$(git rev-parse HEAD 2>/dev/null || true)}
+GIT_BRANCH=${WL_GIT_BRANCH:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)}
 [ "$GIT_BRANCH" != HEAD ] || GIT_BRANCH=""
 
 # git@github.com:owner/repo.git, ssh://git@host/owner/repo, https://user@host/owner/repo.git

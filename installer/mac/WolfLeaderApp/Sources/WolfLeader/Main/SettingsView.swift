@@ -29,6 +29,7 @@ struct SettingsView: View {
             .padding(.bottom, DS.Spacing.xs)
             switch tab {
             case .general:
+                SettingsYouGroup()
                 SettingsAppearanceGroup()
                 SettingsSetupGroup()
             case .agents:
@@ -51,6 +52,38 @@ struct SettingsView: View {
         guard let name = nav.pendingSettingsTab else { return }
         nav.pendingSettingsTab = nil
         if let wanted = SettingsTab(rawValue: name) { tab = wanted }
+    }
+}
+
+// MARK: - General: who you are
+
+/// Which person on the hub uses this Mac. Their profile ("About me") goes into every chat, with
+/// every agent, so none of them start from zero.
+private struct SettingsYouGroup: View {
+    @EnvironmentObject private var store: ConfigStore
+    @State private var owners: [String] = []
+
+    var body: some View {
+        WLGroup(title: "You", subtitle: "Every chat starts with what Wolf Leader knows about you and the project, whichever AI you use.",
+                icon: "person.crop.circle") {
+            WLRow(title: "This Mac is used by", detail: "Your profile (Library > People) goes to every agent at the start of a chat.") {
+                Picker("Person", selection: Binding(
+                    get: { store.config.person ?? "" },
+                    set: { store.config.person = $0.isEmpty ? nil : $0; store.save() }
+                )) {
+                    Text("Nobody in particular").tag("")
+                    ForEach(owners, id: \.self) { Text($0).tag($0) }
+                    if let person = store.config.person, !owners.contains(person) { Text(person).tag(person) }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 220)
+            }
+            WLDivider()
+            WLRow(title: "This Mac's name", detail: "How your other devices refer to it (\"Working on …\").") {
+                Text(store.config.deviceName).foregroundStyle(.secondary)
+            }
+        }
+        .task { owners = (try? await store.hub.owners()) ?? [] }
     }
 }
 

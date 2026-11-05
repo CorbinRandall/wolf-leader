@@ -54,7 +54,9 @@ final class ChatStore: ObservableObject {
         return record
     }
 
-    func write(_ record: ChatRecord) {
+    /// Keeps the chat on this Mac and (unless it just came from the hub) sends it to the hub.
+    func write(_ record: ChatRecord, sync: Bool = true) {
+        if sync { ChatSync.shared.schedulePush(record) }
         if let index = records.firstIndex(where: { $0.id == record.id }) { records[index] = record } else { records.insert(record, at: 0) }
         records.sort { $0.updated > $1.updated }
         do {
@@ -67,11 +69,64 @@ final class ChatStore: ObservableObject {
         }
     }
 
-    /// Removes the chat from this Mac. Its copy on the hub stays in the project's logbook.
+    /// Removes the chat from Wolf Leader's chat list on every device. The copy saved in the
+    /// project's logbook stays.
     func remove(_ id: String) {
+        removeLocal(id, force: true)
+        ChatSync.shared.pushDelete(id)
+    }
+
+    /// Another device removed this chat. A chat that's working here right now is left alone.
+    func removeLocal(_ id: String, force: Bool = false) {
+        if !force, sessions[id]?.busy == true { return }
         sessions.removeValue(forKey: id)?.shutdown()
         records.removeAll { $0.id == id }
         try? FileManager.default.removeItem(at: Self.folder.appendingPathComponent("\(id).json"))
+    }
+
+    /// A newer copy of a chat from another device. Its folder is this device's own copy of the
+    /// project (or its scratch folder), and an open chat shows the new turns right away.
+    func adoptRemote(_ incoming: ChatRecord) {
+        var remote = incoming
+        remote.cwd = remote.projectSlug.map { ProjectWorkspace.folder(slug: $0).path }
+            ?? ProjectWorkspace.looseFolder(chatID: remote.id).path
+        if let local = record(remote.id) {
+            guard remote.updated > local.updated else { return }
+            if sessions[remote.id]?.busy == true { return }
+        }
+        write(remote, sync: false)
+        sessions[remote.id]?.adopt(remote)
+    }
+
+    /// A chat saved from another tool (Claude Code in a terminal, Codex, Cursor) becomes a Wolf
+    /// Leader chat: same project, the conversation so far, and whichever agent you pick carries on.
+    func continueHubChat(id hubChatID: Int, with agent: AgentKind, hub: HubClient) async throws -> ChatRecord {
+        let data = try await hub.data("/api/chats/\(hubChatID)", query: ["include_messages": "true"], timeout: 30)
+        guard let chat = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw AgentError.failed("The hub sent something unexpected.")
+        }
+        let project: ProjectRef? = (chat["project_id"] as? Int).map {
+            ProjectRef(id: $0, name: chat["project_name"] as? String ?? "Project", slug: chat["project_slug"] as? String)
+        }
+        var record = create(project: project, agent: agent)
+        let messages = (chat["messages"] as? [[String: Any]]) ?? []
+        var items: [ChatItem] = messages.suffix(80).compactMap { message in
+            let text = (message["content"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            let kind: ChatItem.Kind = (message["role"] as? String) == "user" ? .user : .agent
+            return ChatItem(id: UUID().uuidString, kind: kind, text: text,
+                            at: HubDate.parse(message["created_at"] as? String) ?? Date())
+        }
+        let from = [chat["device_name"] as? String].compactMap { $0 }.filter { $0 != "unraid-server" }.first
+        items.append(ChatItem(id: UUID().uuidString, kind: .note,
+                              text: "Brought in from \(from.map { "a chat on \($0)" } ?? "a saved chat"). \(agent.name) gets this conversation with your next message."))
+        record.items = items
+        record.title = AgentText.oneLine(chat["title"] as? String ?? "Continued chat", limit: 60)
+        if project == nil, let projectName = chat["project_name"] as? String { record.projectName = projectName }
+        record.needsHandoff = items.contains { $0.kind == .user } ? true : nil
+        record.updated = Date()
+        write(record)
+        return record
     }
 
     func stopAll() {
@@ -122,31 +177,89 @@ final class ChatSession: ObservableObject, Identifiable {
 
     // MARK: Talking to the agent
 
+    /// This device, as the other devices see it.
+    private var thisDevice: String { ChatSync.shared.device }
+
     func send(_ text: String, config: ConfigStore) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !busy else { return }
+        if let other = record.busyElsewhere(than: thisDevice) {
+            append(ChatItem(id: UUID().uuidString, kind: .note,
+                            text: "This chat is working on \(other) right now. Send again when it's done there."))
+            return
+        }
         hubURL = config.config.hubURL
         let hub = config.hub
         self.hub = hub
+        let person = config.config.person
+        // Everything said before this message, for an agent that hasn't seen it yet.
+        let earlier = record.items
         append(ChatItem(id: UUID().uuidString, kind: .user, text: text))
         if record.title == "New chat" { record.title = AgentText.oneLine(text, limit: 60) }
         busy = true
+        claim()
         persist()
         Task {
             do {
                 if driver == nil { try await connect() }
-                var prompt = text
-                if !record.contextSent, let projectID = record.projectID, let name = record.projectName,
-                   let context = await WolfChatSync.context(hub: hub, projectID: projectID,
-                                                            projectKey: record.projectSlug ?? String(projectID), projectName: name) {
-                    prompt = context + "\n\n" + text
+                var parts: [String] = []
+                // Wolf Leader's context goes first: who you are, and for a project chat its
+                // brief, memories and ledger (what every assistant has done in it so far).
+                if !record.contextSent || record.needsHandoff == true {
+                    let project = record.projectID.map { ProjectRef(id: $0, name: record.projectName ?? "Project", slug: record.projectSlug) }
+                    if let context = await WolfChatSync.context(hub: hub, project: project, person: person,
+                                                                excludingSession: record.hubSessionID) {
+                        parts.append(context)
+                    }
                 }
+                if record.needsHandoff == true, let handoff = WolfChatSync.handoff(earlier, agentName: record.agent?.name ?? "the agent") {
+                    parts.append(handoff)
+                }
+                parts.append(text)
                 record.contextSent = true
-                try await driver?.send(prompt)
+                record.needsHandoff = nil
+                try await driver?.send(parts.joined(separator: "\n\n"))
             } catch {
                 fail(error.localizedDescription)
             }
         }
+    }
+
+    /// Marks the chat as working on this device, so other devices wait. Renewed while it works.
+    private func claim() {
+        record.activeDevice = thisDevice
+        record.activeUntil = Date().addingTimeInterval(15 * 60)
+    }
+
+    private func release() {
+        record.activeDevice = nil
+        record.activeUntil = nil
+    }
+
+    /// A newer copy of this chat arrived from another device.
+    func adopt(_ remote: ChatRecord) {
+        guard !busy else { return }
+        // If another device ran the agent since, this device's agent session is out of date.
+        if remote.agentDevice != thisDevice, remote.agentSessionID != record.agentSessionID {
+            driver?.stop()
+            driver = nil
+        }
+        record = remote
+    }
+
+    /// Carry on this chat with another agent. It gets the conversation so far with the next message.
+    func switchAgent(to agent: AgentKind) {
+        guard !busy, agent.id != record.agentID else { return }
+        driver?.stop()
+        driver = nil
+        let from = record.agent?.name ?? record.agentID
+        record.agentID = agent.id
+        record.agentSessionID = nil
+        record.agentDevice = nil
+        if record.items.contains(where: { $0.kind == .user }) { record.needsHandoff = true }
+        append(ChatItem(id: UUID().uuidString, kind: .note,
+                        text: "Switched from \(from) to \(agent.name). \(agent.name) gets the conversation so far with your next message."))
+        persist()
     }
 
     func interrupt() { driver?.interrupt() }
@@ -197,15 +310,20 @@ final class ChatSession: ObservableObject, Identifiable {
         }
         connecting = true
         defer { connecting = false }
+        // An agent session only exists on the device that ran it. Anywhere else (or with no
+        // session to resume) the agent starts fresh and is handed the conversation so far.
+        let resumable = record.agentDevice == nil || record.agentDevice == thisDevice
+        let resumeID = resumable ? record.agentSessionID : nil
+        if resumeID == nil, record.items.filter({ $0.kind == .user }).count > 1 { record.needsHandoff = true }
         let driver: AgentDriver
         switch agent.proto {
         case .claude:
-            driver = ClaudeDriver(executable: executable, cwd: record.cwd, mode: record.mode, resumeID: record.agentSessionID)
+            driver = ClaudeDriver(executable: executable, cwd: record.cwd, mode: record.mode, resumeID: resumeID)
         case .codex:
-            driver = CodexDriver(executable: executable, args: agent.args, cwd: record.cwd, mode: record.mode, resumeID: record.agentSessionID)
+            driver = CodexDriver(executable: executable, args: agent.args, cwd: record.cwd, mode: record.mode, resumeID: resumeID)
         case .acp:
             driver = AcpDriver(name: agent.name, executable: executable, args: agent.args, cwd: record.cwd, mode: record.mode,
-                               resumeID: record.agentSessionID)
+                               resumeID: resumeID)
         }
         driver.onEvent = { [weak self] event in self?.apply(event) }
         self.driver = driver
@@ -221,15 +339,22 @@ final class ChatSession: ObservableObject, Identifiable {
     private func fail(_ message: String) {
         append(ChatItem(id: UUID().uuidString, kind: .error, text: message))
         busy = false
+        release()
         persist()
     }
 
     // MARK: Applying what the agent reports
 
     private func apply(_ event: AgentEvent) {
+        // A long turn keeps its claim on the chat so other devices keep waiting.
+        if busy, let until = record.activeUntil, until.timeIntervalSinceNow < 5 * 60 {
+            claim()
+            persist()
+        }
         switch event {
         case .sessionID(let id):
             record.agentSessionID = id
+            record.agentDevice = thisDevice
         case .textDelta(let id, let text):
             extend(id, kind: .agent, with: text)
         case .text(let id, let text):
@@ -262,6 +387,7 @@ final class ChatSession: ObservableObject, Identifiable {
 
     private func finishTurn() {
         busy = false
+        release()
         for index in record.items.indices where record.items[index].status == .running { record.items[index].status = .done }
         for index in record.items.indices where record.items[index].status == .pending { record.items[index].status = .denied }
         persist()

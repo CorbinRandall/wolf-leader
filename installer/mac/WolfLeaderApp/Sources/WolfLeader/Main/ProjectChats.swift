@@ -25,17 +25,17 @@ struct ProjectChatsGroup: View {
             ForEach(shown) { chat in
                 if chat.id != shown.first?.id { WLDivider() }
                 ChatRow(chat: chat, showProject: false) { nav.open(chat: chat.id, project: entry.id) }
-                    .contextMenu { Button("Remove from this Mac…", role: .destructive) { removing = chat } }
+                    .contextMenu { Button("Remove from Chats…", role: .destructive) { removing = chat } }
             }
             if mine.count > 6 {
                 Button(showAll ? "Show fewer" : "Show all \(mine.count) chats") { showAll.toggle() }.buttonStyle(OutlineButtonStyle())
             }
         }
-        .confirmationDialog("Remove “\(removing?.title ?? "")” from this Mac?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
+        .confirmationDialog("Remove “\(removing?.title ?? "")” from Chats?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
             Button("Remove", role: .destructive) { if let removing { chats.remove(removing.id) }; removing = nil }
             Button("Cancel", role: .cancel) { removing = nil }
         } message: {
-            Text("The copy saved in Wolf Leader stays in this project's logbook.")
+            Text("It goes away on every device. The copy saved in this project's logbook stays.")
         }
     }
 }
@@ -98,12 +98,17 @@ struct ChatRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(chat.title).font(DS.Font.bodySmall.weight(.semibold)).foregroundStyle(p.text).lineLimit(1)
                     Text([chat.agent?.name ?? chat.agentID, showProject ? chat.projectName : nil,
-                          "\(chat.items.filter { $0.kind == .user }.count) messages"]
+                          "\(chat.items.filter { $0.kind == .user }.count) messages",
+                          chat.agentDevice.flatMap { $0 == ChatSync.shared.device ? nil : "last on \($0)" }]
                         .compactMap { $0 }.joined(separator: " · "))
                         .font(DS.Font.micro).foregroundStyle(p.textMuted)
                 }
                 Spacer(minLength: 8)
-                if chats.isRunning(chat.id) { WLStatusPill(text: "Working", kind: .warn) }
+                if chats.isRunning(chat.id) {
+                    WLStatusPill(text: "Working", kind: .warn)
+                } else if let other = chat.busyElsewhere(than: ChatSync.shared.device) {
+                    WLStatusPill(text: "Working on \(other)", kind: .neutral)
+                }
                 Text(HubDate.format(chat.updated)).font(DS.Font.micro.monospacedDigit()).foregroundStyle(p.textFaint)
                 Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(p.textFaint)
             }
@@ -134,7 +139,7 @@ struct AllChatsView: View {
     var body: some View {
         MainPage {
             WLPageHeader(eyebrow: "Chats", title: "Recent chats",
-                         subtitle: "Every chat with every agent. Start one here and add it to a project any time, or start it from a project's page.") {
+                         subtitle: "Every chat with every agent, on every device. Each reply is saved to Wolf Leader as it happens, so you can pick a chat up on another Mac, or with another agent, right where it stopped.") {
                 NewChatMenu { agent in
                     let chat = chats.create(project: nil, agent: agent)
                     nav.open(chat: chat.id, project: nil)
@@ -155,6 +160,86 @@ struct AllChatsView: View {
                     }
                 }
             }
+            OtherToolChatsGroup()
+        }
+    }
+}
+
+/// Chats saved from AI tools outside Wolf Leader (Claude Code in a terminal, Codex, Cursor). Any of
+/// them can be carried on here, with any agent, without losing what was said.
+private struct OtherToolChatsGroup: View {
+    @Environment(\.palette) private var p
+    @EnvironmentObject private var store: ConfigStore
+    @EnvironmentObject private var nav: Navigator
+    @ObservedObject private var agents = AgentRegistry.shared
+    @State private var saved: [[String: Any]] = []
+    @State private var working: Int?
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !saved.isEmpty {
+                WLGroup(title: "From your other AI tools",
+                        subtitle: "Chats saved from Claude Code, Codex, Cursor and others. Continue any of them here, with any agent.",
+                        icon: "tray.and.arrow.down") {
+                    ForEach(Array(saved.prefix(12).enumerated()), id: \.offset) { index, chat in
+                        if index > 0 { WLDivider() }
+                        row(chat)
+                    }
+                    if let error { Text(error).font(DS.Font.caption).foregroundStyle(p.bad) }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: store.config.hubURL) { await load() }
+    }
+
+    private func row(_ chat: [String: Any]) -> some View {
+        let id = chat["id"] as? Int ?? 0
+        let ready = agents.all.filter { agents.found[$0.id] != nil }
+        let meta = [chat["project_name"] as? String,
+                    (chat["device_name"] as? String).flatMap { $0 == "unraid-server" ? nil : "on \($0)" },
+                    (chat["message_count"] as? Int).map { "\($0) messages" },
+                    HubDate.parse((chat["occurred_at"] as? String) ?? (chat["updated_at"] as? String)).map { HubDate.format($0) }]
+            .compactMap { $0 }.joined(separator: " · ")
+        return WLRow(title: AgentText.oneLine(chat["title"] as? String ?? "Untitled chat", limit: 80), detail: meta) {
+            if working == id {
+                ProgressView().controlSize(.small)
+            } else {
+                Menu {
+                    ForEach(ready) { agent in
+                        Button { Task { await continueChat(id, with: agent) } } label: {
+                            Label("\(agent.name) · \(agent.company)", systemImage: agent.symbol)
+                        }
+                    }
+                    if ready.isEmpty { Button("Set up agents…") { nav.open(settingsTab: "agents") } }
+                } label: {
+                    Text("Continue with…")
+                }
+                .menuStyle(.button).fixedSize()
+                .disabled(working != nil)
+            }
+        }
+    }
+
+    private func load() async {
+        guard let data = try? await store.hub.data("/api/chats", query: ["limit": "40"]),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let chats = json["chats"] as? [[String: Any]] else { return }
+        saved = chats.filter {
+            !(($0["session_id"] as? String) ?? "").hasPrefix("wolf-chat-") && (($0["message_count"] as? Int) ?? 0) > 0
+        }
+    }
+
+    private func continueChat(_ id: Int, with agent: AgentKind) async {
+        working = id
+        error = nil
+        defer { working = nil }
+        do {
+            let record = try await ChatStore.shared.continueHubChat(id: id, with: agent, hub: store.hub)
+            nav.open(chat: record.id, project: record.projectID)
+        } catch {
+            self.error = "Couldn't bring that chat in: \(error.localizedDescription)"
         }
     }
 }

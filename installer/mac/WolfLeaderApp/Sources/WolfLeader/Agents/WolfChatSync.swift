@@ -1,33 +1,103 @@
 import Foundation
 
-/// The Wolf Leader side of every chat: the project's brief goes into the first message, and the
-/// whole chat is saved to the hub, under its project, after every turn.
+/// Wolf Leader is the layer above the agents. Every chat, whichever agent runs it, starts with
+/// what Wolf Leader knows: who you are, the project's purpose and where it was left off, its key
+/// memories, and the project's ledger (the recent chats in it, from every agent and device).
+/// After every turn the chat is written back to the project, so the next chat (any agent, any
+/// device) starts from there.
 enum WolfChatSync {
     private static let memoryOrder = ["goal", "constraint", "decision", "active_work", "problem", "caveat", "note"]
 
-    /// The project's purpose, where it was left off, and its key memories, as one block for the agent.
-    static func context(hub: HubClient, projectID: Int, projectKey: String, projectName: String) async -> String? {
-        async let briefTask = try? hub.brief(projectKey: projectKey)
-        async let memoriesTask = try? hub.memories(projectID: projectID, limit: 200)
-        let (brief, memories) = await (briefTask, memoriesTask)
-        var parts: [String] = []
-        if let purpose = brief?.purpose, !purpose.isEmpty { parts.append("Purpose: \(purpose)") }
-        if let pickup = brief?.agentPrompt, !pickup.isEmpty { parts.append("Where it was left off:\n\(pickup)") }
-        let picked = (memories ?? [])
-            .filter { !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .sorted { (memoryOrder.firstIndex(of: $0.type) ?? 99) < (memoryOrder.firstIndex(of: $1.type) ?? 99) }
-            .prefix(25)
-        if !picked.isEmpty {
-            parts.append("Key memories:\n" + picked.map { "- \($0.type): \(AgentText.oneLine($0.content, limit: 400))" }.joined(separator: "\n"))
+    /// Everything an agent should know before the first message of a chat, as one block.
+    /// `project` is nil for a chat that isn't in a project yet (it still gets who you are).
+    static func context(hub: HubClient, project: ProjectRef?, person: String?, excludingSession: String?) async -> String? {
+        let who = person?.trimmingCharacters(in: .whitespaces).isEmpty == false ? person : nil
+        async let aboutTask: String? = who == nil ? nil : (try? await hub.profileMarkdown(person: who ?? ""))
+        async let briefTask = project != nil ? (try? await hub.brief(projectKey: project!.slug)) : nil
+        async let memoriesTask = project != nil ? (try? await hub.memories(projectID: project!.id, limit: 200)) : nil
+        async let ledgerTask = project != nil ? ledger(hub: hub, projectID: project!.id, excluding: excludingSession) : nil
+        let (about, brief, memories, ledger) = await (aboutTask, briefTask, memoriesTask, ledgerTask)
+
+        var sections: [String] = []
+        if let about = about?.trimmingCharacters(in: .whitespacesAndNewlines), !about.isEmpty {
+            sections.append("<about_you person=\"\(person ?? "")\">\n\(clip(about, 3000))\n</about_you>")
         }
-        guard !parts.isEmpty else { return nil }
-        var text = parts.joined(separator: "\n\n")
-        if text.count > 8000 { text = String(text.prefix(8000)) + "\n…" }
+        if let project {
+            var parts: [String] = []
+            if let purpose = brief?.purpose, !purpose.isEmpty { parts.append("Purpose: \(purpose)") }
+            if let pickup = brief?.agentPrompt, !pickup.isEmpty { parts.append("Where it was left off:\n\(pickup)") }
+            let picked = (memories ?? [])
+                .filter { !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                .sorted { (memoryOrder.firstIndex(of: $0.type) ?? 99) < (memoryOrder.firstIndex(of: $1.type) ?? 99) }
+                .prefix(25)
+            if !picked.isEmpty {
+                parts.append("Key memories:\n" + picked.map { "- \($0.type): \(AgentText.oneLine($0.content, limit: 400))" }.joined(separator: "\n"))
+            }
+            if let ledger, !ledger.isEmpty {
+                parts.append("Project ledger (recent chats in this project, newest first, from every assistant and device):\n" + ledger)
+            }
+            sections.append("""
+            <project name="\(project.name)">
+            This chat is part of the Wolf Leader project "\(project.name)". Wolf Leader writes it to the project's ledger after every reply, so the next chat (with any assistant, on any device) picks up from here.
+            \(clip(parts.joined(separator: "\n\n"), 12_000))
+            </project>
+            """)
+        }
+        guard !sections.isEmpty else { return nil }
         return """
-        <wolf_leader_context project="\(projectName)">
-        This chat is part of the Wolf Leader project "\(projectName)". Wolf Leader saves it to the project automatically.
-        \(text)
+        <wolf_leader_context>
+        Wolf Leader is the user's own memory across every AI assistant they use. Use this to pick up where things are; don't recite it back.
+        \(sections.joined(separator: "\n\n"))
         </wolf_leader_context>
+        """
+    }
+
+    /// The project's recent chats, one line each: when, which assistant on which device, and what happened.
+    private static func ledger(hub: HubClient, projectID: Int, excluding session: String?) async -> String? {
+        guard let data = try? await hub.data("/api/projects/\(projectID)/chats", query: ["limit": "14"]),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let chats = json["active"] as? [[String: Any]] else { return nil }
+        let lines: [String] = chats.compactMap { chat in
+            if let session, chat["session_id"] as? String == session { return nil }
+            let title = (chat["title"] as? String) ?? "Untitled chat"
+            let when = HubDate.parse((chat["occurred_at"] as? String) ?? (chat["updated_at"] as? String))
+                .map { $0.formatted(date: .abbreviated, time: .shortened) } ?? ""
+            let content = AgentText.oneLine((chat["content"] as? String) ?? "", limit: 500)
+            return "- \(when) · \(title)" + (content.isEmpty ? "" : "\n  \(content)")
+        }
+        return lines.prefix(10).joined(separator: "\n")
+    }
+
+    private static func clip(_ s: String, _ n: Int) -> String { s.count > n ? String(s.prefix(n)) + "\n…" : s }
+
+    /// The conversation so far, for an agent joining it partway: on another device, after a switch
+    /// to another agent, or when the earlier agent session is gone. Newest turns are kept first
+    /// when it has to be cut; steps the agent took are one line each.
+    static func handoff(_ items: [ChatItem], agentName: String, limit: Int = 24_000) -> String? {
+        var lines: [String] = []
+        var total = 0
+        var cut = false
+        for item in items.reversed() {
+            let line: String
+            switch item.kind {
+            case .user: line = "User: " + String(item.text.prefix(4000))
+            case .agent: line = "Assistant: " + String(item.text.prefix(6000))
+            case .tool: line = "(step: \(AgentText.oneLine(item.text, limit: 160))\(item.status == .failed ? ", failed" : ""))"
+            default: continue
+            }
+            if line.trimmingCharacters(in: .whitespaces).isEmpty { continue }
+            if total + line.count > limit { cut = true; break }
+            total += line.count
+            lines.append(line)
+        }
+        guard lines.contains(where: { $0.hasPrefix("User:") }) else { return nil }
+        lines.reverse()
+        return """
+        <wolf_leader_conversation_so_far>
+        You (\(agentName)) are picking up a conversation that was already going in Wolf Leader, maybe on another device or with another assistant. Here it is\(cut ? ", newest part" : ""). Carry on from where it left off: don't repeat what was said, and treat the steps as already done.
+
+        \(lines.joined(separator: "\n\n"))
+        </wolf_leader_conversation_so_far>
         """
     }
 
@@ -53,7 +123,7 @@ enum WolfChatSync {
         let lastReply = chat.items.last { $0.kind == .agent }?.text ?? ""
         let agentName = chat.agent?.name ?? chat.agentID
         let summary = """
-        \(agentName) chat in Wolf Leader\(chat.projectName.map { ", project \($0)" } ?? "").
+        \(agentName) chat in Wolf Leader\(chat.agentDevice.map { " on \($0)" } ?? "")\(chat.projectName.map { ", project \($0)" } ?? "").
         Asked: \(AgentText.oneLine(chat.items.first { $0.kind == .user }?.text ?? "", limit: 600))
         Latest reply: \(AgentText.oneLine(lastReply, limit: 1500))
         """

@@ -57,8 +57,22 @@ struct ChatRecord: Identifiable, Codable, Hashable {
     var created: Date
     var updated: Date
     var contextSent = false
+    /// The device whose agent session `agentSessionID` is; that session only exists there.
+    var agentDevice: String?
+    /// While an agent is working on this chat: which device, and until when (renewed as it works).
+    /// Other devices wait instead of starting a second agent on the same chat.
+    var activeDevice: String?
+    var activeUntil: Date?
+    /// The next message hands the agent the conversation so far (another device or another agent).
+    var needsHandoff: Bool?
 
     var agent: AgentKind? { AgentRegistry.shared.agent(id: agentID) }
+
+    /// Running on another device right now.
+    func busyElsewhere(than device: String) -> String? {
+        guard let other = activeDevice, other != device, let until = activeUntil, until > Date() else { return nil }
+        return other
+    }
 
     /// The id the hub files this chat under; saving again updates it instead of adding a copy.
     var hubSessionID: String { "wolf-chat-\(id)" }

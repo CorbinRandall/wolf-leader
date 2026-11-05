@@ -22,6 +22,8 @@ struct ChatView: View {
             header
             Rectangle().fill(p.border).frame(height: 1)
             transcript
+            if let other = busyElsewhere { elsewhereBar(other) }
+            if !installed, let agent, !record.items.isEmpty, !session.busy { missingAgentBar(agent) }
             if needsSignIn, let agent { signInBar(agent) }
             composer
         }
@@ -51,6 +53,7 @@ struct ChatView: View {
                 Text(record.title).font(DS.Font.section).foregroundStyle(p.text).lineLimit(1)
                 if let agent { MainTag(text: "\(agent.name) · \(agent.company)") }
                 Spacer(minLength: 8)
+                continueWithMenu
                 Button {
                     choosingProject = true
                 } label: {
@@ -144,6 +147,63 @@ struct ChatView: View {
         .padding(.vertical, DS.Spacing.lg)
     }
 
+    // MARK: Other devices and agents
+
+    /// The device this chat is working on right now, when it isn't this one.
+    private var busyElsewhere: String? {
+        session.busy ? nil : record.busyElsewhere(than: ChatSync.shared.device)
+    }
+
+    private func elsewhereBar(_ device: String) -> some View {
+        HStack(spacing: 10) {
+            ProgressView().controlSize(.small)
+            Text("Working on \(device) right now. Its replies show up here as they're saved; you can send when it's done.")
+                .font(DS.Font.caption).foregroundStyle(p.text)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, DS.Spacing.lg).padding(.vertical, 10)
+        .background(p.accent.opacity(0.08))
+    }
+
+    /// The chat came from another device whose agent this Mac doesn't have: carry on with one it does.
+    private func missingAgentBar(_ agent: AgentKind) -> some View {
+        let ready = AgentRegistry.shared.all.filter { AgentRegistry.shared.found[$0.id] != nil }
+        return HStack(spacing: 8) {
+            Image(systemName: "arrow.triangle.swap").foregroundStyle(p.accent)
+            Text("\(agent.name) isn't set up on this Mac. Carry on with:")
+                .font(DS.Font.caption).foregroundStyle(p.text)
+            ForEach(ready.prefix(4)) { other in
+                Button(other.name) { session.switchAgent(to: other) }.buttonStyle(OutlineButtonStyle())
+            }
+            Button("Set up \(agent.name)…") { nav.open(settingsTab: "agents") }.buttonStyle(SecondaryButtonStyle())
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, DS.Spacing.lg).padding(.vertical, 10)
+        .background(p.accent.opacity(0.06))
+    }
+
+    /// Keep this chat, carry on with a different agent.
+    private var continueWithMenu: some View {
+        let others = AgentRegistry.shared.all.filter { $0.id != record.agentID && AgentRegistry.shared.found[$0.id] != nil }
+        return Menu {
+            if others.isEmpty {
+                Button("Set up more agents…") { nav.open(settingsTab: "agents") }
+            } else {
+                Section("Continue this chat with") {
+                    ForEach(others) { other in
+                        Button { session.switchAgent(to: other) } label: { Label("\(other.name) · \(other.company)", systemImage: other.symbol) }
+                    }
+                }
+            }
+        } label: {
+            Label("Continue with…", systemImage: "arrow.triangle.swap").font(.system(size: 11, weight: .semibold))
+        }
+        .menuStyle(.borderlessButton).fixedSize()
+        .disabled(session.busy || busyElsewhere != nil)
+        .help("Hand this chat to another agent. It gets the conversation so far and carries on.")
+    }
+
     // MARK: Sign-in
 
     /// The agent's last error says it isn't signed in (e.g. Claude Code's "Not logged in · Please run /login").
@@ -177,7 +237,7 @@ struct ChatView: View {
                 .focused($composing)
                 .mainField()
                 .onSubmit(send)
-                .disabled(session.busy)
+                .disabled(session.busy || busyElsewhere != nil)
             if session.busy {
                 Button { session.interrupt() } label: { Label("Stop", systemImage: "stop.fill") }
                     .buttonStyle(SecondaryButtonStyle())

@@ -86,6 +86,8 @@ struct WolfConfig: Codable {
     var hubURL = "http://wolf.local:6971"
     var mcpURL = "http://wolf.local:6972/mcp"
     var deviceName = Host.current().localizedName ?? "Mac"
+    /// Who uses this Mac, as the hub knows them (one of its owners). Their profile goes into every chat.
+    var person: String?
     var shares: [ShareConfig] = []
     /// Folder of the backup made by the last install (contains restore.sh).
     var lastBackupPath: String?

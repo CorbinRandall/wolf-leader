@@ -158,6 +158,14 @@ struct MainView: View {
             updates.start(store: store)
         }
         .task(id: store.config.hubURL) {
+            // Chats follow you: every device on this hub sees and continues the same chats.
+            ChatSync.shared.start(hubURL: store.config.hubURL, device: store.config.deviceName)
+            // Who uses this Mac: guess from its name ("Corbin's Mac Studio") when it's one of the hub's people.
+            if store.config.person == nil, let owners = try? await store.hub.owners() {
+                let name = store.config.deviceName.lowercased()
+                let matches = owners.filter { name.contains($0.lowercased()) }
+                if matches.count == 1 { store.config.person = matches[0]; store.save() }
+            }
             hubOK = nil
             while !Task.isCancelled {
                 hubOK = await store.hub.isHealthy()

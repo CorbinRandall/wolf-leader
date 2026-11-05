@@ -2,16 +2,18 @@ import AppKit
 import SwiftUI
 
 private enum SettingsTab: String, Hashable {
-    case general, hub, updates, about
+    case general, agents, hub, updates, about
 }
 
 struct SettingsView: View {
     @EnvironmentObject private var updates: UpdateChecker
+    @EnvironmentObject private var nav: Navigator
     @State private var tab: SettingsTab = .general
 
     private var tabs: [WLTab<SettingsTab>] {
         [
             WLTab(id: .general, title: "General", icon: "slider.horizontal.3"),
+            WLTab(id: .agents, title: "Agents", icon: "person.2.wave.2"),
             WLTab(id: .hub, title: "Hub", icon: "server.rack"),
             WLTab(id: .updates, title: "Updates", icon: "arrow.triangle.2.circlepath", attention: updates.needsAttention),
             WLTab(id: .about, title: "About", icon: "info.circle"),
@@ -29,6 +31,8 @@ struct SettingsView: View {
             case .general:
                 SettingsAppearanceGroup()
                 SettingsSetupGroup()
+            case .agents:
+                AgentsSettingsGroup()
             case .hub:
                 SettingsHubGroup()
                 SettingsOriginalGroup()
@@ -38,6 +42,15 @@ struct SettingsView: View {
                 SettingsAboutGroup()
             }
         }
+        .onAppear(perform: takePendingTab)
+        .onChange(of: nav.pendingSettingsTab) { _, _ in takePendingTab() }
+    }
+
+    /// "Set up Claude…" and friends land on a specific tab.
+    private func takePendingTab() {
+        guard let name = nav.pendingSettingsTab else { return }
+        nav.pendingSettingsTab = nil
+        if let wanted = SettingsTab(rawValue: name) { tab = wanted }
     }
 }
 
@@ -607,7 +620,7 @@ struct AppUpdateRow: View {
 }
 
 /// Scrolling monospaced output that follows the newest line.
-private struct SettingsLogBox: View {
+struct SettingsLogBox: View {
     @Environment(\.palette) private var p
     let lines: [String]
 

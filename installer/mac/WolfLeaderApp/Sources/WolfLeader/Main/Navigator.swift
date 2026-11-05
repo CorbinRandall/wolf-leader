@@ -20,6 +20,8 @@ final class Navigator: ObservableObject {
     @Published private(set) var canGoForward = false
     /// A search typed in the toolbar, waiting for Super Search to run it.
     @Published var pendingSearch: String?
+    /// A Settings tab to show next (set by `open(settingsTab:)`).
+    @Published var pendingSettingsTab: String?
 
     private var backStack: [Route] = []
     private var forwardStack: [Route] = []
@@ -65,6 +67,12 @@ final class Navigator: ObservableObject {
         next.projectID = nil
         next.chatID = nil
         go(next)
+    }
+
+    /// Settings on a given tab ("agents", "updates", ...). SettingsView picks it up and clears it.
+    func open(settingsTab: String) {
+        pendingSettingsTab = settingsTab
+        open(section: .settings)
     }
 
     func open(projectsTab: String) {

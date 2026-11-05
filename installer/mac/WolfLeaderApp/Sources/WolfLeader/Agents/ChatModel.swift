@@ -58,7 +58,7 @@ struct ChatRecord: Identifiable, Codable, Hashable {
     var updated: Date
     var contextSent = false
 
-    var agent: AgentKind? { AgentKind.builtIn.first { $0.id == agentID } }
+    var agent: AgentKind? { AgentRegistry.shared.agent(id: agentID) }
 
     /// The id the hub files this chat under; saving again updates it instead of adding a copy.
     var hubSessionID: String { "wolf-chat-\(id)" }
@@ -95,7 +95,7 @@ enum AgentError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .notInstalled(let agent): return "\(agent.name) isn't installed on this Mac. \(agent.installHint)"
+        case .notInstalled(let agent): return "\(agent.name) isn't set up on this Mac yet. Open Settings > Agents to install it or point Wolf Leader at it."
         case .failed(let why): return why
         }
     }

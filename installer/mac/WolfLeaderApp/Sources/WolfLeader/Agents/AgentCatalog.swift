@@ -45,8 +45,9 @@ enum AgentLocator {
     static var searchDirs: [String] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         var dirs = ["\(home)/.local/bin", "\(home)/.npm-global/bin", "\(home)/.cursor/bin", "\(home)/.bun/bin",
-                    "\(home)/.opencode/bin", "\(home)/.claude/local", "/opt/homebrew/bin", "/usr/local/bin",
-                    "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+                    "\(home)/.opencode/bin", "\(home)/.claude/local", "\(home)/.volta/bin", "\(home)/Library/pnpm",
+                    "\(home)/.yarn/bin", "\(home)/.asdf/shims", "\(home)/.local/share/mise/shims", "\(home)/.kiro/bin",
+                    "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"]
         // Node version managers put npm-installed CLIs (gemini, copilot) next to node.
         for manager in ["\(home)/.nvm/versions/node", "\(home)/.local"] {
             if let entries = try? FileManager.default.contentsOfDirectory(atPath: manager) {
@@ -60,7 +61,7 @@ enum AgentLocator {
     static var path: String {
         let inherited = ProcessInfo.processInfo.environment["PATH"]?.split(separator: ":").map(String.init) ?? []
         var seen = Set<String>()
-        return (searchDirs + inherited).filter { seen.insert($0).inserted }.joined(separator: ":")
+        return (searchDirs + learnedDirs + inherited).filter { seen.insert($0).inserted }.joined(separator: ":")
     }
 
     static func find(_ binary: String) -> String? {

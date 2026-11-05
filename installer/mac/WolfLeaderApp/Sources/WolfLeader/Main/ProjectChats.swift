@@ -40,35 +40,43 @@ struct ProjectChatsGroup: View {
     }
 }
 
-/// "New chat" with a choice of agent. Agents that aren't installed are listed, greyed out.
+/// "New chat" with a choice of agent. Agents that aren't set up yet lead to Settings > Agents,
+/// where they can be installed, signed in to, or pointed at by hand.
 struct NewChatMenu: View {
     @Environment(\.palette) private var p
+    @EnvironmentObject private var nav: Navigator
+    @ObservedObject private var agents = AgentRegistry.shared
     let start: (AgentKind) -> Void
-    @State private var installed: Set<String> = []
 
     var body: some View {
+        let ready = agents.all.filter { agents.found[$0.id] != nil }
+        let missing = agents.all.filter { agents.found[$0.id] == nil }
         Menu {
-            Section("Installed") {
-                ForEach(AgentKind.builtIn.filter { installed.contains($0.id) }) { agent in
-                    Button { start(agent) } label: { Label("\(agent.name) · \(agent.company)", systemImage: agent.symbol) }
-                }
-            }
-            let missing = AgentKind.builtIn.filter { !installed.contains($0.id) }
-            if !missing.isEmpty {
-                Section("Not installed") {
-                    ForEach(missing) { agent in
-                        Button { } label: { Label("\(agent.name) · \(agent.company)", systemImage: agent.symbol) }
-                            .disabled(true)
-                            .help(agent.installHint)
+            if !ready.isEmpty {
+                Section("Ready") {
+                    ForEach(ready) { agent in
+                        Button { start(agent) } label: { Label("\(agent.name) · \(agent.company)", systemImage: agent.symbol) }
                     }
                 }
             }
+            if !missing.isEmpty {
+                Section("Set up first") {
+                    ForEach(missing) { agent in
+                        Button { nav.open(settingsTab: "agents") } label: {
+                            Label("Set up \(agent.name)…", systemImage: agent.symbol)
+                        }
+                    }
+                }
+            }
+            Divider()
+            Button { nav.open(settingsTab: "agents") } label: { Label("Manage agents…", systemImage: "gearshape") }
         } label: {
             Label("New chat", systemImage: "plus.bubble")
         }
         .menuStyle(.button)
         .fixedSize()
-        .onAppear { installed = Set(AgentKind.builtIn.filter { AgentLocator.find($0.binary) != nil }.map(\.id)) }
+        .onAppear { agents.rescanNow() }
+        .task { await agents.refresh() }
     }
 }
 

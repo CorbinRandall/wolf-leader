@@ -5,6 +5,7 @@ import SwiftUI
 /// short rows you can open; anything that needs your OK waits for you here.
 struct ChatView: View {
     @EnvironmentObject private var store: ConfigStore
+    @EnvironmentObject private var nav: Navigator
     @Environment(\.palette) private var p
     @ObservedObject var session: ChatSession
     let back: () -> Void
@@ -14,13 +15,14 @@ struct ChatView: View {
 
     private var record: ChatRecord { session.record }
     private var agent: AgentKind? { record.agent }
-    private var installed: Bool { agent.map { AgentLocator.find($0.binary) != nil } ?? false }
+    private var installed: Bool { agent.map { AgentRegistry.shared.program(for: $0) != nil } ?? false }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Rectangle().fill(p.border).frame(height: 1)
             transcript
+            if needsSignIn, let agent { signInBar(agent) }
             composer
         }
         .background(p.background)
@@ -134,11 +136,36 @@ struct ChatView: View {
                  : "It starts with this project's notes, works in the project's folder on the server, and is saved back to the project after every reply.")
                 .font(DS.Font.bodySmall).foregroundStyle(p.textMuted)
             if !installed, let agent {
-                WLStatusPill(text: "\(agent.name) isn't installed", kind: .warn)
-                Text(agent.installHint).font(DS.Font.caption).foregroundStyle(p.textMuted).textSelection(.enabled)
+                WLStatusPill(text: "\(agent.name) isn't set up on this Mac yet", kind: .warn)
+                Button("Set up \(agent.name)…") { nav.open(settingsTab: "agents") }
+                    .buttonStyle(PrimaryButtonStyle())
             }
         }
         .padding(.vertical, DS.Spacing.lg)
+    }
+
+    // MARK: Sign-in
+
+    /// The agent's last error says it isn't signed in (e.g. Claude Code's "Not logged in · Please run /login").
+    private var needsSignIn: Bool {
+        guard !session.busy, let last = record.items.last, last.kind == .error else { return false }
+        let text = last.text.lowercased()
+        return ["not logged in", "please run /login", "log in", "login required", "not authenticated",
+                "unauthenticated", "sign in", "authentication required", "auth login"].contains { text.contains($0) }
+    }
+
+    private func signInBar(_ agent: AgentKind) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "person.badge.key").foregroundStyle(p.warn)
+            Text("\(agent.name) needs you to sign in once on this Mac. It opens in Terminal; come back here when it says you're in.")
+                .font(DS.Font.caption).foregroundStyle(p.text)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button("Sign in to \(agent.name)") { AgentRegistry.shared.openSignIn(for: agent) }
+                .buttonStyle(PrimaryButtonStyle())
+        }
+        .padding(.horizontal, DS.Spacing.lg).padding(.vertical, 10)
+        .background(p.warn.opacity(0.08))
     }
 
     // MARK: Composer

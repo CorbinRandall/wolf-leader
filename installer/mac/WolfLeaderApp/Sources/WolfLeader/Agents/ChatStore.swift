@@ -188,7 +188,7 @@ final class ChatSession: ObservableObject, Identifiable {
 
     private func connect() async throws {
         guard let agent = record.agent else { throw AgentError.failed("This chat's agent isn't known to this version of Wolf Leader.") }
-        guard let executable = AgentLocator.find(agent.binary) else { throw AgentError.notInstalled(agent) }
+        guard let executable = AgentRegistry.shared.program(for: agent) else { throw AgentError.notInstalled(agent) }
         if ProjectWorkspace.isWorkspace(record.cwd), let slug = record.projectSlug, let hub {
             preparing = "Bringing \(record.projectName ?? "the project") in from the server…"
             let note = await ProjectWorkspace.prepare(hub: hub, slug: slug, path: record.cwd)

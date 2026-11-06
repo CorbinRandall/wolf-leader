@@ -35,6 +35,18 @@ struct ChatRulesSettings: View {
             }
         }
 
+        WLGroup(title: "Wolf Leader in every chat", icon: "magnifyingglass.circle") {
+            WLRow(title: "Let AIs look things up and take notes",
+                  detail: "Every chat gets Wolf Leader's tools: search your projects, memories and past chats mid-conversation, and record decisions or things about you. Saving the chat stays with Wolf Leader.") {
+                Toggle("Wolf Leader tools", isOn: Binding(
+                    get: { rules.hubTools },
+                    set: { on in rules.update { $0.hub_tools = on } }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+            }
+        }
+
         WLGroup(title: "Rules for every chat",
                 subtitle: "Every agent gets these at the start of every chat: how you like to work, what to always or never do.",
                 icon: "text.badge.checkmark") {

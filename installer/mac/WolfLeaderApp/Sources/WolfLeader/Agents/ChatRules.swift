@@ -16,6 +16,8 @@ final class ChatRules: ObservableObject {
         var rules = ""
         var skills: [String] = []
         var library: [String]? = nil
+        /// Wolf Leader's tools (search, recall, remember…) in every chat. nil = on (older hubs).
+        var hub_tools: Bool? = nil
     }
 
     @Published private(set) var value: Value
@@ -39,6 +41,7 @@ final class ChatRules: ObservableObject {
         neverAsk ? .auto : (PermissionMode(rawValue: value.default_mode) ?? .ask)
     }
     var library: [String] { value.library ?? value.skills }
+    var hubTools: Bool { value.hub_tools ?? true }
 
     func start(hubURL: String) {
         self.hubURL = hubURL
@@ -71,7 +74,7 @@ final class ChatRules: ObservableObject {
         defer { saving = false }
         do {
             let body: [String: Any] = ["never_ask": next.never_ask, "default_mode": next.default_mode,
-                                       "rules": next.rules, "skills": next.skills]
+                                       "rules": next.rules, "skills": next.skills, "hub_tools": next.hub_tools ?? true]
             let data = try await HubClient(baseURL: hubURL).data(
                 "/api/chat-rules", method: "PUT", body: try JSONSerialization.data(withJSONObject: body))
             adopt(try JSONDecoder().decode(Value.self, from: data))

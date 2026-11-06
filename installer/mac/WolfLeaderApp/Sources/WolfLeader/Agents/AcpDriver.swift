@@ -20,7 +20,12 @@ final class AcpDriver: AgentDriver {
     private var replaying = false
     private var exitReported = false
 
-    init(name: String, executable: String, args: [String], cwd: String, mode: PermissionMode, resumeID: String?) {
+    /// The hub's MCP address (Wolf Leader's tools in this chat), or nil for none.
+    private let toolsURL: String?
+
+    init(name: String, executable: String, args: [String], cwd: String, mode: PermissionMode, resumeID: String?,
+         toolsURL: String? = nil) {
+        self.toolsURL = toolsURL
         self.name = name
         self.executable = executable
         self.args = args
@@ -46,14 +51,17 @@ final class AcpDriver: AgentDriver {
             "clientCapabilities": ["fs": ["readTextFile": false, "writeTextFile": false], "terminal": false],
             "clientInfo": ["name": "wolf-leader", "title": "Wolf Leader", "version": "3"],
         ])
-        let canLoad = (hello["agentCapabilities"] as? [String: Any])?["loadSession"] as? Bool ?? false
+        let capabilities = hello["agentCapabilities"] as? [String: Any]
+        let canLoad = capabilities?["loadSession"] as? Bool ?? false
+        // Wolf Leader's tools, for agents that can take an HTTP MCP server.
+        let servers = WolfTools.acpServers(url: toolsURL, capabilities: capabilities)
         if let sessionID, canLoad {
             replaying = true
             defer { replaying = false }
-            if (try? await peer.request("session/load", ["sessionId": sessionID, "cwd": cwd, "mcpServers": []])) != nil { return }
+            if (try? await peer.request("session/load", ["sessionId": sessionID, "cwd": cwd, "mcpServers": servers])) != nil { return }
         }
         if sessionID != nil { onEvent(.note("\(name) can't reopen the old session, so this continues in a new one.")) }
-        let result = try await peer.request("session/new", ["cwd": cwd, "mcpServers": []])
+        let result = try await peer.request("session/new", ["cwd": cwd, "mcpServers": servers])
         guard let id = result["sessionId"] as? String else { throw AgentError.failed("\(name) didn't start a session.") }
         sessionID = id
         onEvent(.sessionID(id))

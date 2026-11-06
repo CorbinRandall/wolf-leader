@@ -18,11 +18,15 @@ final class ClaudeDriver: AgentDriver {
     private var approvals: [String: [String: Any]] = [:]
     private var exitReported = false
 
-    init(executable: String, cwd: String, mode: PermissionMode, resumeID: String?) {
+    /// The hub's MCP address (Wolf Leader's tools in this chat), or nil for none.
+    private let toolsURL: String?
+
+    init(executable: String, cwd: String, mode: PermissionMode, resumeID: String?, toolsURL: String? = nil) {
         self.executable = executable
         self.cwd = cwd
         self.mode = mode
         self.resumeID = resumeID
+        self.toolsURL = toolsURL
     }
 
     private var permissionMode: String {
@@ -37,6 +41,7 @@ final class ClaudeDriver: AgentDriver {
         var args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                     "--include-partial-messages", "--permission-prompt-tool", "stdio", "--permission-mode", permissionMode]
         if let resumeID { args += ["--resume", resumeID] }
+        if let toolsURL { args += WolfTools.claudeArgs(url: toolsURL) }
         let process = JSONLineProcess(executable: executable, args: args, cwd: cwd, environment: AgentLocator.environment)
         process.onMessage = { [weak self] message in MainActor.assumeIsolated { self?.handle(message) } }
         process.onExit = { [weak self] code, tail in

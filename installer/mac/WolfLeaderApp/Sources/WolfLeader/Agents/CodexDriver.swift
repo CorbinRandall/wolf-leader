@@ -15,9 +15,10 @@ final class CodexDriver: AgentDriver {
     private var approvals: [String: Any] = [:]
     private var exitReported = false
 
-    init(executable: String, args: [String], cwd: String, mode: PermissionMode, resumeID: String?) {
+    init(executable: String, args: [String], cwd: String, mode: PermissionMode, resumeID: String?, toolsURL: String? = nil) {
         self.executable = executable
-        self.args = args
+        // Config overrides go before the subcommand (`codex -c … app-server`).
+        self.args = (toolsURL.map { WolfTools.codexArgs(url: $0) } ?? []) + args
         self.cwd = cwd
         self.mode = mode
         self.threadID = resumeID
@@ -47,7 +48,8 @@ final class CodexDriver: AgentDriver {
         try process.start()
         _ = try await peer.request("initialize", ["clientInfo": ["name": "wolf-leader", "title": "Wolf Leader", "version": "3"]])
         peer.notify("initialized")
-        let settings: [String: Any] = ["cwd": cwd, "approvalPolicy": approvalPolicy, "sandbox": sandbox]
+        var settings: [String: Any] = ["cwd": cwd, "approvalPolicy": approvalPolicy, "sandbox": sandbox]
+        if let model = await usableModel(peer) { settings["model"] = model }
         if let threadID {
             do {
                 _ = try await peer.request("thread/resume", settings.merging(["threadId": threadID]) { a, _ in a })
@@ -61,6 +63,36 @@ final class CodexDriver: AgentDriver {
             threadID = id
             onEvent(.sessionID(id))
         }
+    }
+
+    /// The model to ask for, when the one in ~/.codex/config.toml isn't offered to this account
+    /// (an old setting would otherwise fail every turn). nil = leave Codex's choice alone.
+    private func usableModel(_ peer: JSONRPCPeer) async -> String? {
+        guard let configured = Self.configuredModel(),
+              let listed = try? await peer.request("model/list", [:]) else { return nil }
+        let rows = (listed["data"] as? [[String: Any]]) ?? (listed["models"] as? [[String: Any]]) ?? []
+        let ids = rows.compactMap { ($0["id"] as? String) ?? ($0["model"] as? String) }
+        guard !ids.isEmpty, !ids.contains(configured) else { return nil }
+        let fallback = rows.first { $0["isDefault"] as? Bool == true }.flatMap { ($0["id"] as? String) ?? ($0["model"] as? String) } ?? ids[0]
+        onEvent(.note("Codex is set to \(configured), which your account doesn't offer, so this chat uses \(fallback)."))
+        return fallback
+    }
+
+    /// The top-level `model = "…"` in ~/.codex/config.toml (before any [section]).
+    nonisolated static func configuredModel() -> String? {
+        let file = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/config.toml")
+        guard let text = try? String(contentsOf: file, encoding: .utf8) else { return nil }
+        for raw in text.components(separatedBy: .newlines) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("[") { break }
+            guard line.hasPrefix("model"), let eq = line.firstIndex(of: "=") else { continue }
+            let key = line[..<eq].trimmingCharacters(in: .whitespaces)
+            guard key == "model" else { continue }
+            let value = line[line.index(after: eq)...].trimmingCharacters(in: .whitespaces)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            return value.isEmpty ? nil : value
+        }
+        return nil
     }
 
     func send(_ text: String) async throws {

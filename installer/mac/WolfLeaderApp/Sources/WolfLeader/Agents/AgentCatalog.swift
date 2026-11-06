@@ -76,6 +76,9 @@ enum AgentLocator {
     static var environment: [String: String] {
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = path
+        // Tells the tools' own Wolf Leader hooks (installed for using them outside the app) that
+        // this chat is Wolf Leader's: it saves itself and already has its context.
+        env["WOLF_LEADER_IN_APP"] = "1"
         return env
     }
 }

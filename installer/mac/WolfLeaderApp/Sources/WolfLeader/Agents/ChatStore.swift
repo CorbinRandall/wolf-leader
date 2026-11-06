@@ -222,6 +222,7 @@ final class ChatSession: ObservableObject, Identifiable {
                     }
                     // Your rules and skills for every chat, whichever agent runs it.
                     if let rules = await ChatRules.shared.contextBlock(hub: hub) { parts.append(rules) }
+                    if ChatRules.shared.hubTools { parts.append(WolfTools.instructions(projectSlug: record.projectSlug)) }
                 }
                 if record.needsHandoff == true, let handoff = WolfChatSync.handoff(earlier, agentName: record.agent?.name ?? "the agent") {
                     parts.append(handoff)
@@ -326,15 +327,18 @@ final class ChatSession: ObservableObject, Identifiable {
         let resumable = record.agentDevice == nil || record.agentDevice == thisDevice
         let resumeID = resumable ? record.agentSessionID : nil
         if resumeID == nil, record.items.filter({ $0.kind == .user }).count > 1 { record.needsHandoff = true }
+        // Wolf Leader's tools (search, recall, remember…) in the chat, unless the rules turn them off.
+        let tools = WolfTools.url(hubURL: hubURL)
         let driver: AgentDriver
         switch agent.proto {
         case .claude:
-            driver = ClaudeDriver(executable: executable, cwd: record.cwd, mode: record.mode, resumeID: resumeID)
+            driver = ClaudeDriver(executable: executable, cwd: record.cwd, mode: record.mode, resumeID: resumeID, toolsURL: tools)
         case .codex:
-            driver = CodexDriver(executable: executable, args: agent.args, cwd: record.cwd, mode: record.mode, resumeID: resumeID)
+            driver = CodexDriver(executable: executable, args: agent.args, cwd: record.cwd, mode: record.mode, resumeID: resumeID,
+                                 toolsURL: tools)
         case .acp:
             driver = AcpDriver(name: agent.name, executable: executable, args: agent.args, cwd: record.cwd, mode: record.mode,
-                               resumeID: resumeID)
+                               resumeID: resumeID, toolsURL: tools)
         }
         driver.onEvent = { [weak self] event in self?.apply(event) }
         self.driver = driver

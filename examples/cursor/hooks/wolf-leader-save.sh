@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Chats run by the Wolf Leader app save themselves and already start with Wolf Leader's
+# context, so this hook has nothing to do there.
+[[ "${WOLF_LEADER_IN_APP:-}" == 1 ]] && exit 0
 # stop: upload the current transcript and checkpoint it (never block session close).
 set -euo pipefail
 

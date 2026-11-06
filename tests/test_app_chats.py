@@ -62,7 +62,7 @@ def test_delete_leaves_a_tombstone_every_device_sees():
 def test_chat_rules_default_to_never_asking_and_the_library_skills():
     client = _client()
     rules = client.get("/api/chat-rules").json()
-    assert rules["never_ask"] is True and rules["default_mode"] == "auto"
+    assert rules["never_ask"] is True and rules["default_mode"] == "auto" and rules["hub_tools"] is True
     assert "wolfhowl" not in rules["skills"] and "wolfhowl" in rules["library"]
     assert set(rules["skills"]) == set(rules["library"]) - {"wolfhowl", "wolfeat"}
 

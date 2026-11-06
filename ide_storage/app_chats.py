@@ -156,6 +156,8 @@ class ChatRules(BaseModel):
     rules: str = Field(default="", max_length=20000)
     # None = not chosen yet: every skill except wolfhowl/wolfeat.
     skills: Optional[list[str]] = None
+    # Wolf Leader's MCP tools (search, recall, remember…) in every chat.
+    hub_tools: bool = True
 
 
 def _read_rules() -> Dict[str, Any]:

@@ -131,6 +131,45 @@ final class ChatStore: ObservableObject {
         return record
     }
 
+    /// A chat from the Claude app, Claude Code or Codex on this Mac becomes a Wolf Leader chat,
+    /// saved to the ledger right away (so nothing is lost even if it was never saved before).
+    /// With the same AI it resumes that very session, in its own folder; with another AI the
+    /// conversation is handed over. Opening it again reopens the same chat.
+    func openLocal(_ local: LocalSession, with agent: AgentKind, hubURL: String) -> ChatRecord {
+        let key = "wl.localSession.\(local.id)"
+        if let existing = UserDefaults.standard.string(forKey: key), let chat = record(existing) {
+            if chat.agentID != agent.id { session(chat.id)?.switchAgent(to: agent) }
+            return record(existing) ?? chat
+        }
+        var chat = create(project: nil, agent: agent)
+        let items = LocalSessions.items(for: local)
+        let sameAI = agent.id == local.agentID
+        chat.title = AgentText.oneLine(local.title, limit: 60)
+        chat.items = items + [ChatItem(id: UUID().uuidString, kind: .note, text: sameAI
+            ? "Brought in from the \(local.toolName)\(local.folderName.map { " (\($0))" } ?? ""). \(agent.name) picks this session back up where it stopped, with Wolf Leader's context."
+            : "Brought in from the \(local.toolName). \(agent.name) gets this conversation with your next message.")]
+        if sameAI, let cwd = local.cwd, FileManager.default.fileExists(atPath: cwd) {
+            // The real session lives with its folder: resume it there.
+            chat.cwd = cwd
+            chat.agentSessionID = local.sessionID
+            chat.agentDevice = ChatSync.shared.device
+        } else if items.contains(where: { $0.kind == .user }) {
+            chat.needsHandoff = true
+        }
+        chat.contextSent = false
+        chat.updated = Date()
+        write(chat)
+        UserDefaults.standard.set(chat.id, forKey: key)
+        let snapshot = chat
+        Task { try? await WolfChatSync.save(snapshot, hubURL: hubURL) }
+        return chat
+    }
+
+    /// Local sessions already opened here, by LocalSession.id.
+    func openedLocal(_ local: LocalSession) -> ChatRecord? {
+        UserDefaults.standard.string(forKey: "wl.localSession.\(local.id)").flatMap { record($0) }
+    }
+
     func stopAll() {
         for session in sessions.values { session.shutdown() }
     }

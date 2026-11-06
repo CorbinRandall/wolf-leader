@@ -145,6 +145,7 @@ struct AllChatsView: View {
                     nav.open(chat: chat.id, project: nil)
                 }
             }
+            RecentOnThisMacGroup()
             if chats.records.isEmpty {
                 MainNotice(symbol: "bubble.left.and.bubble.right", title: "No chats yet",
                            message: "Choose New chat to talk to Claude, Codex or another agent. Add the chat to a project whenever you like.")
@@ -162,6 +163,93 @@ struct AllChatsView: View {
             }
             OtherToolChatsGroup()
         }
+    }
+}
+
+/// The newest chats in the Claude app, Claude Code and Codex on this Mac, saved to Wolf Leader or
+/// not. Open one and it's in Wolf Leader (and its ledger) from then on.
+private struct RecentOnThisMacGroup: View {
+    @Environment(\.palette) private var p
+    @EnvironmentObject private var store: ConfigStore
+    @EnvironmentObject private var nav: Navigator
+    @ObservedObject private var agents = AgentRegistry.shared
+    @ObservedObject private var chats = ChatStore.shared
+    @State private var sessions: [LocalSession] = []
+    @State private var known: Set<String> = []
+    @State private var showAll = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !sessions.isEmpty {
+                WLGroup(title: "Recent on this Mac",
+                        subtitle: "Your latest chats in the Claude app, Claude Code and Codex, saved to Wolf Leader or not. Open one to keep going here; it's saved to Wolf Leader as soon as you do.",
+                        icon: "clock.arrow.circlepath") {
+                    let shown = showAll ? sessions : Array(sessions.prefix(6))
+                    ForEach(Array(shown.enumerated()), id: \.element.id) { index, session in
+                        if index > 0 { WLDivider() }
+                        row(session)
+                    }
+                    if sessions.count > 6 {
+                        Button(showAll ? "Show fewer" : "Show all \(sessions.count)") { showAll.toggle() }.buttonStyle(OutlineButtonStyle())
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .task { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await load() }
+        }
+    }
+
+    private func row(_ session: LocalSession) -> some View {
+        let opened = chats.openedLocal(session)
+        let saved = opened != nil || known.contains(session.sessionID)
+        let ready = agents.all.filter { agents.found[$0.id] != nil }
+        let own = ready.first { $0.id == session.agentID }
+        return HStack(spacing: 10) {
+            Image(systemName: session.tool == .codex ? "chevron.left.forwardslash.chevron.right" : "sparkle")
+                .font(.system(size: 12, weight: .semibold)).foregroundStyle(p.accent)
+                .frame(width: 26, height: 26)
+                .background(p.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(session.title).font(DS.Font.bodySmall.weight(.semibold)).foregroundStyle(p.text).lineLimit(1)
+                Text([session.toolName, session.folderName, HubDate.format(session.when)].compactMap { $0 }.joined(separator: " · "))
+                    .font(DS.Font.micro).foregroundStyle(p.textMuted)
+            }
+            Spacer(minLength: 8)
+            if !saved { WLStatusPill(text: "Not in Wolf Leader", kind: .warn) }
+            if let opened {
+                Button("Open") { nav.open(chat: opened.id, project: opened.projectID) }.buttonStyle(OutlineButtonStyle())
+            } else if let own {
+                Button("Open here") { open(session, with: own) }.buttonStyle(PrimaryButtonStyle())
+                    .help("Opens it in Wolf Leader and saves it. \(own.name) picks the session back up where it stopped.")
+            }
+            Menu {
+                Section("Continue with") {
+                    ForEach(ready) { agent in
+                        Button { open(session, with: agent) } label: { Label("\(agent.name) · \(agent.company)", systemImage: agent.symbol) }
+                    }
+                }
+                if ready.isEmpty { Button("Set up an AI…") { nav.open(libraryTab: "tools") } }
+            } label: { Image(systemName: "ellipsis.circle") }
+            .menuStyle(.borderlessButton).fixedSize()
+        }
+    }
+
+    private func open(_ session: LocalSession, with agent: AgentKind) {
+        let chat = ChatStore.shared.openLocal(session, with: agent, hubURL: store.config.hubURL)
+        nav.open(chat: chat.id, project: chat.projectID)
+    }
+
+    private func load() async {
+        let found = await Task.detached { LocalSessions.recent() }.value
+        sessions = found
+        guard !found.isEmpty,
+              let body = try? JSONSerialization.data(withJSONObject: ["ids": found.map(\.sessionID)]),
+              let data = try? await store.hub.data("/api/sessions/known", method: "POST", body: body),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        known = Set((json["known"] as? [String]) ?? [])
     }
 }
 

@@ -3,12 +3,22 @@ import SwiftUI
 
 /// Where the app is: the sidebar section, and inside Projects, which view and which project.
 struct Route: Hashable {
-    var section: MainSection = .projects
+    var section: MainSection = .chats
     var projectsTab: String = "focus"
     var libraryTab: String = "skills"
     var projectID: Int?
-    /// A chat open inside the project.
+    /// The open chat (in the Chats section, whatever project it belongs to).
     var chatID: String?
+    /// Chats section without a chat open: the list of every chat instead of the new-chat page.
+    var chatList = false
+}
+
+/// "Start a new chat", optionally already pointed at a project.
+struct NewChatRequest: Equatable {
+    let id = UUID()
+    var project: ProjectRef?
+    /// Open with "New project" picked, its name field ready.
+    var newProject = false
 }
 
 /// One history for the whole window, like a browser: every section change, every switch between
@@ -22,6 +32,8 @@ final class Navigator: ObservableObject {
     @Published var pendingSearch: String?
     /// A Settings tab to show next (set by `open(settingsTab:)`).
     @Published var pendingSettingsTab: String?
+    /// A new chat asked for from somewhere else (a project's + button); the new-chat page picks it up.
+    @Published var pendingNewChat: NewChatRequest?
 
     private var backStack: [Route] = []
     private var forwardStack: [Route] = []
@@ -66,6 +78,28 @@ final class Navigator: ObservableObject {
         next.section = section
         next.projectID = nil
         next.chatID = nil
+        next.chatList = false
+        go(next)
+    }
+
+    /// The new-chat page, with this project already picked (nil: no project).
+    func newChat(project: ProjectRef? = nil, newProject: Bool = false) {
+        pendingNewChat = NewChatRequest(project: project, newProject: newProject)
+        var next = route
+        next.section = .chats
+        next.projectID = nil
+        next.chatID = nil
+        next.chatList = false
+        go(next)
+    }
+
+    /// Every chat, grouped by project, plus chats from other AI tools to bring in.
+    func openChatList() {
+        var next = route
+        next.section = .chats
+        next.projectID = nil
+        next.chatID = nil
+        next.chatList = true
         go(next)
     }
 
@@ -101,23 +135,22 @@ final class Navigator: ObservableObject {
         go(next)
     }
 
-    /// Open a chat: on its project's page, or on the Chats page if it isn't in a project yet.
-    func open(chat id: String, project: Int?) {
+    /// Open a chat. Every chat opens in the Chats section, so the sidebar shows it selected.
+    func open(chat id: String, project: Int? = nil) {
         var next = route
-        next.section = project == nil ? .chats : .projects
-        next.projectID = project
+        next.section = .chats
+        next.projectID = nil
         next.chatID = id
+        next.chatList = false
         go(next)
     }
 
     /// Leave a chat for the page it was opened from. If you came from there, that is simply "back".
     func closeChat() {
-        if let previous = backStack.last, previous.section == route.section, previous.projectID == route.projectID, previous.chatID == nil {
+        if let previous = backStack.last, previous.chatID == nil {
             goBack()
-        } else if route.section == .chats {
-            open(section: .chats)
         } else {
-            open(project: route.projectID)
+            newChat()
         }
     }
 

@@ -16,10 +16,8 @@ struct ProjectChatsGroup: View {
     var body: some View {
         WLGroup(title: "Chats", subtitle: "Talk to any AI agent about this project. Each chat starts with the project's notes, works in the project's folder on the server, and is saved here.",
                 icon: "bubble.left.and.bubble.right") {
-            NewChatMenu { agent in
-                let chat = chats.create(project: ProjectRef(entry.project), agent: agent)
-                nav.open(chat: chat.id, project: entry.id)
-            }
+            Button { nav.newChat(project: ProjectRef(entry.project)) } label: { Label("New chat", systemImage: "plus.bubble") }
+                .buttonStyle(PrimaryButtonStyle())
             if !mine.isEmpty { WLDivider() }
             let shown = showAll ? mine : Array(mine.prefix(6))
             ForEach(shown) { chat in
@@ -37,46 +35,6 @@ struct ProjectChatsGroup: View {
         } message: {
             Text("It goes away on every device. The copy saved in this project's logbook stays.")
         }
-    }
-}
-
-/// "New chat" with a choice of agent. Agents that aren't set up yet lead to Settings > Agents,
-/// where they can be installed, signed in to, or pointed at by hand.
-struct NewChatMenu: View {
-    @Environment(\.palette) private var p
-    @EnvironmentObject private var nav: Navigator
-    @ObservedObject private var agents = AgentRegistry.shared
-    let start: (AgentKind) -> Void
-
-    var body: some View {
-        let ready = agents.all.filter { agents.found[$0.id] != nil }
-        let missing = agents.all.filter { agents.found[$0.id] == nil }
-        Menu {
-            if !ready.isEmpty {
-                Section("Ready") {
-                    ForEach(ready) { agent in
-                        Button { start(agent) } label: { Label("\(agent.name) · \(agent.company)", systemImage: agent.symbol) }
-                    }
-                }
-            }
-            if !missing.isEmpty {
-                Section("Set up first") {
-                    ForEach(missing) { agent in
-                        Button { nav.open(libraryTab: "tools") } label: {
-                            Label("Set up \(agent.name)…", systemImage: agent.symbol)
-                        }
-                    }
-                }
-            }
-            Divider()
-            Button { nav.open(libraryTab: "tools") } label: { Label("Manage agents…", systemImage: "gearshape") }
-        } label: {
-            Label("New chat", systemImage: "plus.bubble")
-        }
-        .menuStyle(.button)
-        .fixedSize()
-        .onAppear { agents.rescanNow() }
-        .task { await agents.refresh() }
     }
 }
 
@@ -138,12 +96,10 @@ struct AllChatsView: View {
 
     var body: some View {
         MainPage {
-            WLPageHeader(eyebrow: "Chats", title: "Recent chats",
+            WLPageHeader(eyebrow: "Chats", title: "All chats",
                          subtitle: "Every chat with every agent, on every device. Each reply is saved to Wolf Leader as it happens, so you can pick a chat up on another Mac, or with another agent, right where it stopped.") {
-                NewChatMenu { agent in
-                    let chat = chats.create(project: nil, agent: agent)
-                    nav.open(chat: chat.id, project: nil)
-                }
+                Button { nav.newChat() } label: { Label("New chat", systemImage: "plus.bubble") }
+                    .buttonStyle(PrimaryButtonStyle())
             }
             RecentOnThisMacGroup()
             if chats.records.isEmpty {

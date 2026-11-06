@@ -22,7 +22,8 @@ enum SetupStep: String, Identifiable {
 }
 
 struct SetupToggles {
-    var client = true
+    /// Rule, hooks and skills inside Cursor / Claude Code: only for using them outside Wolf Leader.
+    var client = false
     var shares = true
     var prereqs = true
     var obsidian = true

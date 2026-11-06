@@ -106,8 +106,27 @@ final class UpdateChecker: ObservableObject {
     @Published private(set) var updateSucceeded: Bool? = nil
     /// Branch names on GitHub for the branch picker (always includes the current branch).
     @Published private(set) var branches: [String] = []
+    /// Newest release with a Mac disk image (release channel only).
+    @Published private(set) var latestRelease: AppRelease? = nil
+    /// Progress of "Update app".
+    @Published private(set) var appPhase: AppPhase = .idle
+    /// Shown once after the app replaced itself ("Updated from 2.4.0 to 2.5.0").
+    @Published private(set) var justUpdated: String? = nil
 
     let runner = InstallRunner()
+    /// A source build running in `runner`.
+    private var buildJob: (work: URL, root: URL)?
+
+    private static let refreshSkillsKey = "wl.refreshSkillsAfterAppUpdate"
+
+    /// Cursor or Claude Code were connected for use outside Wolf Leader (rule or skills installed).
+    nonisolated static var outsideToolsConnected: Bool {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return ["/.cursor/rules/wolf-leader-hub.mdc", "/.claude/skills/wolfhowl", "/.cursor/skills/wolfhowl"]
+            .contains { FileManager.default.fileExists(atPath: home + $0) }
+    }
+    private static let updatedFromKey = "wl.appUpdatedFrom"
+    private static let lastLaunchKey = "wl.lastLaunchedBuild"
 
     private weak var store: ConfigStore?
     private var loop: Task<Void, Never>?
@@ -133,11 +152,29 @@ final class UpdateChecker: ObservableObject {
 
     var releasesURL: URL? { repo?.web?.appendingPathComponent("releases") }
 
-    var busy: Bool { preparing || runner.running }
+    var busy: Bool { preparing || runner.running || appPhase.active }
+
+    /// Release builds on main take published releases; everything else rebuilds from its branch.
+    var channel: AppChannel { (BuildInfo.isDev || branch != "main") ? .source : .release }
+
+    /// Is there a newer app to install?
+    var appUpdateAvailable: Bool {
+        switch channel {
+        case .release:
+            guard let latestRelease else { return false }
+            return VersionOrder.isNewer(latestRelease.version, than: BuildInfo.version)
+        case .source:
+            return hasUpdate
+        }
+    }
+
+    /// Sidebar dot and Settings tab badge.
+    var needsAttention: Bool { hasUpdate || appUpdateAvailable }
 
     /// Call once from the main window; checks now and every 6 hours.
     func start(store: ConfigStore) {
         self.store = store
+        noteLaunch()
         if exitWatch == nil {
             exitWatch = runner.$exitCode.sink { [weak self] code in
                 guard let code, let self else { return }
@@ -150,10 +187,12 @@ final class UpdateChecker: ObservableObject {
         }
         guard loop == nil else { return }
         loop = Task { [weak self] in
+            await self?.check()
+            await self?.refreshSkillsAfterAppUpdate()
             while !Task.isCancelled {
-                await self?.check()
                 try? await Task.sleep(for: .seconds(UpdateChecker.interval))
                 if self == nil { return }
+                await self?.check()
             }
         }
     }
@@ -194,6 +233,28 @@ final class UpdateChecker: ObservableObject {
         } catch {
             status = .failed(error.localizedDescription)
         }
+        if channel == .release { await checkRelease(repo) } else { latestRelease = nil }
+    }
+
+    private func checkRelease(_ repo: GitHubRepo) async {
+        let api = "https://api.github.com/repos/\(repo.owner)/\(repo.name)/releases/latest"
+        guard let json = try? await Self.fetchJSON(api) as? [String: Any],
+              let tag = json["tag_name"] as? String else { return }
+        let assets = (json["assets"] as? [[String: Any]]) ?? []
+        guard let dmg = assets.first(where: { (($0["name"] as? String) ?? "").lowercased().hasSuffix(".dmg") }),
+              let link = (dmg["browser_download_url"] as? String).flatMap(URL.init(string:)) else {
+            latestRelease = nil
+            return
+        }
+        var version = tag
+        if version.hasPrefix("v") || version.hasPrefix("V") { version.removeFirst() }
+        latestRelease = AppRelease(
+            tag: tag,
+            version: version,
+            dmg: link,
+            size: (dmg["size"] as? NSNumber)?.int64Value ?? 0,
+            page: (json["html_url"] as? String).flatMap(URL.init(string:))
+        )
     }
 
     // MARK: Branch picker
@@ -347,6 +408,11 @@ final class UpdateChecker: ObservableObject {
     }
 
     private func installFinished(_ code: Int32) {
+        if let build = buildJob {
+            buildJob = nil
+            buildFinished(code, build)
+            return
+        }
         guard awaitingInstall, let job = pending else { return }
         awaitingInstall = false
         pending = nil
@@ -372,6 +438,193 @@ final class UpdateChecker: ObservableObject {
             updateNote = "The update stopped" + (fields["reason"].map { ": \($0)" } ?? ".") + " See the log below."
         }
         try? FileManager.default.removeItem(at: job.work)
+    }
+
+    // MARK: Update the app itself
+
+    /// Downloads the new app, swaps it in for this one and reopens it. Settings, chats, projects
+    /// and the built-in hub live in Application Support, so they carry over untouched.
+    func updateApp() async {
+        guard !busy else { return }
+        guard let repo else {
+            appPhase = .failed(UpdateError.notConfigured.localizedDescription)
+            return
+        }
+        if let why = AppSwap.blocker() {
+            appPhase = .failed(why)
+            return
+        }
+        switch channel {
+        case .release: await updateFromRelease()
+        case .source: await updateFromSource(repo)
+        }
+    }
+
+    private func newWorkDir() throws -> URL {
+        let work = AppSwap.updatesDir.appendingPathComponent("work-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        return work
+    }
+
+    private func download(_ url: URL, to file: URL) async throws {
+        appPhase = .downloading(nil)
+        try await ProgressDownload.run(url, to: file) { [weak self] fraction in
+            Task { @MainActor in
+                guard let self, case .downloading = self.appPhase else { return }
+                self.appPhase = .downloading(fraction)
+            }
+        }
+    }
+
+    /// Release channel: the .dmg from the newest GitHub release.
+    private func updateFromRelease() async {
+        guard let release = latestRelease else {
+            appPhase = .failed("No GitHub release with a Mac disk image was found.")
+            return
+        }
+        let fm = FileManager.default
+        var work: URL?
+        do {
+            let dir = try newWorkDir()
+            work = dir
+            let dmg = dir.appendingPathComponent("WolfLeader.dmg")
+            try await download(release.dmg, to: dmg)
+
+            appPhase = .installing
+            let mount = dir.appendingPathComponent("mnt", isDirectory: true)
+            try fm.createDirectory(at: mount, withIntermediateDirectories: true)
+            let attach = await MainProcess.run("/usr/bin/hdiutil", [
+                "attach", "-nobrowse", "-readonly", "-noautoopen", "-noverify", "-mountpoint", mount.path, dmg.path,
+            ])
+            guard attach.code == 0 else { throw UpdateError.step("Couldn't open the disk image. \(attach.output)") }
+            let apps = ((try? fm.contentsOfDirectory(at: mount, includingPropertiesForKeys: nil)) ?? [])
+                .filter { $0.pathExtension == "app" }
+            let staged = dir.appendingPathComponent("new", isDirectory: true)
+            try fm.createDirectory(at: staged, withIntermediateDirectories: true)
+            var copied: URL?
+            if let src = apps.first {
+                let dest = staged.appendingPathComponent(src.lastPathComponent)
+                let copy = await MainProcess.run("/usr/bin/ditto", [src.path, dest.path])
+                if copy.code == 0 { copied = dest }
+            }
+            _ = await MainProcess.run("/usr/bin/hdiutil", ["detach", mount.path, "-force"])
+            try? fm.removeItem(at: dmg)
+            guard let app = copied else { throw UpdateError.step("Couldn't copy the app out of the disk image.") }
+            try await finishAppUpdate(app)
+        } catch {
+            if let work { try? fm.removeItem(at: work) }
+            appPhase = .failed(error.localizedDescription)
+        }
+    }
+
+    /// Source channel: download the branch, build it with installer/mac/build-app.sh, swap it in.
+    private func updateFromSource(_ repo: GitHubRepo) async {
+        guard AppSwap.hasSwift else {
+            appPhase = .failed("Building the app needs Apple's Command Line Tools. Run xcode-select --install in Terminal, then try again.")
+            return
+        }
+        let fm = FileManager.default
+        var work: URL?
+        do {
+            let dir = try newWorkDir()
+            work = dir
+            let head = try? await Self.headSHA(api: "https://api.github.com/repos/\(repo.owner)/\(repo.name)", branch: branch)
+            guard let zipURL = URL(string: "https://codeload.github.com/\(repo.owner)/\(repo.name)/zip/refs/heads/\(Self.pathEscape(branch))") else {
+                throw UpdateError.badURL
+            }
+            let zip = dir.appendingPathComponent("source.zip")
+            try await download(zipURL, to: zip)
+
+            appPhase = .building
+            let unpacked = dir.appendingPathComponent("src", isDirectory: true)
+            let unzip = await MainProcess.run("/usr/bin/ditto", ["-x", "-k", zip.path, unpacked.path])
+            guard unzip.code == 0, let checkout = Self.findCheckout(in: unpacked) else {
+                throw UpdateError.step("Couldn't unpack the download. \(unzip.output)")
+            }
+            // Build in a folder that survives between updates, so Swift reuses its compiled files.
+            let root = AppSwap.sourceDir
+            try fm.createDirectory(at: root, withIntermediateDirectories: true)
+            let sync = await MainProcess.run("/usr/bin/rsync", [
+                "-a", "--delete", "--exclude", "/installer/mac/WolfLeaderApp/.build", "--exclude", "/dist",
+                checkout.path + "/", root.path + "/",
+            ])
+            guard sync.code == 0 else { throw UpdateError.step("Couldn't stage the source. \(sync.output)") }
+            try? fm.removeItem(at: unpacked)
+            try? fm.removeItem(at: zip)
+
+            let script = root.appendingPathComponent("installer/mac/build-app.sh")
+            try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+            var args = ["--app-only", "--no-hub"]
+            if BuildInfo.isDev { args.append("--dev") }
+            var env = ["WL_GIT_BRANCH": branch, "WL_VERSION": BuildInfo.version]
+            if let web = repo.web?.absoluteString { env["WL_REPO_URL"] = web }
+            if let head { env["WL_GIT_SHA"] = head }
+            if BuildInfo.isDev { env["WL_DEV_HUB_URL"] = BuildInfo.devHubURL }
+            buildJob = (work: dir, root: root)
+            runner.run(script: script, args: args, env: env)
+        } catch {
+            if let work { try? fm.removeItem(at: work) }
+            appPhase = .failed(error.localizedDescription)
+        }
+    }
+
+    private func buildFinished(_ code: Int32, _ job: (work: URL, root: URL)) {
+        let name = BuildInfo.isDev ? "Wolf Leader Dev.app" : "Wolf Leader.app"
+        let built = job.root.appendingPathComponent("dist/\(name)")
+        guard code == 0, FileManager.default.fileExists(atPath: built.path) else {
+            try? FileManager.default.removeItem(at: job.work)
+            appPhase = .failed("The build stopped. See the log below.")
+            return
+        }
+        appPhase = .installing
+        Task {
+            do {
+                try await finishAppUpdate(built)
+            } catch {
+                appPhase = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    private func finishAppUpdate(_ app: URL) async throws {
+        let version = try await AppSwap.validate(app)
+        let defaults = UserDefaults.standard
+        defaults.set(BuildInfo.version, forKey: Self.updatedFromKey)
+        // Chats in Wolf Leader need nothing installed in the AI tools. Only when you've connected
+        // them for use on their own, keep that connection current. Dev builds never touch them.
+        if !BuildInfo.isDev, store?.config.setupComplete == true, Self.outsideToolsConnected {
+            defaults.set(true, forKey: Self.refreshSkillsKey)
+        }
+        try AppSwap.installAndRelaunch(app)
+        appPhase = .relaunching(version)
+        try? await Task.sleep(for: .milliseconds(700))
+        NSApp.terminate(nil)
+    }
+
+    /// First launch of a new build: drop the old "updated to" commit so the check counts from
+    /// this build, and say what changed.
+    private func noteLaunch() {
+        AppSwap.cleanUp()
+        let defaults = UserDefaults.standard
+        let build = (BuildInfo.gitSHA ?? "") + "@" + BuildInfo.version
+        if let last = defaults.string(forKey: Self.lastLaunchKey), last != build, let repo {
+            defaults.removeObject(forKey: Self.baselineKey(repo: repo, branch: branch))
+        }
+        defaults.set(build, forKey: Self.lastLaunchKey)
+        if let from = defaults.string(forKey: Self.updatedFromKey) {
+            defaults.removeObject(forKey: Self.updatedFromKey)
+            justUpdated = from == BuildInfo.version
+                ? "Rebuilt version \(BuildInfo.version)."
+                : "Updated from \(from) to \(BuildInfo.version)."
+        }
+    }
+
+    /// After an app update, bring the skills and rule to the same commit.
+    private func refreshSkillsAfterAppUpdate() async {
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: Self.refreshSkillsKey) else { return }
+        defaults.removeObject(forKey: Self.refreshSkillsKey)
+        await updateSkills()
     }
 
     // MARK: Helpers

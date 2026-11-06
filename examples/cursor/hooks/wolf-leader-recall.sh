@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Chats run by the Wolf Leader app save themselves and already start with Wolf Leader's
+# context, so this hook has nothing to do there.
+[[ "${WOLF_LEADER_IN_APP:-}" == 1 ]] && exit 0
 # sessionStart: inject Wolf Leader bootstrap context for the workspace.
 set -euo pipefail
 

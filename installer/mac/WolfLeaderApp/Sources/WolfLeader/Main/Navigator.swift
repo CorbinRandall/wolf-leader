@@ -7,6 +7,8 @@ struct Route: Hashable {
     var projectsTab: String = "focus"
     var libraryTab: String = "skills"
     var projectID: Int?
+    /// A chat open inside the project.
+    var chatID: String?
 }
 
 /// One history for the whole window, like a browser: every section change, every switch between
@@ -18,6 +20,8 @@ final class Navigator: ObservableObject {
     @Published private(set) var canGoForward = false
     /// A search typed in the toolbar, waiting for Super Search to run it.
     @Published var pendingSearch: String?
+    /// A Settings tab to show next (set by `open(settingsTab:)`).
+    @Published var pendingSettingsTab: String?
 
     private var backStack: [Route] = []
     private var forwardStack: [Route] = []
@@ -61,7 +65,14 @@ final class Navigator: ObservableObject {
         var next = route
         next.section = section
         next.projectID = nil
+        next.chatID = nil
         go(next)
+    }
+
+    /// Settings on a given tab ("agents", "updates", ...). SettingsView picks it up and clears it.
+    func open(settingsTab: String) {
+        pendingSettingsTab = settingsTab
+        open(section: .settings)
     }
 
     func open(projectsTab: String) {
@@ -69,6 +80,7 @@ final class Navigator: ObservableObject {
         next.section = .projects
         next.projectsTab = projectsTab
         next.projectID = nil
+        next.chatID = nil
         go(next)
     }
 
@@ -77,6 +89,7 @@ final class Navigator: ObservableObject {
         next.section = .library
         next.libraryTab = libraryTab
         next.projectID = nil
+        next.chatID = nil
         go(next)
     }
 
@@ -84,7 +97,28 @@ final class Navigator: ObservableObject {
         var next = route
         next.section = .projects
         next.projectID = id
+        next.chatID = nil
         go(next)
+    }
+
+    /// Open a chat: on its project's page, or on the Chats page if it isn't in a project yet.
+    func open(chat id: String, project: Int?) {
+        var next = route
+        next.section = project == nil ? .chats : .projects
+        next.projectID = project
+        next.chatID = id
+        go(next)
+    }
+
+    /// Leave a chat for the page it was opened from. If you came from there, that is simply "back".
+    func closeChat() {
+        if let previous = backStack.last, previous.section == route.section, previous.projectID == route.projectID, previous.chatID == nil {
+            goBack()
+        } else if route.section == .chats {
+            open(section: .chats)
+        } else {
+            open(project: route.projectID)
+        }
     }
 
     /// Run a search from anywhere: open the results page with this text.

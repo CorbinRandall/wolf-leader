@@ -115,6 +115,11 @@ from .api_wolf import router as wolf_router  # noqa: E402
 
 app.include_router(wolf_router)
 
+from .app_chats import router as app_chats_router, rules_router as chat_rules_router  # noqa: E402
+
+app.include_router(app_chats_router)
+app.include_router(chat_rules_router)
+
 # Native wiki (Fumadocs static export, Halo theme). Built into wiki/out by the
 # Dockerfile and rebuilt by the hub after saves/howls. Same container, no second
 # web server. check_dir=False so a missing build 404s instead of breaking the API.

@@ -608,6 +608,21 @@ SCHEMA_STATEMENTS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id)",
+    # Chats made in the Wolf Leader app, whole, so any device can open and continue them.
+    """
+    CREATE TABLE IF NOT EXISTS app_chats (
+        id TEXT PRIMARY KEY,
+        record TEXT,
+        updated TEXT NOT NULL,
+        server_updated TEXT NOT NULL,
+        device TEXT,
+        project_id BIGINT,
+        title TEXT,
+        agent_id TEXT,
+        deleted INTEGER NOT NULL DEFAULT 0
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_app_chats_server_updated ON app_chats(server_updated)",
     """
     CREATE TABLE IF NOT EXISTS memories (
         id BIGSERIAL PRIMARY KEY,

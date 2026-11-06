@@ -62,6 +62,48 @@ def _norm(p: str) -> str:
     return p.lower()
 
 
+_TOOL_HOMES = (".codex", ".claude", ".cursor", ".gemini", ".grok", ".kiro", ".copilot", ".opencode",
+               ".config", ".cache", ".npm", ".local", ".vscode", ".agents")
+_BROAD_USER_FOLDERS = ("downloads", "desktop", "documents", "applications", "projects", "library")
+
+
+def not_a_project_folder(path: str | None) -> str | None:
+    """Why this folder must never become a project of its own, or None when it may.
+
+    AI tools and apps run in places that aren't anyone's project: a home folder, Downloads, a
+    tool's own folder (~/.codex, ~/Documents/Codex, which the Codex app uses for scratch chats),
+    an app's private data (~/Library/Application Support/…, where apps such as MacParakeet run
+    Codex behind the scenes), or a temp folder. Sessions from those are filed by what was said,
+    never by the folder's name.
+    """
+    n = _norm(path or "")
+    n = re.sub(r"^[a-z]:", "", n)  # C:/Users/x -> /users/x
+    if n in ("", "/", "/root", "/tmp", "/private/tmp", "/srv", "/srv/content", "/srv/wolf"):
+        return "a system or top-level folder"
+    if re.search(r"(^|/)(var/folders|private/var|tmp|temp|appdata/local/temp)(/|$)", n):
+        return "a temporary folder"
+    if "/library/" in n + "/" and re.search(
+            r"/library/(application support|containers|group containers|caches|preferences)(/|$)", n):
+        return "an app's private data folder"
+    if re.search(r"/appdata/(roaming|local)(/|$)", n):
+        return "an app's private data folder"
+    m = re.fullmatch(r"/(users|home)/[^/]+(/.*)?", n)
+    if m:
+        rest = (m.group(2) or "").strip("/")
+        if not rest:
+            return "your home folder"
+        first = rest.split("/")[0]
+        if first in _TOOL_HOMES:
+            return "an AI tool's own folder"
+        if rest in _BROAD_USER_FOLDERS:
+            return f"your {first} folder"
+        if rest == "documents/codex" or rest.startswith("documents/codex/"):
+            return "the Codex app's scratch folder"
+    elif n.split("/")[-1] in _TOOL_HOMES or any(f"/{t}/" in n + "/" for t in _TOOL_HOMES):
+        return "an AI tool's own folder"
+    return None
+
+
 def _root_norm(root: str) -> str:
     n = _norm(root)
     # "o:" from "O:\" — keep the drive letter form comparable with "o:/foo"

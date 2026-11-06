@@ -2,14 +2,15 @@ import AppKit
 import SwiftUI
 
 enum MainSection: String, CaseIterable, Identifiable, Hashable {
-    case projects, library, ask, shares, settings
+    case chats, projects, library, ask, shares, settings
 
     var id: String { rawValue }
 
-    static let primary: [MainSection] = [.projects, .library, .ask]
+    static let primary: [MainSection] = [.chats, .projects, .library, .ask]
 
     var label: String {
         switch self {
+        case .chats: return "Chats"
         case .projects: return "Projects"
         case .library: return "Library"
         case .ask: return "Search"
@@ -20,6 +21,7 @@ enum MainSection: String, CaseIterable, Identifiable, Hashable {
 
     var symbol: String {
         switch self {
+        case .chats: return "bubble.left.and.bubble.right"
         case .projects: return "folder"
         case .library: return "rectangle.3.group"
         case .ask: return "sparkle.magnifyingglass"
@@ -74,6 +76,10 @@ struct MainView: View {
                     .padding(.vertical, 4)
                     .selectionDisabled()
                 }
+                Section {
+                    Label(MainSection.chats.label, systemImage: MainSection.chats.symbol)
+                        .tag(SidebarItem.section(.chats))
+                }
                 // Every view inside a section is one click away, no menu diving.
                 Section("Projects") {
                     Label("Focus", systemImage: "scope").tag(SidebarItem.projects("focus"))
@@ -84,7 +90,7 @@ struct MainView: View {
                     Label("Skills", systemImage: "shippingbox").tag(SidebarItem.library("skills"))
                     Label("People", systemImage: "person.2").tag(SidebarItem.library("people"))
                     Label("Bring in", systemImage: "tray.and.arrow.down").tag(SidebarItem.library("bringin"))
-                    Label("My tools", systemImage: "laptopcomputer").tag(SidebarItem.library("tools"))
+                    Label("AI tools", systemImage: "person.2.wave.2").tag(SidebarItem.library("tools"))
                     Label("Backups", systemImage: "externaldrive.badge.checkmark").tag(SidebarItem.library("repos"))
                     Label("Cleanup", systemImage: "arrow.triangle.merge").tag(SidebarItem.library("cleanup"))
                     Label("Snippets", systemImage: "chevron.left.forwardslash.chevron.right").tag(SidebarItem.library("snippets"))
@@ -95,7 +101,7 @@ struct MainView: View {
                         HStack(spacing: 6) {
                             Text(MainSection.settings.label)
                             Spacer(minLength: 0)
-                            if updates.hasUpdate {
+                            if updates.needsAttention {
                                 Circle()
                                     .fill(p.accent)
                                     .frame(width: 7, height: 7)
@@ -111,8 +117,13 @@ struct MainView: View {
             .listStyle(.sidebar)
             .tint(p.accent)
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                HubStatusCard(hubOK: hubOK, hubURL: store.config.hubURL) {
-                    nav.open(section: .settings)
+                VStack(spacing: 0) {
+                    if updates.appUpdateAvailable || updates.appPhase.active {
+                        SidebarUpdateCard()
+                    }
+                    HubStatusCard(hubOK: hubOK, hubURL: store.config.hubURL) {
+                        nav.open(section: .settings)
+                    }
                 }
             }
             .navigationSplitViewColumnWidth(min: 170, ideal: 200, max: 240)
@@ -147,6 +158,15 @@ struct MainView: View {
             updates.start(store: store)
         }
         .task(id: store.config.hubURL) {
+            // Chats follow you: every device on this hub sees and continues the same chats.
+            ChatSync.shared.start(hubURL: store.config.hubURL, device: store.config.deviceName)
+            ChatRules.shared.start(hubURL: store.config.hubURL)
+            // Who uses this Mac: guess from its name ("Corbin's Mac Studio") when it's one of the hub's people.
+            if store.config.person == nil, let owners = try? await store.hub.owners() {
+                let name = store.config.deviceName.lowercased()
+                let matches = owners.filter { name.contains($0.lowercased()) }
+                if matches.count == 1 { store.config.person = matches[0]; store.save() }
+            }
             hubOK = nil
             while !Task.isCancelled {
                 hubOK = await store.hub.isHealthy()
@@ -158,6 +178,12 @@ struct MainView: View {
     @ViewBuilder
     private var detail: some View {
         switch nav.route.section {
+        case .chats:
+            if let chatID = nav.route.chatID, let session = ChatStore.shared.session(chatID) {
+                ChatView(session: session, back: { nav.closeChat() }).id(chatID)
+            } else {
+                AllChatsView()
+            }
         case .projects:
             ProjectsView(openSettings: { nav.open(section: .settings) })
         case .library:
@@ -169,6 +195,62 @@ struct MainView: View {
         case .settings:
             SettingsView()
         }
+    }
+}
+
+/// Bottom of the sidebar when a new app is out: one click updates and reopens.
+private struct SidebarUpdateCard: View {
+    @EnvironmentObject private var updates: UpdateChecker
+    @Environment(\.palette) private var p
+    @State private var hovering = false
+
+    private var caption: String {
+        switch updates.appPhase {
+        case .downloading(let f): return f.map { "Downloading update… \(Int($0 * 100))%" } ?? "Downloading update…"
+        case .building: return "Building update…"
+        case .installing: return "Installing update…"
+        case .relaunching: return "Reopening…"
+        case .idle, .failed: break
+        }
+        if case .failed = updates.appPhase { return "Update didn't finish · see Settings > Updates" }
+        if let v = updates.latestRelease?.version, updates.channel == .release { return "Update to \(v)" }
+        return "Update available · click to install"
+    }
+
+    var body: some View {
+        Button {
+            Task { await updates.updateApp() }
+        } label: {
+            HStack(spacing: DS.Spacing.sm) {
+                Group {
+                    if updates.appPhase.active {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                }
+                .foregroundStyle(p.accent)
+                .frame(width: 28, height: 28)
+                .background(RoundedRectangle(cornerRadius: 7).fill(p.accent.opacity(0.12)))
+                Text(caption)
+                    .font(DS.Font.caption.weight(.semibold))
+                    .foregroundStyle(p.text)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+            }
+            .padding(DS.Spacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: DS.Radius.row)
+                    .fill(hovering ? p.surfaceRaised : Color.clear)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: DS.Radius.row))
+        }
+        .buttonStyle(.plain)
+        .disabled(updates.busy)
+        .help("Downloads the new version, swaps it in and reopens Wolf Leader. Settings, chats and projects stay.")
+        .onHover { h in withAnimation(DS.Anim.hover) { hovering = h } }
     }
 }
 

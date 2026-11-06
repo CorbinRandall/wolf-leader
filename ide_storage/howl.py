@@ -70,6 +70,14 @@ def run_howl(
         existing = resolve_project(path=workspace_path)
         if existing:
             slug = existing.get("slug")
+        elif create_project and not project_name and _not_a_project(workspace_path):
+            # Named by its folder, this would make a project out of ~/.codex, Downloads or an
+            # app's data folder. Ask for a real project (or a name) instead.
+            report["needs_project_choice"] = True
+            report["error"] = (f"{workspace_path} is {_not_a_project(workspace_path)}, not a project. "
+                               "Ask which project this belongs to, or what to call a new one.")
+            report["candidates"] = []
+            return report
         elif create_project:
             created = _create_project_for_path(workspace_path, device_name, project_name=project_name)
             if created:
@@ -307,6 +315,12 @@ def ensure_share_remote(slug: str) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         out["error"] = str(exc)
     return out
+
+
+def _not_a_project(path: str | None) -> str | None:
+    from ide_storage.paths import not_a_project_folder
+
+    return not_a_project_folder(path)
 
 
 def _create_project_for_path(

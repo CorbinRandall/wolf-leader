@@ -21,7 +21,7 @@ struct LibraryView: View {
             WLTab(id: .skills, title: "Skills", icon: "shippingbox"),
             WLTab(id: .people, title: "People", icon: "person.2"),
             WLTab(id: .bringin, title: "Bring in", icon: "tray.and.arrow.down"),
-            WLTab(id: .tools, title: "My tools", icon: "laptopcomputer"),
+            WLTab(id: .tools, title: "AI tools", icon: "person.2.wave.2"),
             WLTab(id: .repos, title: "Backups", icon: "externaldrive.badge.checkmark"),
             WLTab(id: .cleanup, title: "Cleanup", icon: "arrow.triangle.merge"),
             WLTab(id: .snippets, title: "Snippets", icon: "chevron.left.forwardslash.chevron.right"),
@@ -63,62 +63,78 @@ private struct SkillsLibraryView: View {
     @State private var pickedFound: Set<String> = []
     @State private var pickedInTool: [String: Set<String>] = [:]
     @State private var confirmRemoval: (tool: String?, names: [String])?
+    @ObservedObject private var rules = ChatRules.shared
 
     var body: some View {
-        WLPageHeader(title: "My skills", subtitle: "Your master set. Push it and every AI tool on this Mac gets the same skills.") {
+        WLPageHeader(title: "Skills",
+                     subtitle: "Your skills, kept in one place. Wolf Leader hands the ones marked Every chat to whichever AI runs a chat, so there's nothing to install or keep up to date in each tool.") {
             HStack(spacing: 8) {
                 if working { ProgressView().controlSize(.small) }
-                Button("Add skill") { chooseSkills() }.buttonStyle(SecondaryButtonStyle())
-                Button("Push to all my tools") { Task { await push() } }.buttonStyle(PrimaryButtonStyle()).disabled(working)
+                Button("Add skill") { chooseSkills() }.buttonStyle(PrimaryButtonStyle())
             }
         }
         if let notice { WLStatusPill(text: notice, kind: .good) }
         if let addError { WLStatusPill(text: addError, kind: .bad) }
         if let error { WLStatusPill(text: error, kind: .bad) }
-        dropZone
         if loading && response == nil {
             ProgressView("Loading skills…")
         } else if let response {
-            WLGroup(title: "My skills", subtitle: "\(response.skills.count) in your set", icon: "shippingbox") {
-                if response.skills.isEmpty { Text("No skills yet. Drop one above.").foregroundStyle(p.textMuted) }
+            WLGroup(title: "Your skills",
+                    subtitle: "\(response.skills.count) skill\(response.skills.count == 1 ? "" : "s") · \(rules.value.skills.count) in every chat. Changing a skill here changes it for every chat and every AI.",
+                    icon: "shippingbox") {
+                if response.skills.isEmpty { Text("No skills yet. Drop one below.").foregroundStyle(p.textMuted) }
                 ForEach(response.skills) { skill in
-                    checkRow(skill.name, detail: skill.description, note: reach(skill.id), picked: $pickedMaster, key: skill.id)
+                    skillRow(skill)
                 }
                 selectionBar(all: response.skills.map(\.id), picked: $pickedMaster) {
-                    Button("Remove from my set") { confirmRemoval = (nil, pickedMaster.sorted()) }
+                    Button("Remove") { confirmRemoval = (nil, pickedMaster.sorted()) }
                         .buttonStyle(OutlineButtonStyle()).disabled(pickedMaster.isEmpty)
                 }
+                if response.skills.contains(where: { ["wolfhowl", "wolfeat"].contains($0.name) }) {
+                    Text("wolfhowl and wolfeat are for AI tools used outside Wolf Leader. Chats here save themselves and start with the project's context.")
+                        .font(DS.Font.micro).foregroundStyle(p.textMuted)
+                }
             }
+            dropZone
             if !overview.notInSet.isEmpty {
-                WLGroup(title: "Found in your tools", subtitle: "Not in your set yet. Add the ones you want everywhere.", icon: "tray.and.arrow.down") {
+                WLGroup(title: "Found in your other AI tools",
+                        subtitle: "Skills you made in Claude Code, Codex or Cursor. Add them here and every chat can use them, with any AI.",
+                        icon: "tray.and.arrow.down") {
                     ForEach(overview.notInSet, id: \.self) { name in
                         checkRow(name, detail: nil, note: "in " + overview.tools.filter { $0.skills.contains(name) }.map(\.name).joined(separator: ", "),
                                  picked: $pickedFound, key: name)
                     }
                     selectionBar(all: overview.notInSet, picked: $pickedFound) {
-                        Button("Add to my set") { Task { await adopt() } }
+                        Button("Add to my skills") { Task { await adopt() } }
                             .buttonStyle(SecondaryButtonStyle()).disabled(pickedFound.isEmpty || working)
                     }
                 }
             }
-            ForEach(overview.tools) { tool in
-                WLGroup(title: tool.name, subtitle: "\(tool.skills.count) skills" + (tool.missing.isEmpty ? "" : " · missing \(tool.missing.count) from your set"), icon: "laptopcomputer") {
-                    DisclosureGroup("Show its skills") {
-                        let binding = Binding(get: { pickedInTool[tool.id] ?? [] }, set: { pickedInTool[tool.id] = $0 })
-                        ForEach(tool.skills, id: \.self) { name in
-                            checkRow(name, detail: nil, note: overview.inSet.contains(name) ? "in your set" : nil, picked: binding, key: name)
+            WLGroup(title: "Using AI tools outside Wolf Leader", icon: "arrow.up.forward.app") {
+                DisclosureGroup("Copy your skills into Claude Code, Codex or Cursor, for when you use them on their own") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Not needed for chats in Wolf Leader. Only for opening those tools directly.")
+                            .font(DS.Font.micro).foregroundStyle(p.textMuted)
+                        Button("Copy my skills into those tools") { Task { await push() } }
+                            .buttonStyle(OutlineButtonStyle()).disabled(working)
+                        ForEach(overview.tools) { tool in
+                            DisclosureGroup("\(tool.name) · \(tool.skills.count) skills" + (tool.missing.isEmpty ? "" : " · missing \(tool.missing.count) of yours")) {
+                                let binding = Binding(get: { pickedInTool[tool.id] ?? [] }, set: { pickedInTool[tool.id] = $0 })
+                                ForEach(tool.skills, id: \.self) { name in
+                                    checkRow(name, detail: nil, note: overview.inSet.contains(name) ? "yours" : nil, picked: binding, key: name)
+                                }
+                                selectionBar(all: tool.skills, picked: binding) {
+                                    Button("Remove from \(tool.name)") { confirmRemoval = (tool.id, (pickedInTool[tool.id] ?? []).sorted()) }
+                                        .buttonStyle(OutlineButtonStyle()).disabled((pickedInTool[tool.id] ?? []).isEmpty)
+                                }
+                            }
                         }
-                        selectionBar(all: tool.skills, picked: binding) {
-                            Button("Remove from \(tool.name)") { confirmRemoval = (tool.id, (pickedInTool[tool.id] ?? []).sorted()) }
-                                .buttonStyle(OutlineButtonStyle()).disabled((pickedInTool[tool.id] ?? []).isEmpty)
-                        }
+                        Text(response.installPrompt).font(DS.Font.micro).foregroundStyle(p.textMuted).textSelection(.enabled).lineLimit(3)
+                        Button("Copy install prompt for another tool") { copy(response.installPrompt) }.buttonStyle(OutlineButtonStyle())
                     }
-                    .font(DS.Font.bodySmall)
+                    .padding(.top, 8)
                 }
-            }
-            WLGroup(title: "Connect another client", subtitle: "Copy the current hub-specific install prompt.", icon: "link") {
-                Text(response.installPrompt).font(DS.Font.micro).foregroundStyle(p.textMuted).textSelection(.enabled).lineLimit(4)
-                Button("Copy install prompt") { copy(response.installPrompt) }.buttonStyle(OutlineButtonStyle())
+                .font(DS.Font.bodySmall)
             }
         }
         Color.clear.frame(height: 0).task(id: store.config.hubURL) { await load() }
@@ -130,7 +146,7 @@ private struct SkillsLibraryView: View {
                 Button("Cancel", role: .cancel) { confirmRemoval = nil }
             } message: {
                 Text(confirmRemoval?.tool == nil
-                     ? "They leave your master set. AI tools keep their copies until you remove them there."
+                     ? "Chats stop getting them. Copies you put in other AI tools stay there until you remove them."
                      : "A copy of each is kept in a backup folder, so nothing is lost.")
             }
     }
@@ -147,6 +163,34 @@ private struct SkillsLibraryView: View {
         guard !overview.tools.isEmpty else { return nil }
         let lacking = overview.tools.filter { $0.missing.contains(id) }.map(\.name)
         return lacking.isEmpty ? "in all your tools" : "not yet in " + lacking.joined(separator: ", ")
+    }
+
+    /// One of your skills: pick it (to remove), and whether every chat starts with it.
+    private func skillRow(_ skill: HubSkill) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Toggle("", isOn: Binding(get: { pickedMaster.contains(skill.id) },
+                                     set: { if $0 { pickedMaster.insert(skill.id) } else { pickedMaster.remove(skill.id) } }))
+                .toggleStyle(.checkbox).labelsHidden()
+            VStack(alignment: .leading, spacing: 2) {
+                Text(skill.name).font(DS.Font.bodySmall.weight(.semibold))
+                if let description = skill.description, !description.isEmpty {
+                    Text(description).font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(2)
+                }
+            }
+            Spacer(minLength: 8)
+            Text("Every chat").font(DS.Font.micro).foregroundStyle(p.textMuted)
+            Toggle("Every chat", isOn: Binding(
+                get: { rules.value.skills.contains(skill.name) },
+                set: { on in
+                    rules.update { value in
+                        value.skills.removeAll { $0 == skill.name }
+                        if on { value.skills.append(skill.name) }
+                    }
+                }
+            ))
+            .labelsHidden().toggleStyle(.switch).controlSize(.small)
+            .help("Every chat starts with this skill, whichever AI runs it.")
+        }
     }
 
     private func checkRow(_ title: String, detail: String?, note: String?, picked: Binding<Set<String>>, key: String) -> some View {
@@ -197,7 +241,9 @@ private struct SkillsLibraryView: View {
         do {
             let json = try await bridge(["adopt-skills", "--skills", pickedFound.sorted().joined(separator: ",")])
             let added = (json["added"] as? [Any])?.count ?? 0
-            notice = "Added \(added) to your set. Push to give them to every tool."
+            notice = "Added \(added) to your skills. Every chat now starts with them; switch any off above."
+            let names = pickedFound
+            rules.update { value in value.skills += names.filter { !value.skills.contains($0) } }
             pickedFound = []
             error = nil
             await load()
@@ -294,7 +340,9 @@ private struct SkillsLibraryView: View {
             } catch { addError = describe(error, url) }
         }
         if !added.isEmpty {
-            notice = added.count == 1 ? "Added \(added[0])." : "Added \(added.count) skills."
+            // A new skill is for every chat unless you switch it off.
+            rules.update { value in value.skills += added.filter { !value.skills.contains($0) } }
+            notice = (added.count == 1 ? "Added \(added[0])." : "Added \(added.count) skills.") + " Every chat starts with it now."
             await load()
         }
     }
@@ -465,7 +513,7 @@ private struct SnippetsLibraryView: View {
     @State private var error: String?
 
     var body: some View {
-        WLPageHeader(title: "Snippets", subtitle: "Small reusable pieces of code stored with project context.")
+        WLPageHeader(title: "Snippets", subtitle: "Text and code you reuse. Drop any of them into a chat from the Insert button next to the message box.")
         WLGroup(title: "New snippet", subtitle: "Save a reusable command, query, or code fragment.", icon: "plus.square") {
             HStack {
                 TextField("Title", text: $title).mainField()
@@ -538,7 +586,7 @@ private struct PeopleLibraryView: View {
     @State private var notice: String?
 
     var body: some View {
-        WLPageHeader(title: "People", subtitle: "Who a project can belong to, and what AI tools should know about each person.")
+        WLPageHeader(title: "People", subtitle: "Who a project can belong to, and what every AI should know about each person. Wolf Leader gives your profile to every chat, whichever AI runs it.")
         if let notice { WLStatusPill(text: notice, kind: .good) }
         if let error { WLStatusPill(text: error, kind: .bad) }
         WLGroup(title: "Owners", subtitle: "\(counts[""] ?? 0) project\((counts[""] ?? 0) == 1 ? " has" : "s have") no owner.", icon: "person.2") {

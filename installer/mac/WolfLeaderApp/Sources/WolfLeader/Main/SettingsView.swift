@@ -2,18 +2,20 @@ import AppKit
 import SwiftUI
 
 private enum SettingsTab: String, Hashable {
-    case general, hub, updates, about
+    case general, rules, hub, updates, about
 }
 
 struct SettingsView: View {
     @EnvironmentObject private var updates: UpdateChecker
+    @EnvironmentObject private var nav: Navigator
     @State private var tab: SettingsTab = .general
 
     private var tabs: [WLTab<SettingsTab>] {
         [
             WLTab(id: .general, title: "General", icon: "slider.horizontal.3"),
+            WLTab(id: .rules, title: "Rules", icon: "checklist"),
             WLTab(id: .hub, title: "Hub", icon: "server.rack"),
-            WLTab(id: .updates, title: "Updates", icon: "arrow.triangle.2.circlepath", attention: updates.hasUpdate),
+            WLTab(id: .updates, title: "Updates", icon: "arrow.triangle.2.circlepath", attention: updates.needsAttention),
             WLTab(id: .about, title: "About", icon: "info.circle"),
         ]
     }
@@ -27,8 +29,11 @@ struct SettingsView: View {
             .padding(.bottom, DS.Spacing.xs)
             switch tab {
             case .general:
+                SettingsYouGroup()
                 SettingsAppearanceGroup()
                 SettingsSetupGroup()
+            case .rules:
+                ChatRulesSettings()
             case .hub:
                 SettingsHubGroup()
                 SettingsOriginalGroup()
@@ -38,6 +43,47 @@ struct SettingsView: View {
                 SettingsAboutGroup()
             }
         }
+        .onAppear(perform: takePendingTab)
+        .onChange(of: nav.pendingSettingsTab) { _, _ in takePendingTab() }
+    }
+
+    /// "Set up Claude…" and friends land on a specific tab.
+    private func takePendingTab() {
+        guard let name = nav.pendingSettingsTab else { return }
+        nav.pendingSettingsTab = nil
+        if let wanted = SettingsTab(rawValue: name) { tab = wanted }
+    }
+}
+
+// MARK: - General: who you are
+
+/// Which person on the hub uses this Mac. Their profile ("About me") goes into every chat, with
+/// every agent, so none of them start from zero.
+private struct SettingsYouGroup: View {
+    @EnvironmentObject private var store: ConfigStore
+    @State private var owners: [String] = []
+
+    var body: some View {
+        WLGroup(title: "You", subtitle: "Every chat starts with what Wolf Leader knows about you and the project, whichever AI you use.",
+                icon: "person.crop.circle") {
+            WLRow(title: "This Mac is used by", detail: "Your profile (Library > People) goes to every agent at the start of a chat.") {
+                Picker("Person", selection: Binding(
+                    get: { store.config.person ?? "" },
+                    set: { store.config.person = $0.isEmpty ? nil : $0; store.save() }
+                )) {
+                    Text("Nobody in particular").tag("")
+                    ForEach(owners, id: \.self) { Text($0).tag($0) }
+                    if let person = store.config.person, !owners.contains(person) { Text(person).tag(person) }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 220)
+            }
+            WLDivider()
+            WLRow(title: "This Mac's name", detail: "How your other devices refer to it (\"Working on …\").") {
+                Text(store.config.deviceName).foregroundStyle(.secondary)
+            }
+        }
+        .task { owners = (try? await store.hub.owners()) ?? [] }
     }
 }
 
@@ -430,7 +476,12 @@ private struct SettingsUpdatesGroup: View {
     }
 
     var body: some View {
-        WLGroup(title: "Updates", subtitle: "Keep the skills, rule and this app current.", icon: "arrow.triangle.2.circlepath") {
+        WLGroup(title: "Updates", subtitle: "Keep Wolf Leader current.", icon: "arrow.triangle.2.circlepath") {
+            if let done = updates.justUpdated {
+                Text(done)
+                    .font(DS.Font.caption.weight(.medium))
+                    .foregroundStyle(p.good)
+            }
             WLRow(title: statusTitle, detail: statusDetail) {
                 HStack(spacing: 8) {
                     if let pill = statusPill { WLStatusPill(text: pill.0, kind: pill.1) }
@@ -462,24 +513,25 @@ private struct SettingsUpdatesGroup: View {
                 .task { await updates.loadBranches() }
             }
             WLDivider()
-            WLRow(title: "Skills & rule", detail: "Downloads the latest Cursor and Claude Code files from GitHub and installs them. Makes an undo point first.") {
-                Button {
-                    Task { await updates.updateSkills() }
-                } label: {
-                    HStack(spacing: 6) {
-                        if working { ProgressView().controlSize(.small) }
-                        Text("Update skills & rule")
-                    }
-                }
-                .buttonStyle(OutlineButtonStyle())
-                .disabled(working || updates.repo == nil)
-            }
+            AppUpdateRow()
             WLDivider()
-            WLRow(title: "App", detail: "New versions of this app are published on GitHub.") {
-                Button("Get the new app") { MainLinks.open(updates.releasesURL) }
-                    .buttonStyle(updates.hasUpdate ? OutlineButtonStyle(tint: p.warn) : OutlineButtonStyle(tint: p.textMuted))
-                    .disabled(updates.releasesURL == nil)
+            DisclosureGroup("Connect my AI tools outside Wolf Leader") {
+                WLRow(title: "Cursor and Claude Code on their own",
+                      detail: "Not needed for chats in Wolf Leader. Installs the Wolf Leader rule, hooks and skills into those tools so their own chats save here too. Makes an undo point first.") {
+                    Button {
+                        Task { await updates.updateSkills() }
+                    } label: {
+                        HStack(spacing: 6) {
+                            if working { ProgressView().controlSize(.small) }
+                            Text("Connect / update")
+                        }
+                    }
+                    .buttonStyle(OutlineButtonStyle())
+                    .disabled(working || updates.repo == nil)
+                }
+                .padding(.top, 6)
             }
+            .font(DS.Font.bodySmall)
             if let note = updates.updateNote {
                 Text(note)
                     .font(DS.Font.caption.weight(.medium))
@@ -529,8 +581,84 @@ private struct SettingsUpdatesGroup: View {
     }
 }
 
+/// "Update app": downloads the new version, swaps it in and reopens. No trip to GitHub.
+struct AppUpdateRow: View {
+    @EnvironmentObject private var updates: UpdateChecker
+    @Environment(\.palette) private var p
+
+    private var title: String {
+        switch updates.appPhase {
+        case .downloading(let f): return f.map { "Downloading… \(Int($0 * 100))%" } ?? "Downloading…"
+        case .building: return "Building the new app on this Mac…"
+        case .installing: return "Installing…"
+        case .relaunching(let v): return "Reopening as \(v)…"
+        case .idle, .failed: break
+        }
+        switch updates.channel {
+        case .release:
+            if updates.appUpdateAvailable, let r = updates.latestRelease { return "Version \(r.version) is available" }
+            return "App \(BuildInfo.version) · latest release"
+        case .source:
+            if case .available(let n) = updates.status { return "\(n) new commit\(n == 1 ? "" : "s") on \(updates.branch)" }
+            return "App built from \(updates.branch)"
+        }
+    }
+
+    private var detail: String {
+        if case .failed(let why) = updates.appPhase { return why }
+        if case .building = updates.appPhase { return "This takes a few minutes the first time. The log is below." }
+        switch updates.channel {
+        case .release:
+            return "Downloads the new version from GitHub, swaps it in and reopens. Settings, chats and projects stay."
+        case .source:
+            return "Downloads \(updates.branch) from GitHub, builds it here, swaps it in and reopens. Settings, chats and projects stay."
+        }
+    }
+
+    private var buttonTitle: String {
+        switch updates.channel {
+        case .release:
+            if let r = updates.latestRelease, updates.appUpdateAvailable { return "Update to \(r.version)" }
+            return "Up to date"
+        case .source:
+            return updates.appUpdateAvailable ? "Update & reopen" : "Rebuild"
+        }
+    }
+
+    /// Release builds only install a newer release; source builds can always rebuild.
+    private var canStart: Bool {
+        guard !updates.busy, updates.repo != nil else { return false }
+        return updates.channel == .source || updates.appUpdateAvailable
+    }
+
+    var body: some View {
+        WLRow(title: title, detail: detail) {
+            HStack(spacing: 8) {
+                if case .downloading(let f?) = updates.appPhase {
+                    ProgressView(value: f).frame(width: 80)
+                } else if updates.appPhase.active {
+                    ProgressView().controlSize(.small)
+                }
+                if updates.channel == .release, let page = updates.latestRelease?.page {
+                    Button("Notes") { MainLinks.open(page) }
+                        .buttonStyle(OutlineButtonStyle(tint: p.textMuted))
+                }
+                if updates.appUpdateAvailable {
+                    Button(buttonTitle) { Task { await updates.updateApp() } }
+                        .buttonStyle(PrimaryButtonStyle())
+                        .disabled(!canStart)
+                } else {
+                    Button(buttonTitle) { Task { await updates.updateApp() } }
+                        .buttonStyle(OutlineButtonStyle(tint: p.textMuted))
+                        .disabled(!canStart)
+                }
+            }
+        }
+    }
+}
+
 /// Scrolling monospaced output that follows the newest line.
-private struct SettingsLogBox: View {
+struct SettingsLogBox: View {
     @Environment(\.palette) private var p
     let lines: [String]
 

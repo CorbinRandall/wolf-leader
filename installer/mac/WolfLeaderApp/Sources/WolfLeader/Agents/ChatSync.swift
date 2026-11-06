@@ -34,7 +34,9 @@ final class ChatSync: ObservableObject {
             activeObserver = NotificationCenter.default.addObserver(
                 forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
             ) { _ in
-                MainActor.assumeIsolated { Task { await ChatSync.shared.pull() } }
+                MainActor.assumeIsolated {
+                    _ = Task { () async -> Void in await ChatSync.shared.pull() }
+                }
             }
         }
         if changed { loop?.cancel(); loop = nil }

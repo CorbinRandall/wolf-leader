@@ -86,9 +86,30 @@ final class ChatStore: ObservableObject {
         try? FileManager.default.removeItem(at: Self.folder.appendingPathComponent("\(id).json"))
     }
 
+    /// A chat that was opened but never used: nothing sent, never named, and not just opened
+    /// (an older app on another device may still be waiting for its first message).
+    static func isEmpty(_ record: ChatRecord) -> Bool {
+        record.title == "New chat" && !record.items.contains { $0.kind == .user }
+            && Date().timeIntervalSince(record.updated) > 10 * 60
+    }
+
+    /// Drops chats that were opened but never used, here and on every device. Chats are only made
+    /// when the first message is sent now; this clears ones left by older versions and other devices.
+    func pruneEmpty() {
+        for record in records where Self.isEmpty(record) && sessions[record.id]?.busy != true {
+            remove(record.id)
+        }
+    }
+
     /// A newer copy of a chat from another device. Its folder is this device's own copy of the
     /// project (or its scratch folder), and an open chat shows the new turns right away.
     func adoptRemote(_ incoming: ChatRecord) {
+        if Self.isEmpty(incoming) {
+            // Never used on the device that made it: don't list it, and clear it from the hub.
+            if record(incoming.id) != nil { removeLocal(incoming.id) }
+            ChatSync.shared.pushDelete(incoming.id)
+            return
+        }
         var remote = incoming
         remote.cwd = remote.projectSlug.map { ProjectWorkspace.folder(slug: $0).path }
             ?? ProjectWorkspace.looseFolder(chatID: remote.id).path

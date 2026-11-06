@@ -33,14 +33,14 @@ enum MainSection: String, CaseIterable, Identifiable, Hashable {
 
 /// A row in the sidebar.
 enum SidebarItem: Hashable {
-    case newChat, allChats, chat(String), project(Int), projects, library
+    case newChat, allChats, chat(String), project(Int), projects, library(String)
     case section(MainSection)
 
     @MainActor init(_ route: Route) {
         switch route.section {
         case .chats: self = route.chatID.map { .chat($0) } ?? (route.chatList ? .allChats : .newChat)
         case .projects: self = route.projectID.map { .project($0) } ?? .projects
-        case .library: self = .library
+        case .library: self = .library(route.libraryTab)
         default: self = .section(route.section)
         }
     }
@@ -52,7 +52,7 @@ enum SidebarItem: Hashable {
         case .chat(let id): nav.open(chat: id)
         case .project(let id): nav.open(project: id)
         case .projects: nav.open(projectsTab: nav.route.projectsTab)
-        case .library: nav.open(libraryTab: nav.route.libraryTab)
+        case .library(let tab): nav.open(libraryTab: tab)
         case .section(let section): nav.open(section: section)
         }
     }
@@ -87,10 +87,10 @@ struct MainView: View {
                     Label("New chat", systemImage: "square.and.pencil").tag(SidebarItem.newChat)
                     Label(MainSection.ask.label, systemImage: MainSection.ask.symbol).tag(SidebarItem.section(.ask))
                 }
-                SidebarProjectsSection(showAll: $showAllProjects)
+                SidebarProjectsSection(showAll: $showAllProjects, removing: $removingChat)
                 SidebarChatsSection(removing: $removingChat)
+                SidebarLibrarySection()
                 Section {
-                    Label(MainSection.library.label, systemImage: MainSection.library.symbol).tag(SidebarItem.library)
                     Label(MainSection.shares.label, systemImage: MainSection.shares.symbol).tag(SidebarItem.section(.shares))
                     Label {
                         HStack(spacing: 6) {
@@ -154,6 +154,7 @@ struct MainView: View {
                 if let chat = removingChat {
                     if nav.route.chatID == chat.id { nav.newChat() }
                     ChatStore.shared.remove(chat.id)
+                    Drafts.shared.set(chat.id, "")
                 }
                 removingChat = nil
             }
@@ -213,24 +214,89 @@ struct MainView: View {
     }
 }
 
-/// Sidebar: open projects, most recently used first. Click one to open it; its + starts a chat in it.
+/// Which chats the sidebar lists: the ones still in progress. Nobody has to tidy up. A chat
+/// stays while it's working, waiting for you, open, has unsent text, or was used in the last
+/// day; after a quiet day it leaves the sidebar on its own (it's still in the project and in
+/// All chats).
+@MainActor
+enum SidebarChats {
+    static let quietAfter: TimeInterval = 24 * 60 * 60
+    static let perProject = 5
+
+    static func needsYou(_ chat: ChatRecord, _ chats: ChatStore) -> Bool {
+        chats.isRunning(chat.id) && chat.items.contains { $0.kind == .approval && $0.status == .pending }
+    }
+
+    static func inProgress(_ chat: ChatRecord, chats: ChatStore, openID: String?, drafts: Drafts) -> Bool {
+        chat.id == openID
+            || chats.isRunning(chat.id)
+            || chat.busyElsewhere(than: ChatSync.shared.device) != nil
+            || drafts.has(chat.id)
+            || Date().timeIntervalSince(chat.updated) < quietAfter
+    }
+
+    /// In progress, the ones that need you first, then the most recently used.
+    static func active(_ records: [ChatRecord], chats: ChatStore, openID: String?, drafts: Drafts) -> [ChatRecord] {
+        records.filter { inProgress($0, chats: chats, openID: openID, drafts: drafts) }
+            .sorted { a, b in
+                let ra = rank(a, chats), rb = rank(b, chats)
+                return ra != rb ? ra < rb : a.updated > b.updated
+            }
+    }
+
+    private static func rank(_ chat: ChatRecord, _ chats: ChatStore) -> Int {
+        needsYou(chat, chats) ? 0 : chats.isRunning(chat.id) ? 1 : 2
+    }
+}
+
+/// Sidebar: projects, most recently used first. A project with chats in progress opens like a
+/// folder to show them; click a project to open it, its + starts a chat in it.
 private struct SidebarProjectsSection: View {
     @EnvironmentObject private var nav: Navigator
     @Environment(\.palette) private var p
     @ObservedObject private var projects = RecentProjects.shared
     @ObservedObject private var chats = ChatStore.shared
+    @ObservedObject private var drafts = Drafts.shared
     @Binding var showAll: Bool
+    @Binding var removing: ChatRecord?
+    /// Projects whose chat list you folded away.
+    @AppStorage("wl.sidebar.folded") private var foldedRaw = ""
 
     var body: some View {
         let recent = projects.recent(chats: chats.records)
-        let shown = showAll ? Array(recent.prefix(25)) : Array(recent.prefix(6))
+        let active = SidebarChats.active(chats.records.filter { $0.projectID != nil }, chats: chats,
+                                         openID: nav.route.chatID, drafts: drafts)
+        let byProject = Dictionary(grouping: active, by: { $0.projectID! })
+        // Projects with chats in progress are always listed, then the most recent fill up to six.
+        let busy = recent.filter { byProject[$0.id] != nil }
+        let rest = recent.filter { byProject[$0.id] == nil }
+        let limit = showAll ? 25 : 6
+        let shown = busy + rest.prefix(max(0, limit - busy.count))
         Section {
             ForEach(shown) { project in
-                SidebarProjectRow(project: project,
-                                  working: chats.records.contains { $0.projectID == project.id && chats.isRunning($0.id) })
-                    .tag(SidebarItem.project(project.id))
+                let list = byProject[project.id] ?? []
+                if list.isEmpty {
+                    row(project, chats: list)
+                } else {
+                    DisclosureGroup(isExpanded: expanded(project.id)) {
+                        ForEach(list.prefix(SidebarChats.perProject)) { chat in
+                            SidebarChatRow(chat: chat, working: chats.isRunning(chat.id),
+                                           needsYou: SidebarChats.needsYou(chat, chats),
+                                           hasDraft: drafts.has(chat.id), showProject: false)
+                                .tag(SidebarItem.chat(chat.id))
+                                .contextMenu { SidebarChatMenu(chat: chat, removing: $removing) }
+                        }
+                        if list.count > SidebarChats.perProject {
+                            Button("\(list.count - SidebarChats.perProject) more in \(project.name)…") { nav.open(project: project.id) }
+                                .buttonStyle(.plain).font(DS.Font.caption).foregroundStyle(p.textMuted)
+                                .selectionDisabled()
+                        }
+                    } label: {
+                        row(project, chats: list)
+                    }
+                }
             }
-            if recent.count > 6 {
+            if recent.count > shown.count || showAll {
                 Button(showAll ? "Show fewer" : "Show more") { showAll.toggle() }
                     .buttonStyle(.plain).font(DS.Font.caption).foregroundStyle(p.textMuted)
                     .selectionDisabled()
@@ -246,6 +312,22 @@ private struct SidebarProjectsSection: View {
             }
         }
     }
+
+    private func row(_ project: HubProject, chats list: [ChatRecord]) -> some View {
+        SidebarProjectRow(project: project, working: list.contains { chats.isRunning($0.id) },
+                          needsYou: list.contains { SidebarChats.needsYou($0, chats) })
+            .tag(SidebarItem.project(project.id))
+    }
+
+    private var folded: Set<Int> { Set(foldedRaw.split(separator: ",").compactMap { Int($0) }) }
+
+    private func expanded(_ id: Int) -> Binding<Bool> {
+        Binding(get: { !folded.contains(id) }, set: { open in
+            var set = folded
+            if open { set.remove(id) } else { set.insert(id) }
+            foldedRaw = set.sorted().map(String.init).joined(separator: ",")
+        })
+    }
 }
 
 private struct SidebarProjectRow: View {
@@ -253,13 +335,18 @@ private struct SidebarProjectRow: View {
     @Environment(\.palette) private var p
     let project: HubProject
     let working: Bool
+    var needsYou = false
     @State private var hovering = false
 
     var body: some View {
         HStack(spacing: 6) {
             Label(project.name, systemImage: "folder").lineLimit(1)
             Spacer(minLength: 0)
-            if working { ProgressView().controlSize(.mini) }
+            if needsYou {
+                Circle().fill(p.accent2).frame(width: 7, height: 7).help("A chat is waiting for your OK")
+            } else if working {
+                ProgressView().controlSize(.mini)
+            }
             if hovering {
                 Button { nav.newChat(project: ProjectRef(project)) } label: {
                     Image(systemName: "plus.bubble").font(.system(size: 11, weight: .semibold))
@@ -277,37 +364,37 @@ private struct SidebarProjectRow: View {
     }
 }
 
-/// Sidebar: recent chats from every project. A chat that's working shows a spinner, one that
-/// needs your OK shows a dot, and both stay listed however old they are.
-private struct SidebarChatsSection: View {
+private struct SidebarChatMenu: View {
     @EnvironmentObject private var nav: Navigator
-    @Environment(\.palette) private var p
-    @ObservedObject private var chats = ChatStore.shared
+    let chat: ChatRecord
     @Binding var removing: ChatRecord?
 
     var body: some View {
-        let running = chats.records.filter { chats.isRunning($0.id) || needsYou($0) }
-        let recent = running + chats.records.filter { r in !running.contains { $0.id == r.id } }.prefix(max(0, 15 - running.count))
-        Section("Chats") {
-            if recent.isEmpty {
-                Text("No chats yet").font(DS.Font.caption).foregroundStyle(p.textFaint).selectionDisabled()
-            }
-            ForEach(recent) { chat in
-                SidebarChatRow(chat: chat, working: chats.isRunning(chat.id), needsYou: needsYou(chat))
-                    .tag(SidebarItem.chat(chat.id))
-                    .contextMenu {
-                        if let id = chat.projectID { Button("Open \(chat.projectName ?? "project")") { nav.open(project: id) } }
-                        Button("Remove from Chats…", role: .destructive) { removing = chat }
-                    }
-            }
-            if chats.records.count > recent.count {
-                Label("All chats", systemImage: "list.bullet").tag(SidebarItem.allChats)
-            }
-        }
+        if let id = chat.projectID { Button("Open \(chat.projectName ?? "project")") { nav.open(project: id) } }
+        Button("Remove from Chats…", role: .destructive) { removing = chat }
     }
+}
 
-    private func needsYou(_ chat: ChatRecord) -> Bool {
-        chats.isRunning(chat.id) && chat.items.contains { $0.kind == .approval && $0.status == .pending }
+/// Sidebar: chats in progress that aren't in a project yet (the rest sit under their project),
+/// and the way to every chat.
+private struct SidebarChatsSection: View {
+    @EnvironmentObject private var nav: Navigator
+    @ObservedObject private var chats = ChatStore.shared
+    @ObservedObject private var drafts = Drafts.shared
+    @Binding var removing: ChatRecord?
+
+    var body: some View {
+        let loose = SidebarChats.active(chats.records.filter { $0.projectID == nil }, chats: chats,
+                                        openID: nav.route.chatID, drafts: drafts)
+        Section("Chats") {
+            ForEach(loose.prefix(8)) { chat in
+                SidebarChatRow(chat: chat, working: chats.isRunning(chat.id),
+                               needsYou: SidebarChats.needsYou(chat, chats), hasDraft: drafts.has(chat.id))
+                    .tag(SidebarItem.chat(chat.id))
+                    .contextMenu { SidebarChatMenu(chat: chat, removing: $removing) }
+            }
+            Label("All chats", systemImage: "list.bullet").tag(SidebarItem.allChats)
+        }
     }
 }
 
@@ -316,12 +403,14 @@ private struct SidebarChatRow: View {
     let chat: ChatRecord
     let working: Bool
     let needsYou: Bool
+    var hasDraft = false
+    var showProject = true
 
     var body: some View {
         HStack(spacing: 6) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(chat.title).lineLimit(1)
-                if let project = chat.projectName {
+                if showProject, let project = chat.projectName {
                     Text(project).font(DS.Font.micro).foregroundStyle(p.textFaint).lineLimit(1)
                 }
             }
@@ -333,9 +422,36 @@ private struct SidebarChatRow: View {
             } else if chat.busyElsewhere(than: ChatSync.shared.device) != nil {
                 Image(systemName: "desktopcomputer").font(.system(size: 10)).foregroundStyle(p.textFaint)
                     .help("Working on another device")
+            } else if hasDraft {
+                Image(systemName: "pencil").font(.system(size: 10)).foregroundStyle(p.textFaint)
+                    .help("Unsent message")
             }
         }
         .help([chat.title, chat.projectName, chat.agent?.name].compactMap { $0 }.joined(separator: " · "))
+    }
+}
+
+/// Sidebar: Library folds open to every view inside it (Skills, People, ...).
+private struct SidebarLibrarySection: View {
+    @AppStorage("wl.sidebar.libraryOpen") private var open = true
+
+    var body: some View {
+        Section {
+            DisclosureGroup(isExpanded: $open) {
+                Label("Skills", systemImage: "shippingbox").tag(SidebarItem.library("skills"))
+                Label("People", systemImage: "person.2").tag(SidebarItem.library("people"))
+                Label("Bring in", systemImage: "tray.and.arrow.down").tag(SidebarItem.library("bringin"))
+                Label("AI tools", systemImage: "person.2.wave.2").tag(SidebarItem.library("tools"))
+                Label("Backups", systemImage: "externaldrive.badge.checkmark").tag(SidebarItem.library("repos"))
+                Label("Cleanup", systemImage: "arrow.triangle.merge").tag(SidebarItem.library("cleanup"))
+                Label("Snippets", systemImage: "chevron.left.forwardslash.chevron.right").tag(SidebarItem.library("snippets"))
+            } label: {
+                Label(MainSection.library.label, systemImage: MainSection.library.symbol)
+                    .contentShape(Rectangle())
+                    .onTapGesture { open.toggle() }
+                    .selectionDisabled()
+            }
+        }
     }
 }
 

@@ -96,11 +96,13 @@ struct ChatHome: View {
         }
         .background(p.background)
         .onAppear {
+            if draft.isEmpty { draft = Drafts.shared.text(Drafts.newChat) }
             takePending()
             focus = .message
             agents.rescanNow()
         }
         .onChange(of: nav.pendingNewChat) { _, _ in takePending() }
+        .onChange(of: draft) { _, text in Drafts.shared.set(Drafts.newChat, text) }
         .task { await agents.refresh() }
         .task(id: store.config.hubURL) { await projects.load(store.hub) }
         .sheet(isPresented: $picking) {

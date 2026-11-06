@@ -30,7 +30,11 @@ struct ChatView: View {
             composer
         }
         .background(p.background)
-        .onAppear { composing = true }
+        .onAppear {
+            if draft.isEmpty { draft = Drafts.shared.text(record.id) }
+            composing = true
+        }
+        .onChange(of: draft) { _, text in Drafts.shared.set(record.id, text) }
         .sheet(isPresented: $choosingProject) {
             ProjectPickerSheet(current: record.projectID) { session.attach(to: $0, config: store) }
                 .environment(\.palette, p)

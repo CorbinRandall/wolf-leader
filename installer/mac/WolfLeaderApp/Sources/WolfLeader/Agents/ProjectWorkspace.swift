@@ -96,11 +96,36 @@ enum ProjectWorkspace {
         // The hub sees the share as /srv/wolf inside its container; on the server it may be /srv/content.
         var candidates = [hubPath]
         if hubPath.hasPrefix("/srv/wolf/") { candidates.append("/srv/content/" + hubPath.dropFirst("/srv/wolf/".count)) }
-        for path in candidates {
-            let remote = "\(sshHost):\(path)"
-            if await git(["ls-remote", "--quiet", remote], in: root.path).code == 0 { return remote }
+        // The server's SSH name: the one that worked last time, then `wolf`, then every host in
+        // ~/.ssh/config (e.g. `bbq`). Probes fail fast instead of waiting on a password prompt.
+        var hosts: [String] = []
+        for host in [UserDefaults.standard.string(forKey: "wl.serverSSHHost"), "wolf"].compactMap({ $0 }) + sshConfigHosts()
+        where !hosts.contains(host) { hosts.append(host) }
+        for host in hosts {
+            for path in candidates {
+                let remote = "\(host):\(path)"
+                if await git(["ls-remote", "--quiet", remote], in: root.path).code == 0 {
+                    UserDefaults.standard.set(host, forKey: "wl.serverSSHHost")
+                    return remote
+                }
+            }
         }
         return nil
+    }
+
+    /// Named hosts in ~/.ssh/config (no wildcards).
+    static func sshConfigHosts() -> [String] {
+        let file = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ssh/config")
+        guard let text = try? String(contentsOf: file, encoding: .utf8) else { return [] }
+        var out: [String] = []
+        for line in text.components(separatedBy: .newlines) {
+            let parts = line.trimmingCharacters(in: .whitespaces).split(whereSeparator: { $0 == " " || $0 == "\t" })
+            guard parts.count > 1, parts[0].lowercased() == "host" else { continue }
+            for name in parts.dropFirst().map(String.init) where !name.contains("*") && !name.contains("?") && !out.contains(name) {
+                out.append(name)
+            }
+        }
+        return out
     }
 
     @discardableResult

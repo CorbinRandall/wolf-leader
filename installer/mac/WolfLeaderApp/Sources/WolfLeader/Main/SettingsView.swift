@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 private enum SettingsTab: String, Hashable {
-    case general, rules, agents, hub, updates, about
+    case general, rules, hub, updates, about
 }
 
 struct SettingsView: View {
@@ -14,7 +14,6 @@ struct SettingsView: View {
         [
             WLTab(id: .general, title: "General", icon: "slider.horizontal.3"),
             WLTab(id: .rules, title: "Rules", icon: "checklist"),
-            WLTab(id: .agents, title: "Agents", icon: "person.2.wave.2"),
             WLTab(id: .hub, title: "Hub", icon: "server.rack"),
             WLTab(id: .updates, title: "Updates", icon: "arrow.triangle.2.circlepath", attention: updates.needsAttention),
             WLTab(id: .about, title: "About", icon: "info.circle"),
@@ -35,8 +34,6 @@ struct SettingsView: View {
                 SettingsSetupGroup()
             case .rules:
                 ChatRulesSettings()
-            case .agents:
-                AgentsSettingsGroup()
             case .hub:
                 SettingsHubGroup()
                 SettingsOriginalGroup()
@@ -479,7 +476,7 @@ private struct SettingsUpdatesGroup: View {
     }
 
     var body: some View {
-        WLGroup(title: "Updates", subtitle: "Keep the skills, rule and this app current.", icon: "arrow.triangle.2.circlepath") {
+        WLGroup(title: "Updates", subtitle: "Keep Wolf Leader current.", icon: "arrow.triangle.2.circlepath") {
             if let done = updates.justUpdated {
                 Text(done)
                     .font(DS.Font.caption.weight(.medium))
@@ -516,20 +513,25 @@ private struct SettingsUpdatesGroup: View {
                 .task { await updates.loadBranches() }
             }
             WLDivider()
-            WLRow(title: "Skills & rule", detail: "Downloads the latest Cursor and Claude Code files from GitHub and installs them. Makes an undo point first.") {
-                Button {
-                    Task { await updates.updateSkills() }
-                } label: {
-                    HStack(spacing: 6) {
-                        if working { ProgressView().controlSize(.small) }
-                        Text("Update skills & rule")
-                    }
-                }
-                .buttonStyle(OutlineButtonStyle())
-                .disabled(working || updates.repo == nil)
-            }
-            WLDivider()
             AppUpdateRow()
+            WLDivider()
+            DisclosureGroup("Connect my AI tools outside Wolf Leader") {
+                WLRow(title: "Cursor and Claude Code on their own",
+                      detail: "Not needed for chats in Wolf Leader. Installs the Wolf Leader rule, hooks and skills into those tools so their own chats save here too. Makes an undo point first.") {
+                    Button {
+                        Task { await updates.updateSkills() }
+                    } label: {
+                        HStack(spacing: 6) {
+                            if working { ProgressView().controlSize(.small) }
+                            Text("Connect / update")
+                        }
+                    }
+                    .buttonStyle(OutlineButtonStyle())
+                    .disabled(working || updates.repo == nil)
+                }
+                .padding(.top, 6)
+            }
+            .font(DS.Font.bodySmall)
             if let note = updates.updateNote {
                 Text(note)
                     .font(DS.Font.caption.weight(.medium))

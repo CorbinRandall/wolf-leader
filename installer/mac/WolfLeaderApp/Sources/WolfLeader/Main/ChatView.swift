@@ -12,6 +12,7 @@ struct ChatView: View {
     let back: () -> Void
     @State private var draft = ""
     @State private var choosingProject = false
+    @State private var snippets: [HubSnippet] = []
     @FocusState private var composing: Bool
 
     private var record: ChatRecord { session.record }
@@ -149,7 +150,7 @@ struct ChatView: View {
                 .font(DS.Font.bodySmall).foregroundStyle(p.textMuted)
             if !installed, let agent {
                 WLStatusPill(text: "\(agent.name) isn't set up on this Mac yet", kind: .warn)
-                Button("Set up \(agent.name)…") { nav.open(settingsTab: "agents") }
+                Button("Set up \(agent.name)…") { nav.open(libraryTab: "tools") }
                     .buttonStyle(PrimaryButtonStyle())
             }
         }
@@ -185,7 +186,7 @@ struct ChatView: View {
             ForEach(ready.prefix(4)) { other in
                 Button(other.name) { session.switchAgent(to: other) }.buttonStyle(OutlineButtonStyle())
             }
-            Button("Set up \(agent.name)…") { nav.open(settingsTab: "agents") }.buttonStyle(SecondaryButtonStyle())
+            Button("Set up \(agent.name)…") { nav.open(libraryTab: "tools") }.buttonStyle(SecondaryButtonStyle())
             Spacer(minLength: 0)
         }
         .padding(.horizontal, DS.Spacing.lg).padding(.vertical, 10)
@@ -197,7 +198,7 @@ struct ChatView: View {
         let others = AgentRegistry.shared.all.filter { $0.id != record.agentID && AgentRegistry.shared.found[$0.id] != nil }
         return Menu {
             if others.isEmpty {
-                Button("Set up more agents…") { nav.open(settingsTab: "agents") }
+                Button("Set up more agents…") { nav.open(libraryTab: "tools") }
             } else {
                 Section("Continue this chat with") {
                     ForEach(others) { other in
@@ -239,8 +240,42 @@ struct ChatView: View {
 
     // MARK: Composer
 
+    /// Saved snippets (Library > Snippets), this project's first, dropped into the message.
+    private var snippetMenu: some View {
+        let mine = snippets.filter { $0.projectID != nil && $0.projectID == record.projectID }
+        let others = snippets.filter { !($0.projectID != nil && $0.projectID == record.projectID) }
+        return Menu {
+            if snippets.isEmpty {
+                Text("No snippets yet")
+                Button("Add snippets in Library…") { nav.open(libraryTab: "snippets") }
+            }
+            if !mine.isEmpty {
+                Section(record.projectName ?? "This project") {
+                    ForEach(mine) { s in Button(s.title) { insert(s.content) } }
+                }
+            }
+            if !others.isEmpty {
+                Section("Snippets") {
+                    ForEach(others.prefix(30)) { s in Button(s.title) { insert(s.content) } }
+                }
+            }
+        } label: {
+            Image(systemName: "text.insert")
+        }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .help("Insert a saved snippet")
+        .disabled(session.busy || busyElsewhere != nil)
+        .task(id: store.config.hubURL) { snippets = (try? await store.hub.snippets()) ?? [] }
+    }
+
+    private func insert(_ text: String) {
+        draft = draft.isEmpty ? text : draft + (draft.hasSuffix("\n") ? "" : "\n") + text
+        composing = true
+    }
+
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 10) {
+            snippetMenu
             TextField("Message \(agent?.name ?? "the agent")…", text: $draft, axis: .vertical)
                 .lineLimit(1...10)
                 .focused($composing)

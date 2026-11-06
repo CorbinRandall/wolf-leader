@@ -4,10 +4,10 @@ import SwiftUI
 struct ChatRulesSettings: View {
     @Environment(\.palette) private var p
     @EnvironmentObject private var store: ConfigStore
+    @EnvironmentObject private var nav: Navigator
     @ObservedObject private var rules = ChatRules.shared
     @State private var draft = ""
     @State private var editing = false
-    @State private var descriptions: [String: String] = [:]
 
     var body: some View {
         WLGroup(title: "Permissions", subtitle: "Applies to every chat, with every agent, on every device.", icon: "bolt.shield") {
@@ -57,31 +57,10 @@ struct ChatRulesSettings: View {
             }
         }
 
-        WLGroup(title: "Skills in every chat",
-                subtitle: "Skills from your Library that every chat starts with, whichever agent runs it.",
-                icon: "shippingbox") {
-            if rules.library.isEmpty {
-                Text("No skills in your Library yet.").font(DS.Font.caption).foregroundStyle(p.textMuted)
-            }
-            ForEach(Array(rules.library.enumerated()), id: \.element) { index, name in
-                if index > 0 { WLDivider() }
-                WLRow(title: name, detail: descriptions[name]) {
-                    Toggle(name, isOn: Binding(
-                        get: { rules.value.skills.contains(name) },
-                        set: { on in
-                            rules.update { value in
-                                value.skills.removeAll { $0 == name }
-                                if on { value.skills.append(name) }
-                            }
-                        }
-                    ))
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                }
-            }
-            if ["wolfhowl", "wolfeat"].contains(where: rules.library.contains) {
-                Text("wolfhowl and wolfeat aren't needed here: Wolf Leader chats save themselves and start with the project's context.")
-                    .font(DS.Font.caption).foregroundStyle(p.textMuted)
+        WLGroup(title: "Skills in every chat", icon: "shippingbox") {
+            WLRow(title: rules.value.skills.isEmpty ? "None yet" : rules.value.skills.joined(separator: ", "),
+                  detail: "Choose them in Library > Skills, where your skills live.") {
+                Button("Open Skills") { nav.open(libraryTab: "skills") }.buttonStyle(OutlineButtonStyle())
             }
         }
 
@@ -94,18 +73,7 @@ struct ChatRulesSettings: View {
                 draft = rules.value.rules
                 await rules.refresh()
                 if !editing { draft = rules.value.rules }
-                await loadDescriptions()
             }
     }
 
-    private func loadDescriptions() async {
-        guard let data = try? await store.hub.data("/api/skills"),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let skills = json["skills"] as? [[String: Any]] else { return }
-        var out: [String: String] = [:]
-        for skill in skills {
-            if let name = skill["name"] as? String { out[name] = AgentText.oneLine(skill["description"] as? String ?? "", limit: 180) }
-        }
-        descriptions = out
-    }
 }

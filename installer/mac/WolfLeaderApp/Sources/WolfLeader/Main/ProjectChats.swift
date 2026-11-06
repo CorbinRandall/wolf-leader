@@ -62,14 +62,14 @@ struct NewChatMenu: View {
             if !missing.isEmpty {
                 Section("Set up first") {
                     ForEach(missing) { agent in
-                        Button { nav.open(settingsTab: "agents") } label: {
+                        Button { nav.open(libraryTab: "tools") } label: {
                             Label("Set up \(agent.name)…", systemImage: agent.symbol)
                         }
                     }
                 }
             }
             Divider()
-            Button { nav.open(settingsTab: "agents") } label: { Label("Manage agents…", systemImage: "gearshape") }
+            Button { nav.open(libraryTab: "tools") } label: { Label("Manage agents…", systemImage: "gearshape") }
         } label: {
             Label("New chat", systemImage: "plus.bubble")
         }
@@ -212,7 +212,7 @@ private struct OtherToolChatsGroup: View {
                             Label("\(agent.name) · \(agent.company)", systemImage: agent.symbol)
                         }
                     }
-                    if ready.isEmpty { Button("Set up agents…") { nav.open(settingsTab: "agents") } }
+                    if ready.isEmpty { Button("Set up agents…") { nav.open(libraryTab: "tools") } }
                 } label: {
                     Text("Continue with…")
                 }

@@ -194,11 +194,11 @@ struct SetupTogglesStep: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            SetupHeader(title: "What to install", subtitle: "Everything is on by default. Turn off anything you don't want.")
+            SetupHeader(title: "What to install", subtitle: "Chats in Wolf Leader need none of this. Turn on what you want.")
             SetupToggleCard(
-                title: "Agent skills and rule",
-                detail: "Teaches your AI tools to use Wolf Leader without being asked.",
-                example: "Cursor and Claude Code start saving memories on their own",
+                title: "Also connect my AI tools outside Wolf Leader",
+                detail: "Only if you also use Cursor or Claude Code on their own: their chats then save to Wolf Leader too.",
+                example: "Installs the Wolf Leader rule, hooks and skills into those tools",
                 isOn: $model.toggles.client
             )
             SetupToggleCard(
@@ -507,7 +507,7 @@ struct SetupReviewStep: View {
     private var installsText: String {
         var items: [String] = []
         let t = model.toggles
-        if t.client { items.append("Agent skills and rule") }
+        if t.client { items.append("Connect Cursor and Claude Code outside Wolf Leader") }
         if t.shares { items.append("Network shares") }
         if t.prereqs { items.append("Git and Python (if missing)") }
         if t.obsidian { items.append("Obsidian") }

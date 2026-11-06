@@ -118,6 +118,13 @@ final class UpdateChecker: ObservableObject {
     private var buildJob: (work: URL, root: URL)?
 
     private static let refreshSkillsKey = "wl.refreshSkillsAfterAppUpdate"
+
+    /// Cursor or Claude Code were connected for use outside Wolf Leader (rule or skills installed).
+    nonisolated static var outsideToolsConnected: Bool {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return ["/.cursor/rules/wolf-leader-hub.mdc", "/.claude/skills/wolfhowl", "/.cursor/skills/wolfhowl"]
+            .contains { FileManager.default.fileExists(atPath: home + $0) }
+    }
     private static let updatedFromKey = "wl.appUpdatedFrom"
     private static let lastLaunchKey = "wl.lastLaunchedBuild"
 
@@ -583,8 +590,9 @@ final class UpdateChecker: ObservableObject {
         let version = try await AppSwap.validate(app)
         let defaults = UserDefaults.standard
         defaults.set(BuildInfo.version, forKey: Self.updatedFromKey)
-        // Dev builds point at the dev hub; their skills must not repoint Cursor / Claude Code there.
-        if !BuildInfo.isDev, store?.config.setupComplete == true {
+        // Chats in Wolf Leader need nothing installed in the AI tools. Only when you've connected
+        // them for use on their own, keep that connection current. Dev builds never touch them.
+        if !BuildInfo.isDev, store?.config.setupComplete == true, Self.outsideToolsConnected {
             defaults.set(true, forKey: Self.refreshSkillsKey)
         }
         try AppSwap.installAndRelaunch(app)

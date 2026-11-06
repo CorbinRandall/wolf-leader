@@ -636,13 +636,15 @@ struct KanbanColumnEditor: View {
 
 // MARK: - Build prompt
 
-/// Choose goals, add a note, and get a frozen brief to paste into Codex or Claude.
+/// Choose goals, add a note, and start a chat in the project with a scoped brief (or copy it for a tool outside Wolf Leader).
 struct BuildPromptSheet: View {
     @EnvironmentObject private var store: ConfigStore
     @Environment(\.palette) private var p
     @Environment(\.dismiss) private var dismiss
     let entry: ProjectEntry
     let onDone: () async -> Void
+    @EnvironmentObject private var nav: Navigator
+    @ObservedObject private var agents = AgentRegistry.shared
     @State private var chosen: Set<Int> = []
     @State private var note = ""
     @State private var prompt: HubBuildPrompt?
@@ -651,10 +653,10 @@ struct BuildPromptSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            WLEyebrow("Build prompt")
+            WLEyebrow("Start a build")
             Text(entry.name).font(DS.Font.page).foregroundStyle(p.text)
             if let prompt {
-                Text("Saved as written. Paste it into Codex or Claude in the project's folder.")
+                Text("Ready. Start building and the AI you pick gets this in a new chat in the project, along with everything Wolf Leader knows about it.")
                     .font(DS.Font.bodySmall).foregroundStyle(p.textMuted)
                 ScrollView {
                     Text(prompt.body).font(.system(size: 12, design: .monospaced)).foregroundStyle(p.text)
@@ -666,11 +668,24 @@ struct BuildPromptSheet: View {
                     if copied { WLStatusPill(text: "Copied", kind: .good) }
                     Spacer()
                     Button("Done") { dismiss() }.buttonStyle(OutlineButtonStyle())
-                    Button("Copy prompt") {
+                    Button("Copy") {
                         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(prompt.body, forType: .string)
                         copied = true
                     }
-                    .buttonStyle(PrimaryButtonStyle())
+                    .buttonStyle(OutlineButtonStyle())
+                    .help("For an AI tool outside Wolf Leader")
+                    let ready = agents.all.filter { agents.found[$0.id] != nil }
+                    Menu {
+                        ForEach(ready) { agent in
+                            Button { startBuild(prompt.body, with: agent) } label: {
+                                Label("\(agent.name) · \(agent.company)", systemImage: agent.symbol)
+                            }
+                        }
+                        if ready.isEmpty { Button("Set up an AI…") { dismiss(); nav.open(libraryTab: "tools") } }
+                    } label: {
+                        Text("Start building with…")
+                    }
+                    .menuStyle(.button).fixedSize()
                 }
             } else {
                 Text("Choose what to build. The prompt includes only these goals, plus the constraints and decisions that bear on them.")
@@ -712,6 +727,14 @@ struct BuildPromptSheet: View {
             // Start with what is up now, so the default prompt is narrow.
             chosen = Set(entry.openGoals.filter { $0.phase == "now" }.map(\.id))
         }
+    }
+
+    /// A new chat in the project with the chosen AI, the build prompt as its first message.
+    private func startBuild(_ body: String, with agent: AgentKind) {
+        let chat = ChatStore.shared.create(project: ProjectRef(entry.project), agent: agent)
+        ChatStore.shared.session(chat.id)?.send(body, config: store)
+        dismiss()
+        nav.open(chat: chat.id, project: entry.id)
     }
 
     private func prepare() {

@@ -134,15 +134,17 @@ struct ProjectPage: View {
                     Text(entry.name).font(DS.Font.page).foregroundStyle(p.text)
                 }
                 Spacer(minLength: DS.Spacing.md)
-                Button("Prepare build prompt") { prompt(entry) }
+                Button("Start a build…") { prompt(entry) }
                     .buttonStyle(PrimaryButtonStyle()).disabled(entry.openGoals.isEmpty)
-                    .help(entry.openGoals.isEmpty ? "Add a goal first" : "Make a scoped brief for Codex or Claude")
+                    .help(entry.openGoals.isEmpty ? "Add a goal first" : "Pick goals; Wolf Leader starts a chat in this project with a scoped brief, with any AI")
                 Menu {
-                    Button("Copy agent start prompt") { copy(brief?.agentPrompt ?? "", "Start prompt copied.") }
-                        .disabled((brief?.agentPrompt ?? "").isEmpty)
-                    Button("Copy full brief") { copy(brief?.briefMarkdown ?? "", "Brief copied.") }
-                        .disabled((brief?.briefMarkdown ?? "").isEmpty)
                     Button("Refresh brief") { refreshBrief() }
+                    Menu("Copy for an AI tool outside Wolf Leader") {
+                        Button("Start prompt") { copy(brief?.agentPrompt ?? "", "Start prompt copied.") }
+                            .disabled((brief?.agentPrompt ?? "").isEmpty)
+                        Button("Full brief") { copy(brief?.briefMarkdown ?? "", "Brief copied.") }
+                            .disabled((brief?.briefMarkdown ?? "").isEmpty)
+                    }
                     Divider()
                     Button("Edit name, description and topics…") { editing = true }
                     Divider()

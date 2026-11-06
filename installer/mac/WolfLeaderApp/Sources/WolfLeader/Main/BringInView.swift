@@ -504,14 +504,33 @@ struct MyToolsView: View {
     @State private var error: String?
 
     var body: some View {
-        WLPageHeader(title: "My tools", subtitle: "Every AI tool on this Mac gets the same profile and skills.") {
+        WLPageHeader(title: "AI tools",
+                     subtitle: "The AIs you chat with. Wolf Leader gives each one your profile, the project's context, your rules and your skills at the start of every chat, so there's nothing to set up inside them.")
+        AgentsSettingsGroup()
+        WLGroup(title: "Using these tools outside Wolf Leader", icon: "arrow.up.forward.app") {
+            DisclosureGroup("For when you open Claude Code, Codex or Cursor on their own") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Not needed for chats in Wolf Leader. Connecting a tool makes its own chats save to Wolf Leader, and gives it your profile.")
+                        .font(DS.Font.micro).foregroundStyle(p.textMuted)
+                    outsideTools
+                }
+                .padding(.top, 8)
+            }
+            .font(DS.Font.bodySmall)
+        }
+        Color.clear.frame(height: 0).task(id: store.config.hubURL) { await load() }
+    }
+
+    @ViewBuilder
+    private var outsideTools: some View {
+        HStack {
             Button("Check again") { Task { await load() } }.buttonStyle(SecondaryButtonStyle()).disabled(loading)
+            if loading { ProgressView().controlSize(.small) }
         }
         if let notice { WLStatusPill(text: notice, kind: .good) }
         if let error { WLStatusPill(text: error, kind: .bad) }
-        if loading && tools.isEmpty { ProgressView("Checking your tools…") }
         if !tools.isEmpty {
-            WLGroup(title: "On this Mac", subtitle: "Connected tools save their chats to Wolf Leader.", icon: "laptopcomputer") {
+            WLGroup(title: "On this Mac", subtitle: "Connected tools save their own chats to Wolf Leader.", icon: "laptopcomputer") {
                 ForEach(tools) { tool in
                     if tool.id != tools.first?.id { WLDivider() }
                     HStack {
@@ -527,14 +546,11 @@ struct MyToolsView: View {
                     }
                 }
                 if tools.contains(where: { $0.installed && !$0.connected }) {
-                    Text("To connect a tool, use Settings → Update, which sets up every tool it finds.")
+                    Text("To connect a tool, use Settings > Updates > Connect my AI tools outside Wolf Leader.")
                         .font(DS.Font.micro).foregroundStyle(p.textMuted)
                 }
             }
-            WLGroup(title: "Skills", subtitle: "Your skills live in one master set. Push it from My skills.", icon: "shippingbox") {
-                Button("Open My skills") { nav.open(libraryTab: "skills") }.buttonStyle(OutlineButtonStyle())
-            }
-            WLGroup(title: "Profile", subtitle: "Each tool reads it at the start of every chat.", icon: "person.text.rectangle") {
+            WLGroup(title: "Profile in those tools", subtitle: "Chats in Wolf Leader already get it. This copies it into each tool's own notes file.", icon: "person.text.rectangle") {
                 HStack {
                     Text("Whose profile").font(DS.Font.bodySmall)
                     Picker("", selection: $person) {
@@ -549,12 +565,11 @@ struct MyToolsView: View {
             HStack {
                 Spacer()
                 if sending { ProgressView().controlSize(.small) }
-                Button("Send profile to all my tools") { Task { await send() } }
-                    .buttonStyle(PrimaryButtonStyle())
+                Button("Copy my profile into those tools") { Task { await send() } }
+                    .buttonStyle(OutlineButtonStyle())
                     .disabled(sending || person.isEmpty)
             }
         }
-        Color.clear.frame(height: 0).task(id: store.config.hubURL) { await load() }
     }
 
     private var installed: [String] { tools.filter(\.installed).map(\.id) }

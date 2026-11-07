@@ -9,6 +9,7 @@
 ; Silent install: WolfLeaderSetup.exe /VERYSILENT /SUPPRESSMSGBOXES /CURRENTUSER
 ;   [/WLCHOICES=client,shares,prereqs,obsidian,wiki] [/WLGITNAME=Name /WLGITEMAIL=me@example.com]
 ;   [/WLINI=<answer file>]   (needed only when connecting to a hub; "Just this PC" answers itself)
+;   [/WLMODE=new|connect|update]   (default: connect when /WLINI is given, otherwise the wizard's default)
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -666,6 +667,22 @@ begin
   end;
 end;
 
+{ /WLMODE=new|connect|update picks the mode for a silent install. An answer file (/WLINI) is only
+  read when connecting, so passing one without /WLMODE means connect; otherwise a PC with the
+  built-in hub would silently become "Just this PC" and ignore the answer file. }
+procedure ApplyModeParam;
+var
+  M: String;
+begin
+  M := LowerCase(Trim(ExpandConstant('{param:WLMODE|}')));
+  if (M = '') and (ExpandConstant('{param:WLINI|}') <> '') then M := 'connect';
+  if M = 'connect' then RadioConnect.Checked := True
+  else if M = 'new' then RadioNew.Checked := True
+  else if M = 'update' then RadioUpdate.Checked := True
+  else if M <> '' then Log('Ignoring /WLMODE=' + M + ': use new, connect or update.');
+  if M <> '' then Log('Mode from the command line: ' + GetMode);
+end;
+
 procedure CreateChoicesPage;
 var
   i: Integer;
@@ -803,6 +820,7 @@ begin
   LoadPromptTemplate;
   CreateWhatsNewPage;
   CreateModePage;
+  ApplyModeParam;
   CreateChoicesPage;
   CreateAgentPage;
   CreatePasswordPage;

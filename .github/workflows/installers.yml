@@ -264,6 +264,22 @@ jobs:
           try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http://127.0.0.1:6971/health | Out-Null; throw "hub still running" } catch { if ($_.Exception.Message -eq "hub still running") { throw } }
           if (Test-Path "$([Environment]::GetFolderPath('Startup'))\Wolf Leader hub.lnk") { throw "startup entry left behind" }
 
+      - name: A silent install with an answer file connects instead of starting a hub here
+        shell: powershell
+        run: |
+          # Port 6999 only appears in this answer file, so finding it in mcp.json proves the answers were used.
+          $ini = (Get-Content "$env:RUNNER_TEMP\answer.ini" -Raw) -replace '127\.0\.0\.1:6971', '127.0.0.1:6999' -replace '127\.0\.0\.1:6972', '127.0.0.1:7000'
+          Set-Content "$env:RUNNER_TEMP\connect.ini" $ini -Encoding UTF8
+          $log = "$env:RUNNER_TEMP\setup-connect.log"
+          Start-Process -Wait "dist\WolfLeaderSetup-0.0.0.exe" -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/CURRENTUSER", "/WLCHOICES=client", "/WLINI=$env:RUNNER_TEMP\connect.ini", "/LOG=$log"
+          Get-Content "$env:LOCALAPPDATA\WolfLeader\install.log" -Tail 30
+          if (-not (Select-String -Path "$env:LOCALAPPDATA\WolfLeader\install.log" -Pattern 'mode=connect' -Quiet)) { throw "the answer file did not select connect mode" }
+          if (Test-Path "$([Environment]::GetFolderPath('Startup'))\Wolf Leader hub.lnk") { throw "a connect install set a hub to start on this PC" }
+          if (Test-Path "$env:LOCALAPPDATA\WolfLeader\runtime") { throw "a connect install copied the built-in hub" }
+          if (-not (Select-String -Path "$HOME\.cursor\mcp.json" -Pattern '127.0.0.1:7000/mcp' -Quiet)) { throw "Cursor does not point at the hub from the answer file" }
+          $un = Get-ChildItem "$env:LOCALAPPDATA\WolfLeader" -Filter "unins*.exe" | Select-Object -First 1
+          Start-Process -Wait $un.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES"
+
       - name: Run the hub with a console, to see why it stopped
         if: failure()
         shell: powershell

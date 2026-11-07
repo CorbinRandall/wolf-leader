@@ -2,15 +2,13 @@ import SwiftUI
 
 /// One thing the sidebar can show. Each can be moved and hidden.
 enum SidebarBlock: String, CaseIterable, Identifiable, Hashable {
-    case newChat, search, allProjects, projects, allChats, library, shares, settings
+    case newChat, projects, allChats, library, shares, settings
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .newChat: return "New chat"
-        case .search: return "Search"
-        case .allProjects: return "All projects"
         case .projects: return "Projects"
         case .allChats: return "All chats"
         case .library: return "Library"
@@ -22,8 +20,6 @@ enum SidebarBlock: String, CaseIterable, Identifiable, Hashable {
     var symbol: String {
         switch self {
         case .newChat: return "square.and.pencil"
-        case .search: return MainSection.ask.symbol
-        case .allProjects: return "square.grid.2x2"
         case .projects: return "folder"
         case .allChats: return "list.bullet"
         case .library: return MainSection.library.symbol
@@ -35,7 +31,7 @@ enum SidebarBlock: String, CaseIterable, Identifiable, Hashable {
     /// What it is, for the Settings list.
     var detail: String {
         switch self {
-        case .projects: return "Your project folders, with chats in progress inside"
+        case .projects: return "All projects, then your project folders with chats in progress"
         case .library: return "Skills, People, Bring in and the rest"
         case .allChats: return "Every chat in one list"
         default: return ""
@@ -70,7 +66,7 @@ struct LibraryEntry: Identifiable, Hashable {
 final class SidebarLayout: ObservableObject {
     static let shared = SidebarLayout()
 
-    static let defaultOrder: [SidebarBlock] = [.newChat, .search, .allProjects, .projects, .allChats, .library, .shares, .settings]
+    static let defaultOrder: [SidebarBlock] = [.newChat, .projects, .allChats, .library, .shares, .settings]
     static let defaultHidden: Set<String> = [SidebarBlock.allChats.rawValue]
 
     private static let orderKey = "wl.sidebar.order"
@@ -140,6 +136,15 @@ final class SidebarLayout: ObservableObject {
         save()
     }
 
+    /// Dropped just above or just below another item.
+    func move(_ block: SidebarBlock, next target: SidebarBlock, above: Bool) {
+        guard block != target, let from = order.firstIndex(of: block) else { return }
+        order.remove(at: from)
+        guard let at = order.firstIndex(of: target) else { order.insert(block, at: from); return }
+        order.insert(block, at: above ? at : at + 1)
+        save()
+    }
+
     func move(fromOffsets: IndexSet, toOffset: Int) {
         order.move(fromOffsets: fromOffsets, toOffset: toOffset)
         save()
@@ -196,25 +201,83 @@ struct SidebarBlockMenu: View {
     }
 }
 
+/// What's being dragged in the sidebar, and where the line shows that it would land.
+@MainActor
+final class SidebarDragState: ObservableObject {
+    static let shared = SidebarDragState()
+    @Published var dragging: SidebarBlock?
+    @Published var target: SidebarBlock?
+    @Published var above = true
+}
+
 extension View {
-    /// Drag this item onto another to swap places; right-click to move or hide it.
+    /// Drag this item above or below another (a line shows where it will land); right-click to
+    /// move or hide it.
     func sidebarBlock(_ block: SidebarBlock) -> some View {
-        self
-            .draggable(SidebarDrag(block: block.rawValue))
-            .dropDestination(for: SidebarDrag.self) { items, _ in
-                guard let raw = items.first?.block, let moved = SidebarBlock(rawValue: raw) else { return false }
-                withAnimation { SidebarLayout.shared.move(moved, onto: block) }
-                return true
+        modifier(SidebarBlockModifier(block: block))
+    }
+}
+
+private struct SidebarBlockModifier: ViewModifier {
+    @Environment(\.palette) private var p
+    @ObservedObject private var drag = SidebarDragState.shared
+    let block: SidebarBlock
+    @State private var height: CGFloat = 24
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { height = $0 }
+            .onDrag {
+                drag.dragging = block
+                return NSItemProvider(object: "wolfleader-sidebar:\(block.rawValue)" as NSString)
+            }
+            .onDrop(of: [.plainText], delegate: SidebarDropDelegate(block: block, height: height, drag: drag))
+            .overlay(alignment: drag.above ? .top : .bottom) {
+                if drag.target == block, drag.dragging != nil, drag.dragging != block {
+                    HStack(spacing: 0) {
+                        Circle().stroke(p.accent, lineWidth: 2).frame(width: 7, height: 7)
+                        Rectangle().fill(p.accent).frame(height: 2)
+                    }
+                    .offset(y: drag.above ? -4 : 4)
+                    .allowsHitTesting(false)
+                }
             }
             .contextMenu { SidebarBlockMenu(block: block) }
     }
 }
 
-/// What's carried while dragging a sidebar item (its own type, so dropped text is ignored).
-struct SidebarDrag: Codable, Transferable {
-    let block: String
-    static var transferRepresentation: some TransferRepresentation {
-        CodableRepresentation(contentType: .data)
+private struct SidebarDropDelegate: DropDelegate {
+    let block: SidebarBlock
+    let height: CGFloat
+    let drag: SidebarDragState
+
+    func validateDrop(info: DropInfo) -> Bool { MainActor.assumeIsolated { drag.dragging != nil } }
+
+    func dropEntered(info: DropInfo) { update(info) }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        update(info)
+        return DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) {
+        MainActor.assumeIsolated { if drag.target == block { drag.target = nil } }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        MainActor.assumeIsolated {
+            defer { drag.dragging = nil; drag.target = nil }
+            guard let moved = drag.dragging, moved != block else { return false }
+            withAnimation { SidebarLayout.shared.move(moved, next: block, above: info.location.y < height / 2) }
+            return true
+        }
+    }
+
+    private func update(_ info: DropInfo) {
+        MainActor.assumeIsolated {
+            drag.target = block
+            drag.above = info.location.y < height / 2
+        }
     }
 }
 

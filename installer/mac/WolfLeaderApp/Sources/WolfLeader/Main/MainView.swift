@@ -196,8 +196,6 @@ struct MainView: View {
     private func sidebarRow(_ block: SidebarBlock) -> some View {
         switch block {
         case .newChat: Label(block.title, systemImage: block.symbol).tag(SidebarItem.newChat)
-        case .search: Label(block.title, systemImage: block.symbol).tag(SidebarItem.section(.ask))
-        case .allProjects: Label(block.title, systemImage: block.symbol).tag(SidebarItem.projects)
         case .allChats: Label(block.title, systemImage: block.symbol).tag(SidebarItem.allChats)
         case .shares: Label(block.title, systemImage: block.symbol).tag(SidebarItem.section(.shares))
         case .settings:
@@ -301,6 +299,7 @@ private struct SidebarProjectsSection: View {
         let limit = showAll ? 25 : 6
         let shown = busy + rest.prefix(max(0, limit - busy.count))
         Section {
+            Label("All projects", systemImage: "square.grid.2x2").tag(SidebarItem.projects)
             ForEach(shown) { project in
                 let list = byProject[project.id] ?? []
                 folder(project.id, chats: list, more: { nav.open(project: project.id) }) {

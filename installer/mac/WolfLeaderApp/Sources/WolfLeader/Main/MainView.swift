@@ -283,6 +283,7 @@ private struct SidebarProjectsSection: View {
     @ObservedObject private var projects = RecentProjects.shared
     @ObservedObject private var chats = ChatStore.shared
     @ObservedObject private var drafts = Drafts.shared
+    @ObservedObject private var layout = SidebarLayout.shared
     @Binding var showAll: Bool
     @Binding var removing: ChatRecord?
     /// Projects whose chat list you folded away.
@@ -293,21 +294,19 @@ private struct SidebarProjectsSection: View {
         let active = SidebarChats.active(chats.records.filter { $0.projectID != nil }, chats: chats,
                                          openID: nav.route.chatID, drafts: drafts)
         let byProject = Dictionary(grouping: active, by: { $0.projectID! })
-        // Projects with chats in progress are always listed, then the most recent fill up to six.
-        let busy = recent.filter { byProject[$0.id] != nil }
-        let rest = recent.filter { byProject[$0.id] == nil }
-        let limit = showAll ? 25 : 6
-        let shown = busy + rest.prefix(max(0, limit - busy.count))
+        // Projects you've arranged keep their place; the rest follow, most recently used first.
+        // Projects with chats in progress are always listed; others fill up to six.
+        let ordered = layout.arrange(recent)
+        let busyCount = ordered.filter { byProject[$0.id] != nil }.count
+        var room = max(0, (showAll ? 25 : 6) - busyCount)
+        let shown = ordered.filter { project in
+            if byProject[project.id] != nil { return true }
+            guard room > 0 else { return false }
+            room -= 1
+            return true
+        }
         Section {
             Label("All projects", systemImage: "square.grid.2x2").tag(SidebarItem.projects)
-            ForEach(shown) { project in
-                let list = byProject[project.id] ?? []
-                folder(project.id, chats: list, more: { nav.open(project: project.id) }) {
-                    SidebarProjectRow(project: project, working: list.contains { chats.isRunning($0.id) },
-                                      needsYou: list.contains { SidebarChats.needsYou($0, chats) })
-                        .tag(SidebarItem.project(project.id))
-                }
-            }
             // Every person has a "No project" folder: chats not filed in a project yet live here.
             // Clicking it opens All chats, where they're listed first.
             let loose = SidebarChats.active(chats.records.filter { $0.projectID == nil }, chats: chats,
@@ -316,6 +315,15 @@ private struct SidebarProjectsSection: View {
                 SidebarNoProjectRow(working: loose.contains { chats.isRunning($0.id) },
                                     needsYou: loose.contains { SidebarChats.needsYou($0, chats) })
                     .tag(SidebarItem.allChats)
+            }
+            ForEach(shown) { project in
+                let list = byProject[project.id] ?? []
+                folder(project.id, chats: list, more: { nav.open(project: project.id) }) {
+                    SidebarProjectRow(project: project, working: list.contains { chats.isRunning($0.id) },
+                                      needsYou: list.contains { SidebarChats.needsYou($0, chats) })
+                        .tag(SidebarItem.project(project.id))
+                        .sidebarProject(project.id, shown: shown.map(\.id))
+                }
             }
             if recent.count > shown.count || showAll {
                 Button(showAll ? "Show fewer" : "Show more") { showAll.toggle() }
@@ -405,6 +413,12 @@ private struct SidebarProjectRow: View {
         .contextMenu {
             Button("New chat in \(project.name)") { nav.newChat(project: ProjectRef(project)) }
             Button("Open project") { nav.open(project: project.id) }
+            if SidebarLayout.shared.hasProjectOrder {
+                Divider()
+                Button("Sort Projects by Recent Use") { SidebarLayout.shared.resetProjectOrder() }
+            }
+            Divider()
+            Button("Customize Sidebar…") { nav.open(settingsTab: "sidebar") }
         }
     }
 }

@@ -74,6 +74,9 @@ final class SidebarLayout: ObservableObject {
 
     @Published private(set) var order: [SidebarBlock]
     @Published private(set) var hidden: Set<String>
+    /// Projects in the order you dragged them into. Empty: most recently used first.
+    @Published private(set) var projectOrder: [Int]
+    private static let projectOrderKey = "wl.sidebar.projectOrder"
 
     private init() {
         let defaults = UserDefaults.standard
@@ -88,6 +91,35 @@ final class SidebarLayout: ObservableObject {
         } else {
             hidden = Self.defaultHidden
         }
+        projectOrder = (defaults.string(forKey: Self.projectOrderKey) ?? "").split(separator: ",").compactMap { Int(String($0)) }
+    }
+
+    var hasProjectOrder: Bool { !projectOrder.isEmpty }
+
+    /// Arranged projects first, in your order; the others after, as they came (most recent first).
+    func arrange(_ projects: [HubProject]) -> [HubProject] {
+        let byID = Dictionary(projects.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let placed = projectOrder.compactMap { byID[$0] }
+        let placedIDs = Set(placed.map(\.id))
+        return placed + projects.filter { !placedIDs.contains($0.id) }
+    }
+
+    /// A project dropped above or below another. What you see becomes the saved order, so
+    /// nothing else jumps around.
+    func moveProject(_ id: Int, next target: Int, above: Bool, shown: [Int]) {
+        guard id != target else { return }
+        var list = shown
+        for other in projectOrder where !list.contains(other) { list.append(other) }
+        list.removeAll { $0 == id }
+        guard let at = list.firstIndex(of: target) else { return }
+        list.insert(id, at: above ? at : at + 1)
+        projectOrder = list
+        save()
+    }
+
+    func resetProjectOrder() {
+        projectOrder = []
+        save()
     }
 
     var visible: [SidebarBlock] { order.filter { !isHidden($0) } }
@@ -125,6 +157,7 @@ final class SidebarLayout: ObservableObject {
     func reset() {
         order = Self.defaultOrder
         hidden = Self.defaultHidden
+        projectOrder = []
         save()
     }
 
@@ -178,6 +211,7 @@ final class SidebarLayout: ObservableObject {
     private func save() {
         UserDefaults.standard.set(order.map(\.rawValue).joined(separator: ","), forKey: Self.orderKey)
         UserDefaults.standard.set(hidden.sorted().joined(separator: ","), forKey: Self.hiddenKey)
+        UserDefaults.standard.set(projectOrder.map(String.init).joined(separator: ","), forKey: Self.projectOrderKey)
     }
 }
 
@@ -208,6 +242,9 @@ final class SidebarDragState: ObservableObject {
     @Published var dragging: SidebarBlock?
     @Published var target: SidebarBlock?
     @Published var above = true
+    /// The same, for a project being dragged among the project folders.
+    @Published var draggingProject: Int?
+    @Published var targetProject: Int?
 }
 
 extension View {
@@ -228,6 +265,7 @@ private struct SidebarBlockModifier: ViewModifier {
         content
             .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { height = $0 }
             .onDrag {
+                drag.draggingProject = nil
                 drag.dragging = block
                 return NSItemProvider(object: "wolfleader-sidebar:\(block.rawValue)" as NSString)
             }
@@ -281,6 +319,75 @@ private struct SidebarDropDelegate: DropDelegate {
     }
 }
 
+extension View {
+    /// Drag a project folder above or below another; a line shows where it will land.
+    func sidebarProject(_ id: Int, shown: [Int]) -> some View {
+        modifier(SidebarProjectDragModifier(id: id, shown: shown))
+    }
+}
+
+private struct SidebarProjectDragModifier: ViewModifier {
+    @Environment(\.palette) private var p
+    @ObservedObject private var drag = SidebarDragState.shared
+    let id: Int
+    let shown: [Int]
+    @State private var height: CGFloat = 24
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { height = $0 }
+            .onDrag {
+                drag.dragging = nil
+                drag.draggingProject = id
+                return NSItemProvider(object: "wolfleader-project:\(id)" as NSString)
+            }
+            .onDrop(of: [.plainText], delegate: SidebarProjectDropDelegate(id: id, shown: shown, height: height, drag: drag))
+            .overlay(alignment: drag.above ? .top : .bottom) {
+                if drag.targetProject == id, let moving = drag.draggingProject, moving != id {
+                    HStack(spacing: 0) {
+                        Circle().stroke(p.accent, lineWidth: 2).frame(width: 7, height: 7)
+                        Rectangle().fill(p.accent).frame(height: 2)
+                    }
+                    .offset(y: drag.above ? -4 : 4)
+                    .allowsHitTesting(false)
+                }
+            }
+    }
+}
+
+private struct SidebarProjectDropDelegate: DropDelegate {
+    let id: Int
+    let shown: [Int]
+    let height: CGFloat
+    let drag: SidebarDragState
+
+    func validateDrop(info: DropInfo) -> Bool { MainActor.assumeIsolated { drag.draggingProject != nil } }
+    func dropEntered(info: DropInfo) { update(info) }
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        update(info)
+        return DropProposal(operation: .move)
+    }
+    func dropExited(info: DropInfo) {
+        MainActor.assumeIsolated { if drag.targetProject == id { drag.targetProject = nil } }
+    }
+    func performDrop(info: DropInfo) -> Bool {
+        MainActor.assumeIsolated {
+            defer { drag.draggingProject = nil; drag.targetProject = nil }
+            guard let moved = drag.draggingProject, moved != id else { return false }
+            withAnimation {
+                SidebarLayout.shared.moveProject(moved, next: id, above: info.location.y < height / 2, shown: shown)
+            }
+            return true
+        }
+    }
+    private func update(_ info: DropInfo) {
+        MainActor.assumeIsolated {
+            drag.targetProject = id
+            drag.above = info.location.y < height / 2
+        }
+    }
+}
+
 // MARK: - Settings > Sidebar
 
 /// Everything the sidebar can show: drag to reorder, switch off to hide, and bring back anything hidden.
@@ -326,6 +433,8 @@ struct SidebarSettingsGroup: View {
         HStack {
             Button("Show everything") { layout.showEverything() }
                 .disabled(layout.hiddenCount == 0)
+            Button("Sort projects by recent use") { layout.resetProjectOrder() }
+                .disabled(!layout.hasProjectOrder)
             Button("Reset to default") { layout.reset() }
             Spacer()
         }

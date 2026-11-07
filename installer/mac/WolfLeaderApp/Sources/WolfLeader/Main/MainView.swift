@@ -65,6 +65,10 @@ struct MainView: View {
     @StateObject private var updates = UpdateChecker()
     @StateObject private var nav = Navigator()
     @StateObject private var search = SearchModel()
+    @StateObject private var projectsModel = ProjectsModel()
+    @ObservedObject private var chats = ChatStore.shared
+    @AppStorage("wl.sidebar.showNoProject") private var showNoProject: Bool = true
+    @AppStorage("wl.sidebar.showLibrary") private var showLibrary: Bool = true
     @State private var hubOK: Bool? = nil
     @State private var toolbarQuery = ""
     @State private var showAllProjects = false
@@ -72,7 +76,10 @@ struct MainView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(selection: Binding<SidebarItem?>(get: { SidebarItem(nav.route) }, set: { if let item = $0 { item.open(in: nav) } })) {
+            List(selection: Binding<SidebarItem?>(
+                get: { SidebarItem(nav.route) },
+                set: { if let item = $0 { item.open(in: nav) } }
+            )) {
                 Section {
                     HStack(spacing: 8) {
                         WolfMark(size: 18)
@@ -88,7 +95,20 @@ struct MainView: View {
                     Label(MainSection.ask.label, systemImage: MainSection.ask.symbol).tag(SidebarItem.section(.ask))
                 }
                 SidebarProjectsSection(showAll: $showAllProjects)
-                SidebarChatsSection(removing: $removingChat)
+                // No project folder: chats not yet filed under any project.
+                if showNoProject {
+                    Section("No project") {
+                        let loose = chats.records.filter { $0.projectID == nil }
+                        if loose.isEmpty {
+                            Text("No loose chats").font(DS.Font.caption).foregroundStyle(p.textFaint).selectionDisabled()
+                        } else {
+                            ForEach(loose.prefix(8), id: \.id) { chat in
+                                let symbol = chat.agent?.symbol ?? "bubble.left"
+                                Label(chat.title, systemImage: symbol).tag(SidebarItem.chat(chat.id))
+                            }
+                        }
+                    }
+                }
                 Section {
                     Label(MainSection.library.label, systemImage: MainSection.library.symbol).tag(SidebarItem.library)
                     Label(MainSection.shares.label, systemImage: MainSection.shares.symbol).tag(SidebarItem.section(.shares))
@@ -111,6 +131,9 @@ struct MainView: View {
             }
             .listStyle(.sidebar)
             .tint(p.accent)
+            .contextMenu {
+                Button("Sidebar settings") { nav.open(section: .settings) }
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
                     if updates.appUpdateAvailable || updates.appPhase.active {
@@ -148,7 +171,7 @@ struct MainView: View {
                     .keyboardShortcut("]", modifiers: .command)
             }
         }
-        .confirmationDialog("Remove “\(removingChat?.title ?? "")” from Chats?",
+        .confirmationDialog("Remove \u{201C}\(removingChat?.title ?? "")\u{201D} from Chats?",
                             isPresented: Binding(get: { removingChat != nil }, set: { if !$0 { removingChat = nil } })) {
             Button("Remove", role: .destructive) {
                 if let chat = removingChat {
@@ -161,12 +184,21 @@ struct MainView: View {
         } message: {
             Text("It goes away on every device. The copy saved in its project's logbook stays.")
         }
+        .background {
+            Button("") { nav.open(section: .settings) }
+                .keyboardShortcut(",", modifiers: .command)
+                .hidden()
+        }
         .environmentObject(nav)
         .environmentObject(search)
         .onAppear { nav.watchSwipes() }
         .environmentObject(updates)
         .task {
             updates.start(store: store)
+            SkillSyncer.shared.start(store: store)
+        }
+        .task(id: store.config.hubURL) {
+            await projectsModel.load(store.hub)
         }
         .task(id: store.config.hubURL) {
             // Chats follow you: every device on this hub sees and continues the same chats.
@@ -200,7 +232,7 @@ struct MainView: View {
                 ChatHome()
             }
         case .projects:
-            ProjectsView(openSettings: { nav.open(section: .settings) })
+            ProjectsView(openSettings: { nav.open(section: .settings) }, model: projectsModel)
         case .library:
             LibraryView()
         case .ask:

@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-private enum SettingsTab: String, Hashable {
-    case general, rules, hub, updates, about
+enum SettingsTab: String, Hashable {
+    case general, rules, hub, updates, about, sidebar
 }
 
 struct SettingsView: View {
@@ -16,6 +16,7 @@ struct SettingsView: View {
             WLTab(id: .rules, title: "Rules", icon: "checklist"),
             WLTab(id: .hub, title: "Hub", icon: "server.rack"),
             WLTab(id: .updates, title: "Updates", icon: "arrow.triangle.2.circlepath", attention: updates.needsAttention),
+            WLTab(id: .sidebar, title: "Sidebar", icon: "sidebar.left"),
             WLTab(id: .about, title: "About", icon: "info.circle"),
         ]
     }
@@ -39,6 +40,8 @@ struct SettingsView: View {
                 SettingsOriginalGroup()
             case .updates:
                 SettingsUpdatesGroup(runner: updates.runner)
+            case .sidebar:
+                SettingsSidebarGroup()
             case .about:
                 SettingsAboutGroup()
             }
@@ -47,7 +50,6 @@ struct SettingsView: View {
         .onChange(of: nav.pendingSettingsTab) { _, _ in takePendingTab() }
     }
 
-    /// "Set up Claude…" and friends land on a specific tab.
     private func takePendingTab() {
         guard let name = nav.pendingSettingsTab else { return }
         nav.pendingSettingsTab = nil
@@ -57,8 +59,6 @@ struct SettingsView: View {
 
 // MARK: - General: who you are
 
-/// Which person on the hub uses this Mac. Their profile ("About me") goes into every chat, with
-/// every agent, so none of them start from zero.
 private struct SettingsYouGroup: View {
     @EnvironmentObject private var store: ConfigStore
     @State private var owners: [String] = []
@@ -687,6 +687,41 @@ struct SettingsLogBox: View {
             .onAppear { proxy.scrollTo(shown.count - 1, anchor: .bottom) }
             .onChange(of: lines.count) {
                 proxy.scrollTo(min(lines.count, 500) - 1, anchor: .bottom)
+            }
+        }
+    }
+}
+
+// MARK: - Sidebar
+
+private struct SettingsSidebarGroup: View {
+    @AppStorage("wl.sidebar.showNoProject") private var showNoProject: Bool = true
+    @AppStorage("wl.sidebar.showLibrary") private var showLibrary: Bool = true
+
+    var body: some View {
+        WLGroup(title: "Sidebar", subtitle: "Control what shows up in the sidebar.", icon: "sidebar.left") {
+            WLRow(title: "Show \u{201C}No project\u{201D} folder", detail: "Chats not yet connected to a project.") {
+                Toggle("", isOn: $showNoProject).wlSwitch()
+            }
+            WLDivider()
+            WLRow(title: "Show Library section", detail: "Skills, People, Bring in, My tools, Backups, Cleanup, Snippets.") {
+                Toggle("", isOn: $showLibrary).wlSwitch()
+            }
+            WLDivider()
+            WLRow(title: "Project order", detail: "Drag projects in the sidebar to reorder them.") {
+                Button("Reset project order") {
+                    UserDefaults.standard.removeObject(forKey: "wl.sidebar.projectOrder")
+                }
+                .buttonStyle(SecondaryButtonStyle())
+            }
+            WLDivider()
+            WLRow(title: "Show everything") {
+                Button("Reset") {
+                    showNoProject = true
+                    showLibrary = true
+                    UserDefaults.standard.removeObject(forKey: "wl.sidebar.projectOrder")
+                }
+                .buttonStyle(SecondaryButtonStyle())
             }
         }
     }

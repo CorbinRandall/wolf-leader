@@ -228,6 +228,7 @@ final class ChatSession: ObservableObject, Identifiable {
     private var driver: AgentDriver?
     private var hubURL = ""
     private var hub: HubClient?
+    private var skillsFingerprint = ""
 
     init(record: ChatRecord, store: ChatStore) {
         self.record = record
@@ -254,14 +255,18 @@ final class ChatSession: ObservableObject, Identifiable {
         let hub = config.hub
         self.hub = hub
         let person = config.config.person
-        // "Never ask" applies to every chat, old ones too. The mode is fixed when an agent
-        // starts, so an agent started in another mode starts again.
+        // "Never ask" applies to every chat, old ones too.
         if ChatRules.shared.neverAsk, record.mode != .auto {
             record.mode = .auto
             driver?.stop()
             driver = nil
         }
-        // Everything said before this message, for an agent that hasn't seen it yet.
+        // If skills changed on disk since this process started, reconnect so the agent sees them.
+        let currentFingerprint = SkillSyncer.fingerprint()
+        if !skillsFingerprint.isEmpty, skillsFingerprint != currentFingerprint, driver != nil {
+            driver?.stop(); driver = nil
+            append(ChatItem(id: UUID().uuidString, kind: .note, text: "Skills updated — reconnecting to pick them up."))
+        }
         let earlier = record.items
         append(ChatItem(id: UUID().uuidString, kind: .user, text: text))
         if record.title == "New chat" { record.title = AgentText.oneLine(text, limit: 60) }
@@ -380,6 +385,7 @@ final class ChatSession: ObservableObject, Identifiable {
             preparing = nil
             if let note { append(ChatItem(id: UUID().uuidString, kind: .note, text: note)) }
         }
+        skillsFingerprint = SkillSyncer.fingerprint()
         connecting = true
         defer { connecting = false }
         // An agent session only exists on the device that ran it. Anywhere else (or with no

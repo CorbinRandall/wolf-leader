@@ -12,7 +12,7 @@ struct ProjectsView: View {
     @EnvironmentObject private var store: ConfigStore
     @Environment(\.palette) private var p
     var openSettings: () -> Void = {}
-    @StateObject private var model = ProjectsModel()
+    @ObservedObject var model: ProjectsModel
     @EnvironmentObject private var nav: Navigator
     @State private var query = ""
     @State private var promptFor: ProjectEntry?
@@ -53,7 +53,6 @@ struct ProjectsView: View {
             }
         }
         .background(p.background)
-        .task(id: store.config.hubURL) { await model.load(store.hub) }
         .sheet(item: $promptFor) { entry in
             BuildPromptSheet(entry: entry, onDone: { await model.reload() })
         }

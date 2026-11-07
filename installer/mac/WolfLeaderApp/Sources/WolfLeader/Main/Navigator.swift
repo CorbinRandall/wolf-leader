@@ -154,6 +154,11 @@ final class Navigator: ObservableObject {
         }
     }
 
+    func openSettingsSidebar() {
+        open(section: .settings)
+        open(settingsTab: "sidebar")
+    }
+
     /// Run a search from anywhere: open the results page with this text.
     func search(_ text: String) {
         let q = text.trimmingCharacters(in: .whitespacesAndNewlines)

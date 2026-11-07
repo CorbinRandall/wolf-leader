@@ -154,8 +154,8 @@ final class UpdateChecker: ObservableObject {
 
     var busy: Bool { preparing || runner.running || appPhase.active }
 
-    /// Release builds on main take published releases; everything else rebuilds from its branch.
-    var channel: AppChannel { (BuildInfo.isDev || branch != "main") ? .source : .release }
+    /// Always rebuild from the branch — no GitHub releases needed.
+    var channel: AppChannel { .source }
 
     /// Is there a newer app to install?
     var appUpdateAvailable: Bool {

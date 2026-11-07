@@ -71,7 +71,6 @@ struct MainView: View {
     @AppStorage("wl.sidebar.showLibrary") private var showLibrary: Bool = true
     @State private var hubOK: Bool? = nil
     @State private var toolbarQuery = ""
-    @State private var showAllProjects = false
     @State private var removingChat: ChatRecord?
 
     var body: some View {
@@ -94,20 +93,24 @@ struct MainView: View {
                     Label("New chat", systemImage: "square.and.pencil").tag(SidebarItem.newChat)
                     Label(MainSection.ask.label, systemImage: MainSection.ask.symbol).tag(SidebarItem.section(.ask))
                 }
-                SidebarProjectsSection(showAll: $showAllProjects)
-                // No project folder: chats not yet filed under any project.
-                if showNoProject {
-                    Section("No project") {
+                Section("Projects") {
+                    Label("All projects", systemImage: "list.bullet").tag(SidebarItem.projects)
+                    if showNoProject {
                         let loose = chats.records.filter { $0.projectID == nil }
-                        if loose.isEmpty {
-                            Text("No loose chats").font(DS.Font.caption).foregroundStyle(p.textFaint).selectionDisabled()
-                        } else {
-                            ForEach(loose.prefix(8), id: \.id) { chat in
-                                let symbol = chat.agent?.symbol ?? "bubble.left"
-                                Label(chat.title, systemImage: symbol).tag(SidebarItem.chat(chat.id))
+                        DisclosureGroup {
+                            if loose.isEmpty {
+                                Text("No chats yet").font(DS.Font.caption).foregroundStyle(p.textFaint).selectionDisabled()
+                            } else {
+                                ForEach(loose.prefix(8), id: \.id) { chat in
+                                    let symbol = chat.agent?.symbol ?? "bubble.left"
+                                    Label(chat.title, systemImage: symbol).tag(SidebarItem.chat(chat.id))
+                                }
                             }
+                        } label: {
+                            Label("No project", systemImage: "questionmark.folder")
                         }
                     }
+                    SidebarProjectFolders(model: projectsModel)
                 }
                 Section {
                     Label(MainSection.library.label, systemImage: MainSection.library.symbol).tag(SidebarItem.library)

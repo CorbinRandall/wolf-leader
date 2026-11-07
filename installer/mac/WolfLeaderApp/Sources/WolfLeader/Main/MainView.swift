@@ -88,7 +88,6 @@ struct MainView: View {
                     Label(MainSection.ask.label, systemImage: MainSection.ask.symbol).tag(SidebarItem.section(.ask))
                 }
                 SidebarProjectsSection(showAll: $showAllProjects, removing: $removingChat)
-                SidebarChatsSection(removing: $removingChat)
                 SidebarLibrarySection()
                 Section {
                     Label(MainSection.shares.label, systemImage: MainSection.shares.symbol).tag(SidebarItem.section(.shares))
@@ -275,26 +274,20 @@ private struct SidebarProjectsSection: View {
         Section {
             ForEach(shown) { project in
                 let list = byProject[project.id] ?? []
-                if list.isEmpty {
-                    row(project, chats: list)
-                } else {
-                    DisclosureGroup(isExpanded: expanded(project.id)) {
-                        ForEach(list.prefix(SidebarChats.perProject)) { chat in
-                            SidebarChatRow(chat: chat, working: chats.isRunning(chat.id),
-                                           needsYou: SidebarChats.needsYou(chat, chats),
-                                           hasDraft: drafts.has(chat.id), showProject: false)
-                                .tag(SidebarItem.chat(chat.id))
-                                .contextMenu { SidebarChatMenu(chat: chat, removing: $removing) }
-                        }
-                        if list.count > SidebarChats.perProject {
-                            Button("\(list.count - SidebarChats.perProject) more in \(project.name)…") { nav.open(project: project.id) }
-                                .buttonStyle(.plain).font(DS.Font.caption).foregroundStyle(p.textMuted)
-                                .selectionDisabled()
-                        }
-                    } label: {
-                        row(project, chats: list)
-                    }
+                folder(project.id, chats: list, more: { nav.open(project: project.id) }) {
+                    SidebarProjectRow(project: project, working: list.contains { chats.isRunning($0.id) },
+                                      needsYou: list.contains { SidebarChats.needsYou($0, chats) })
+                        .tag(SidebarItem.project(project.id))
                 }
+            }
+            // Every person has a "No project" folder: chats not filed in a project yet live here.
+            // Clicking it opens All chats, where they're listed first.
+            let loose = SidebarChats.active(chats.records.filter { $0.projectID == nil }, chats: chats,
+                                            openID: nav.route.chatID, drafts: drafts)
+            folder(Self.noProject, chats: loose, more: { nav.openChatList() }) {
+                SidebarNoProjectRow(working: loose.contains { chats.isRunning($0.id) },
+                                    needsYou: loose.contains { SidebarChats.needsYou($0, chats) })
+                    .tag(SidebarItem.allChats)
             }
             if recent.count > shown.count || showAll {
                 Button(showAll ? "Show fewer" : "Show more") { showAll.toggle() }
@@ -313,13 +306,36 @@ private struct SidebarProjectsSection: View {
         }
     }
 
-    private func row(_ project: HubProject, chats list: [ChatRecord]) -> some View {
-        SidebarProjectRow(project: project, working: list.contains { chats.isRunning($0.id) },
-                          needsYou: list.contains { SidebarChats.needsYou($0, chats) })
-            .tag(SidebarItem.project(project.id))
+    /// The folding key for the "No project" folder (real project ids are positive).
+    private static let noProject = -1
+
+    /// A project row that opens like a folder when it has chats in progress.
+    @ViewBuilder
+    private func folder<Row: View>(_ id: Int, chats list: [ChatRecord], more: @escaping () -> Void,
+                                   @ViewBuilder row: () -> Row) -> some View {
+        if list.isEmpty {
+            row()
+        } else {
+            DisclosureGroup(isExpanded: expanded(id)) {
+                ForEach(list.prefix(SidebarChats.perProject)) { chat in
+                    SidebarChatRow(chat: chat, working: chats.isRunning(chat.id),
+                                   needsYou: SidebarChats.needsYou(chat, chats),
+                                   hasDraft: drafts.has(chat.id), showProject: false)
+                        .tag(SidebarItem.chat(chat.id))
+                        .contextMenu { SidebarChatMenu(chat: chat, removing: $removing) }
+                }
+                if list.count > SidebarChats.perProject {
+                    Button("\(list.count - SidebarChats.perProject) more…", action: more)
+                        .buttonStyle(.plain).font(DS.Font.caption).foregroundStyle(p.textMuted)
+                        .selectionDisabled()
+                }
+            } label: {
+                row()
+            }
+        }
     }
 
-    private var folded: Set<Int> { Set(foldedRaw.split(separator: ",").compactMap { Int($0) }) }
+    private var folded: Set<Int> { Set(foldedRaw.split(separator: ",").compactMap { Int(String($0)) }) }
 
     private func expanded(_ id: Int) -> Binding<Bool> {
         Binding(get: { !folded.contains(id) }, set: { open in
@@ -375,25 +391,38 @@ private struct SidebarChatMenu: View {
     }
 }
 
-/// Sidebar: chats in progress that aren't in a project yet (the rest sit under their project),
-/// and the way to every chat.
-private struct SidebarChatsSection: View {
+/// The "No project" folder's row: its + starts a chat that isn't in a project.
+private struct SidebarNoProjectRow: View {
     @EnvironmentObject private var nav: Navigator
-    @ObservedObject private var chats = ChatStore.shared
-    @ObservedObject private var drafts = Drafts.shared
-    @Binding var removing: ChatRecord?
+    @Environment(\.palette) private var p
+    let working: Bool
+    let needsYou: Bool
+    @State private var hovering = false
 
     var body: some View {
-        let loose = SidebarChats.active(chats.records.filter { $0.projectID == nil }, chats: chats,
-                                        openID: nav.route.chatID, drafts: drafts)
-        Section("Chats") {
-            ForEach(loose.prefix(8)) { chat in
-                SidebarChatRow(chat: chat, working: chats.isRunning(chat.id),
-                               needsYou: SidebarChats.needsYou(chat, chats), hasDraft: drafts.has(chat.id))
-                    .tag(SidebarItem.chat(chat.id))
-                    .contextMenu { SidebarChatMenu(chat: chat, removing: $removing) }
+        HStack(spacing: 6) {
+            Label("No project", systemImage: "folder.badge.questionmark").lineLimit(1)
+                .foregroundStyle(p.textMuted)
+            Spacer(minLength: 0)
+            if needsYou {
+                Circle().fill(p.accent2).frame(width: 7, height: 7).help("A chat is waiting for your OK")
+            } else if working {
+                ProgressView().controlSize(.mini)
             }
-            Label("All chats", systemImage: "list.bullet").tag(SidebarItem.allChats)
+            if hovering {
+                Button { nav.newChat() } label: {
+                    Image(systemName: "plus.bubble").font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(p.accent)
+                .help("New chat, not in a project")
+            }
+        }
+        .onHover { hovering = $0 }
+        .help("Chats not in a project yet. Move one into a project from inside the chat.")
+        .contextMenu {
+            Button("New chat") { nav.newChat() }
+            Button("All chats") { nav.openChatList() }
         }
     }
 }

@@ -91,7 +91,7 @@ struct AllChatsView: View {
             byProject[chat.projectID, default: []].append(chat)
         }
         order.sort { a, _ in a == nil }
-        return order.map { id in (id, id == nil ? "Not in a project yet" : byProject[id]?.first?.projectName ?? "Project", byProject[id] ?? []) }
+        return order.map { id in (id, id == nil ? "No project" : byProject[id]?.first?.projectName ?? "Project", byProject[id] ?? []) }
     }
 
     var body: some View {

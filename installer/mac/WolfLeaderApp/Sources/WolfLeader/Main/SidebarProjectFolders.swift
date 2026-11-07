@@ -7,14 +7,18 @@ struct SidebarProjectFolders: View {
     @ObservedObject private var drafts = Drafts.shared
     @AppStorage("wl.sidebar.projectOrder") private var savedOrder: String = ""
 
+    private var activeEntries: [ProjectEntry] {
+        model.entries.filter { model.status(of: $0) != "done" }
+    }
+
     private var orderedEntries: [ProjectEntry] {
         let ids = savedOrder.split(separator: ",").compactMap { Int($0) }
-        guard !ids.isEmpty else { return model.entries }
+        guard !ids.isEmpty else { return activeEntries }
         var byID: [Int: ProjectEntry] = [:]
-        for entry in model.entries { byID[entry.id] = entry }
+        for entry in activeEntries { byID[entry.id] = entry }
         var result = ids.compactMap { byID[$0] }
         let placed = Set(ids)
-        result += model.entries.filter { !placed.contains($0.id) }
+        result += activeEntries.filter { !placed.contains($0.id) }
         return result
     }
 

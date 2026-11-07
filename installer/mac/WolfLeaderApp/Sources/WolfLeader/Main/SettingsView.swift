@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 private enum SettingsTab: String, Hashable {
-    case general, rules, hub, updates, about
+    case general, sidebar, rules, hub, updates, about
 }
 
 struct SettingsView: View {
@@ -13,6 +13,7 @@ struct SettingsView: View {
     private var tabs: [WLTab<SettingsTab>] {
         [
             WLTab(id: .general, title: "General", icon: "slider.horizontal.3"),
+            WLTab(id: .sidebar, title: "Sidebar", icon: "sidebar.left"),
             WLTab(id: .rules, title: "Rules", icon: "checklist"),
             WLTab(id: .hub, title: "Hub", icon: "server.rack"),
             WLTab(id: .updates, title: "Updates", icon: "arrow.triangle.2.circlepath", attention: updates.needsAttention),
@@ -32,6 +33,8 @@ struct SettingsView: View {
                 SettingsYouGroup()
                 SettingsAppearanceGroup()
                 SettingsSetupGroup()
+            case .sidebar:
+                SidebarSettingsGroup()
             case .rules:
                 ChatRulesSettings()
             case .hub:

@@ -69,6 +69,7 @@ struct MainView: View {
     @State private var toolbarQuery = ""
     @State private var showAllProjects = false
     @State private var removingChat: ChatRecord?
+    @ObservedObject private var layout = SidebarLayout.shared
 
     var body: some View {
         NavigationSplitView {
@@ -82,30 +83,26 @@ struct MainView: View {
                     .padding(.vertical, 4)
                     .selectionDisabled()
                 }
-                // Chat first: a new chat is always one click (or ⌘N) away.
-                Section {
-                    Label("New chat", systemImage: "square.and.pencil").tag(SidebarItem.newChat)
-                    Label(MainSection.ask.label, systemImage: MainSection.ask.symbol).tag(SidebarItem.section(.ask))
-                }
-                SidebarProjectsSection(showAll: $showAllProjects, removing: $removingChat)
-                SidebarLibrarySection()
-                Section {
-                    Label(MainSection.shares.label, systemImage: MainSection.shares.symbol).tag(SidebarItem.section(.shares))
-                    Label {
-                        HStack(spacing: 6) {
-                            Text(MainSection.settings.label)
-                            Spacer(minLength: 0)
-                            if updates.needsAttention {
-                                Circle()
-                                    .fill(p.accent)
-                                    .frame(width: 7, height: 7)
-                                    .help("Update available")
-                            }
+                // Everything below is yours to arrange: drag, right-click, or Settings > Sidebar.
+                ForEach(layout.groups, id: \.self) { group in
+                    if group == [.projects] {
+                        SidebarProjectsSection(showAll: $showAllProjects, removing: $removingChat)
+                    } else if group == [.library] {
+                        SidebarLibrarySection()
+                    } else {
+                        Section {
+                            ForEach(group) { block in sidebarRow(block).sidebarBlock(block) }
                         }
-                    } icon: {
-                        Image(systemName: MainSection.settings.symbol)
                     }
-                    .tag(SidebarItem.section(.settings))
+                }
+            }
+            // Right-click on empty sidebar space: straight to the sidebar settings.
+            .contextMenu(forSelectionType: SidebarItem.self) { items in
+                if items.isEmpty {
+                    Button("Customize Sidebar…") { nav.open(settingsTab: "sidebar") }
+                    if layout.hiddenCount > 0 {
+                        Button("Show Everything") { layout.showEverything() }
+                    }
                 }
             }
             .listStyle(.sidebar)
@@ -161,6 +158,12 @@ struct MainView: View {
         } message: {
             Text("It goes away on every device. The copy saved in its project's logbook stays.")
         }
+        // Settings stays reachable with ⌘, even if it's hidden from the sidebar.
+        .background {
+            Button("Settings") { nav.open(section: .settings) }
+                .keyboardShortcut(",", modifiers: .command)
+                .opacity(0).allowsHitTesting(false).accessibilityHidden(true)
+        }
         .environmentObject(nav)
         .environmentObject(search)
         .onAppear { nav.watchSwipes() }
@@ -185,6 +188,32 @@ struct MainView: View {
                 hubOK = await store.hub.isHealthy()
                 try? await Task.sleep(for: .seconds(30))
             }
+        }
+    }
+
+    /// A one-line sidebar item.
+    @ViewBuilder
+    private func sidebarRow(_ block: SidebarBlock) -> some View {
+        switch block {
+        case .newChat: Label(block.title, systemImage: block.symbol).tag(SidebarItem.newChat)
+        case .search: Label(block.title, systemImage: block.symbol).tag(SidebarItem.section(.ask))
+        case .allProjects: Label(block.title, systemImage: block.symbol).tag(SidebarItem.projects)
+        case .allChats: Label(block.title, systemImage: block.symbol).tag(SidebarItem.allChats)
+        case .shares: Label(block.title, systemImage: block.symbol).tag(SidebarItem.section(.shares))
+        case .settings:
+            Label {
+                HStack(spacing: 6) {
+                    Text(block.title)
+                    Spacer(minLength: 0)
+                    if updates.needsAttention {
+                        Circle().fill(p.accent).frame(width: 7, height: 7).help("Update available")
+                    }
+                }
+            } icon: {
+                Image(systemName: block.symbol)
+            }
+            .tag(SidebarItem.section(.settings))
+        case .projects, .library: EmptyView()
         }
     }
 
@@ -294,7 +323,6 @@ private struct SidebarProjectsSection: View {
                     .buttonStyle(.plain).font(DS.Font.caption).foregroundStyle(p.textMuted)
                     .selectionDisabled()
             }
-            Label("All projects", systemImage: "square.grid.2x2").tag(SidebarItem.projects)
         } header: {
             HStack {
                 Text("Projects")
@@ -303,6 +331,8 @@ private struct SidebarProjectsSection: View {
                     .buttonStyle(.plain)
                     .help("New project: name it, then say what you want")
             }
+            .contentShape(Rectangle())
+            .sidebarBlock(.projects)
         }
     }
 
@@ -460,25 +490,30 @@ private struct SidebarChatRow: View {
     }
 }
 
-/// Sidebar: Library folds open to every view inside it (Skills, People, ...).
+/// Sidebar: Library folds open to the views inside it you haven't hidden.
 private struct SidebarLibrarySection: View {
+    @EnvironmentObject private var nav: Navigator
     @AppStorage("wl.sidebar.libraryOpen") private var open = true
+    @ObservedObject private var layout = SidebarLayout.shared
 
     var body: some View {
         Section {
             DisclosureGroup(isExpanded: $open) {
-                Label("Skills", systemImage: "shippingbox").tag(SidebarItem.library("skills"))
-                Label("People", systemImage: "person.2").tag(SidebarItem.library("people"))
-                Label("Bring in", systemImage: "tray.and.arrow.down").tag(SidebarItem.library("bringin"))
-                Label("AI tools", systemImage: "person.2.wave.2").tag(SidebarItem.library("tools"))
-                Label("Backups", systemImage: "externaldrive.badge.checkmark").tag(SidebarItem.library("repos"))
-                Label("Cleanup", systemImage: "arrow.triangle.merge").tag(SidebarItem.library("cleanup"))
-                Label("Snippets", systemImage: "chevron.left.forwardslash.chevron.right").tag(SidebarItem.library("snippets"))
+                ForEach(LibraryEntry.all.filter { !layout.isHidden($0) }) { entry in
+                    Label(entry.title, systemImage: entry.symbol)
+                        .tag(SidebarItem.library(entry.id))
+                        .contextMenu {
+                            Button("Hide \(entry.title)") { layout.setHidden(entry, true) }
+                            Divider()
+                            Button("Customize Sidebar…") { nav.open(settingsTab: "sidebar") }
+                        }
+                }
             } label: {
-                Label(MainSection.library.label, systemImage: MainSection.library.symbol)
+                Label(SidebarBlock.library.title, systemImage: SidebarBlock.library.symbol)
                     .contentShape(Rectangle())
                     .onTapGesture { open.toggle() }
                     .selectionDisabled()
+                    .sidebarBlock(.library)
             }
         }
     }

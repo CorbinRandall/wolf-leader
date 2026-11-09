@@ -70,6 +70,15 @@ enum AgentLocator {
             let candidate = "\(dir)/\(binary)"
             if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
         }
+        if binary == "codex" {
+            let roots = ["/Applications", FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path]
+            for root in roots {
+                for suffix in ["ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex", "Codex.app/Contents/Resources/codex"] {
+                    let candidate = "\(root)/\(suffix)"
+                    if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
+                }
+            }
+        }
         return nil
     }
 

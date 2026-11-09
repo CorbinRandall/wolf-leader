@@ -11,5 +11,6 @@ let package = Package(
             name: "WolfLeader",
             path: "Sources/WolfLeader"
         ),
+        .testTarget(name: "WolfLeaderTests", dependencies: ["WolfLeader"]),
     ]
 )

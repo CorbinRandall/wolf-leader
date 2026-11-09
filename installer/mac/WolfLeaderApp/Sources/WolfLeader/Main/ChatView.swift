@@ -11,6 +11,9 @@ struct ChatView: View {
     @ObservedObject private var rules = ChatRules.shared
     let back: () -> Void
     @State private var draft = ""
+    @State private var images: [ChatImage] = []
+    @State private var imageError: String?
+    private var supportsImages: Bool { agent?.proto == .claude || agent?.proto == .codex }
     @State private var choosingProject = false
     @State private var snippets: [HubSnippet] = []
     @FocusState private var composing: Bool
@@ -55,6 +58,13 @@ struct ChatView: View {
                 Text(record.title).font(DS.Font.section).foregroundStyle(p.text).lineLimit(1)
                 if let agent { MainTag(text: "\(agent.name) · \(agent.company)") }
                 Spacer(minLength: 8)
+                Button("Copy chat") {
+                    let text = record.items.filter { $0.kind == .user || $0.kind == .agent }
+                        .map { "\($0.kind == .user ? "You" : (agent?.name ?? "Agent")):\n\($0.text)" }
+                        .joined(separator: "\n\n")
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                }
                 continueWithMenu
                 Button {
                     choosingProject = true
@@ -274,7 +284,35 @@ struct ChatView: View {
     }
 
     private var composer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let imageError { Text(imageError).foregroundStyle(.red) }
+            HStack {
+                ForEach(images) { image in
+                    if let preview = NSImage(data: image.data) {
+                        Image(nsImage: preview).resizable().scaledToFit().frame(width: 64, height: 64)
+                        Button("Remove image", systemImage: "xmark.circle") { images.removeAll { $0.id == image.id } }
+                            .labelStyle(.iconOnly)
+                    }
+                }
+            }
         HStack(alignment: .bottom, spacing: 10) {
+            if supportsImages {
+                Button("Attach image", systemImage: "photo.badge.plus") {
+                    let panel = NSOpenPanel()
+                    panel.allowedContentTypes = [.png, .jpeg, .webP, .heic]
+                    panel.allowsMultipleSelection = true
+                    if panel.runModal() == .OK {
+                        for url in panel.urls {
+                            if let image = NSImage(contentsOf: url) { addImage(image) }
+                            else { imageError = "Couldn't read that image." }
+                        }
+                    }
+                }.labelStyle(.iconOnly).disabled(session.busy)
+                Button("Paste image") {
+                    if let image = NSImage(pasteboard: .general) { addImage(image) }
+                    else { imageError = "Copy an image first." }
+                }.disabled(session.busy)
+            }
             snippetMenu
             TextField("Message \(agent?.name ?? "the agent")…", text: $draft, axis: .vertical)
                 .lineLimit(1...10)
@@ -290,8 +328,9 @@ struct ChatView: View {
                 Button("Send", action: send)
                     .buttonStyle(PrimaryButtonStyle())
                     .keyboardShortcut(.return, modifiers: .command)
-                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && images.isEmpty)
             }
+        }
         }
         .padding(.horizontal, DS.Spacing.lg).padding(.vertical, 12)
         .frame(maxWidth: 860 + DS.Spacing.lg * 2)
@@ -300,11 +339,20 @@ struct ChatView: View {
         .overlay(alignment: .top) { Rectangle().fill(p.border).frame(height: 1) }
     }
 
+    private func addImage(_ image: NSImage) {
+        guard images.count < 4 else { imageError = "Attach up to four images at a time."; return }
+        do { images.append(try ChatImage(image)); imageError = nil }
+        catch { imageError = error.localizedDescription }
+    }
+
     private func send() {
+        guard images.isEmpty || supportsImages else { imageError = "Choose Claude or Codex to send these images."; return }
         let text = draft
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !session.busy else { return }
+        guard (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !images.isEmpty), !session.busy, busyElsewhere == nil else { return }
         draft = ""
-        session.send(text, config: store)
+        session.send(text, images: images, config: store)
+        images = []
+        imageError = nil
         composing = true
     }
 }
@@ -321,7 +369,14 @@ private struct ChatItemView: View {
         case .user:
             HStack {
                 Spacer(minLength: 80)
-                MarkdownText(text: item.text)
+                VStack(alignment: .leading) {
+                    ForEach(item.images ?? []) { image in
+                        if let preview = NSImage(data: image.data) {
+                            Image(nsImage: preview).resizable().scaledToFit().frame(maxWidth: 300, maxHeight: 200)
+                        }
+                    }
+                    MarkdownText(text: item.text)
+                }
                     .padding(.horizontal, 14).padding(.vertical, 10)
                     .background(p.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }

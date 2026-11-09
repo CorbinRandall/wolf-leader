@@ -57,11 +57,11 @@ final class ClaudeDriver: AgentDriver {
         process.send(["type": "control_request", "request_id": "init", "request": ["subtype": "initialize"]])
     }
 
-    func send(_ text: String) async throws {
+    func send(_ text: String, images: [ChatImage]) async throws {
         guard let process, process.isRunning else { throw AgentError.failed("Claude isn't running.") }
         process.send([
             "type": "user",
-            "message": ["role": "user", "content": [["type": "text", "text": text]]],
+            "message": ["role": "user", "content": [["type": "text", "text": text] as [String: Any]] + images.map { ["type": "image", "source": ["type": "base64", "media_type": "image/png", "data": $0.data.base64EncodedString()]] }],
             "parent_tool_use_id": NSNull(),
             "session_id": "",
         ])

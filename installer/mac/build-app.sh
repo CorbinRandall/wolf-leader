@@ -181,6 +181,19 @@ cat >"$CONTENTS/Info.plist" <<PLIST
 	<string>public.app-category.developer-tools</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<!-- Private hubs may use HTTP inside a LAN, loopback, or encrypted Tailscale network. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key><true/>
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>127.0.0.1</key><dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+			<key>10.0.0.0/8</key><dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+			<key>172.16.0.0/12</key><dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+			<key>192.168.0.0/16</key><dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+			<key>100.64.0.0/10</key><dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+		</dict>
+	</dict>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSAppleEventsUsageDescription</key>

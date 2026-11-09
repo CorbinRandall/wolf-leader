@@ -37,6 +37,7 @@ struct ChatItem: Identifiable, Codable, Hashable {
     var output: String = ""
     var status: Status?
     var at = Date()
+    var images: [ChatImage]?
 }
 
 /// A chat with one agent, in a project or not yet in one. Stored on this Mac so it can be picked
@@ -97,7 +98,7 @@ enum AgentEvent {
 protocol AgentDriver: AnyObject {
     var onEvent: (AgentEvent) -> Void { get set }
     func start() async throws
-    func send(_ text: String) async throws
+    func send(_ text: String, images: [ChatImage]) async throws
     func interrupt()
     func answer(approval id: String, allow: Bool, always: Bool)
     func stop()

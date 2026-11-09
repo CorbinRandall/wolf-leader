@@ -14,21 +14,27 @@ struct ProjectChatsGroup: View {
     private var mine: [ChatRecord] { chats.chats(projectID: entry.id) }
 
     var body: some View {
-        WLGroup(title: "Chats", subtitle: "Talk to any AI agent about this project. Each chat starts with the project's notes, works in the project's folder on the server, and is saved here.",
-                icon: "bubble.left.and.bubble.right") {
-            Button { nav.newChat(project: ProjectRef(entry.project)) } label: { Label("New chat", systemImage: "plus.bubble") }
-                .buttonStyle(PrimaryButtonStyle())
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Chats").font(DS.Font.bodySmall.weight(.semibold))
+                Text("\(mine.count)").font(DS.Font.caption).foregroundStyle(p.textMuted)
+                Spacer()
+                Button { nav.newChat(project: ProjectRef(entry.project)) } label: { Label("New chat", systemImage: "plus.bubble") }
+                    .buttonStyle(SecondaryButtonStyle()).controlSize(.small)
+            }
             if !mine.isEmpty { WLDivider() }
-            let shown = showAll ? mine : Array(mine.prefix(6))
+            let shown = showAll ? mine : Array(mine.prefix(3))
             ForEach(shown) { chat in
                 if chat.id != shown.first?.id { WLDivider() }
                 ChatRow(chat: chat, showProject: false) { nav.open(chat: chat.id, project: entry.id) }
                     .contextMenu { Button("Remove from Chats…", role: .destructive) { removing = chat } }
             }
-            if mine.count > 6 {
+            if mine.count > 3 {
                 Button(showAll ? "Show fewer" : "Show all \(mine.count) chats") { showAll.toggle() }.buttonStyle(OutlineButtonStyle())
             }
         }
+        .padding(12)
+        .background(p.surface, in: RoundedRectangle(cornerRadius: 12))
         .confirmationDialog("Remove “\(removing?.title ?? "")” from Chats?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
             Button("Remove", role: .destructive) { if let removing { chats.remove(removing.id) }; removing = nil }
             Button("Cancel", role: .cancel) { removing = nil }

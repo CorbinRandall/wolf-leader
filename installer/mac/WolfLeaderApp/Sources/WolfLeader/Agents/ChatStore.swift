@@ -10,7 +10,7 @@ final class ChatStore: ObservableObject {
     @Published private(set) var records: [ChatRecord] = []
     private var sessions: [String: ChatSession] = [:]
 
-    static var folder: URL { ConfigStore.supportDir.appendingPathComponent("chats", isDirectory: true) }
+    static var folder: URL { ConfigStore.sessionDir.appendingPathComponent("chats", isDirectory: true) }
 
     private init() {
         load()

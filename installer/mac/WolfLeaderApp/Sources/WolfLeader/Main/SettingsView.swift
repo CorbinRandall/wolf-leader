@@ -284,6 +284,8 @@ private struct SettingsHubGroup: View {
 
     var body: some View {
         WLGroup(title: "Hub", subtitle: "Where this Mac saves and reads memories.", icon: "server.rack") {
+            HubProfileEditor()
+            WLDivider()
             addressRow("Hub address", detail: hubResult?.text ?? "REST API, for example http://wolf.local:6971",
                        example: "http://wolf.local:6971", text: $hubDraft, result: hubResult)
             WLDivider()
@@ -334,9 +336,12 @@ private struct SettingsHubGroup: View {
         let hub = hubDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         let mcp = mcpDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !hub.isEmpty else { return }
-        store.config.hubURL = hub
-        if !mcp.isEmpty { store.config.mcpURL = mcp }
+        store.ensureHubProfiles()
+        let profile = HubProfile(name: URL(string: hub)?.host ?? "Hub", hubURL: hub,
+                                 mcpURL: mcp, sshHost: "", storageID: UUID().uuidString)
+        store.config.hubProfiles = (store.config.hubProfiles ?? []) + [profile]
         store.save()
+        store.switchHub(profile)
         hubDraft = store.config.hubURL
         mcpDraft = store.config.mcpURL
     }
@@ -498,7 +503,7 @@ private struct SettingsUpdatesGroup: View {
                 }
             }
             WLDivider()
-            WLRow(title: "Branch", detail: "Which GitHub branch to follow. Pushes to it show up here as updates.") {
+            WLRow(title: "Branch", detail: "Choose the app branch, then install its update below. This does not change your hub.") {
                 Picker("Branch", selection: Binding(
                     get: { updates.branch },
                     set: { updates.setBranch($0) }

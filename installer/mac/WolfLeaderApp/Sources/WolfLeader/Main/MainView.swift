@@ -142,6 +142,19 @@ struct MainView: View {
                     if updates.appUpdateAvailable || updates.appPhase.active {
                         SidebarUpdateCard()
                     }
+                    HubSwitcher().padding(.horizontal, 10).padding(.top, 6)
+                    Menu {
+                        ForEach(updates.branches.isEmpty ? [updates.branch] : updates.branches, id: \.self) { branch in
+                            Button(branch + (branch == updates.branch ? " ✓" : "")) {
+                                updates.setBranch(branch)
+                                nav.pendingSettingsTab = "updates"
+                                nav.open(section: .settings)
+                            }
+                        }
+                    } label: { Label("App branch: \(updates.branch)", systemImage: "arrow.triangle.branch").lineLimit(1) }
+                    .help("Select an app branch, then install its update in Settings. Your hub stays unchanged.")
+                    .task { await updates.loadBranches() }
+                    .padding(.horizontal, 10).padding(.vertical, 4)
                     HubStatusCard(hubOK: hubOK, hubURL: store.config.hubURL) {
                         nav.open(section: .settings)
                     }
@@ -445,12 +458,11 @@ private struct HubStatusCard: View {
     }
 
     var body: some View {
-        let host = URL(string: hubURL)?.host ?? hubURL
         let (symbol, tint, caption): (String, Color, String) = {
             switch hubOK {
-            case .some(true): return ("server.rack", p.good, "Hub online · \(host)")
-            case .some(false): return ("wifi.exclamationmark", p.bad, "Can't reach hub at \(host)")
-            case .none: return ("hourglass", p.textMuted, "Checking hub · \(host)")
+            case .some(true): return ("server.rack", p.good, "Hub online")
+            case .some(false): return ("wifi.exclamationmark", p.bad, "Hub offline")
+            case .none: return ("hourglass", p.textMuted, "Checking hub")
             }
         }()
         Button(action: action) {

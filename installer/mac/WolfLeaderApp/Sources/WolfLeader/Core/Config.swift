@@ -96,6 +96,8 @@ struct WolfConfig: Codable {
     var branch: String = BuildInfo.branch
     /// Set when setup found an original hub; `upgraded` once the upgrade ran.
     var original: OriginalHub?
+    var hubProfiles: [HubProfile]?
+    var activeHubProfileID: String?
 
     var wolfShare: ShareConfig? { shares.first { $0.role == "wolf" } ?? shares.first }
     /// Obsidian vault on the wolf share, if that share is mounted.
@@ -116,6 +118,14 @@ final class ConfigStore: ObservableObject {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent(BuildInfo.isDev ? "WolfLeaderDev" : "WolfLeader", isDirectory: true)
     }
+    /// Fixed for this process; switching hubs restarts before using another workspace.
+    static let sessionDir: URL = {
+        guard let data = try? Data(contentsOf: supportDir.appendingPathComponent("config.json")),
+              let config = try? JSONDecoder().decode(WolfConfig.self, from: data),
+              let profile = config.hubProfiles?.first(where: { $0.id == config.activeHubProfileID }) else { return supportDir }
+        return profile.workspaceDirectory(base: supportDir)
+    }()
+
     private static var file: URL { supportDir.appendingPathComponent("config.json") }
 
     init() {

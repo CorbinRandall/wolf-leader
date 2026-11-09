@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SidebarProjectFolders: View {
+    @Environment(\.palette) private var p
     @ObservedObject var model: ProjectsModel
     @EnvironmentObject var nav: Navigator
     @ObservedObject private var chats = ChatStore.shared
@@ -33,7 +34,7 @@ struct SidebarProjectFolders: View {
     private func row(for entry: ProjectEntry) -> some View {
         let active = activeChats(for: entry)
         if active.isEmpty {
-            Label(entry.name, systemImage: "folder")
+            Label { Text(entry.name) } icon: { Image(systemName: "folder").foregroundStyle(p.accent) }
                 .tag(SidebarItem.project(entry.id))
                 .onTapGesture { nav.open(project: entry.id) }
                 .contextMenu { menu(for: entry) }
@@ -44,7 +45,7 @@ struct SidebarProjectFolders: View {
                         .onTapGesture { nav.open(chat: chat.id, project: entry.id) }
                 }
             } label: {
-                Label(entry.name, systemImage: "folder")
+                Label { Text(entry.name) } icon: { Image(systemName: "folder").foregroundStyle(p.accent) }
                     .onTapGesture { nav.open(project: entry.id) }
             }
             .contextMenu { menu(for: entry) }

@@ -48,6 +48,7 @@ final class ProjectsModel: ObservableObject {
             // Progress and unfiled sessions are newer hub features; an older hub still gets list and board.
             let progress = (try? await hub.progress())?.projects ?? []
             let byID = Dictionary(progress.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            notice = loadedColumns.isEmpty ? "Connected to an older hub. Projects are available; board features require a newer hub." : nil
             self.columns = loadedColumns
             entries = loadedProjects.map { ProjectEntry(project: $0, progress: byID[$0.id]) }
             unfiled = (try? await hub.unfiledSessions()) ?? []

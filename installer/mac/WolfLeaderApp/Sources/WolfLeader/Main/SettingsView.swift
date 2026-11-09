@@ -353,26 +353,38 @@ private struct SettingsHubGroup: View {
         mcpResult = nil
         let hub = hubDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         let mcp = mcpDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        async let hubOK = HubClient(baseURL: hub).isHealthy(timeout: 6)
+        async let hubOK = Self.projectConnection(hub)
         async let mcpOK = Self.reachable(mcp)
         let (h, m) = await (hubOK, mcpOK)
         hubResult = h
-            ? (ok: true, text: "The hub answered.")
-            : (ok: false, text: "No answer from \(hub)/health.")
         mcpResult = m
             ? (ok: true, text: "The MCP server answered.")
             : (ok: false, text: "No answer from \(mcp).")
     }
 
-    /// Any HTTP response counts: the MCP endpoint rejects plain GETs but still answers.
+    static func projectConnection(_ address: String) async -> (ok: Bool, text: String) {
+        let hub = HubClient(baseURL: address)
+        do {
+            _ = try await hub.projects(limit: 1)
+            let columns = try await hub.kanbanColumns()
+            return (true, columns.isEmpty ? "Projects available. This older hub doesn't support boards." : "Projects and board features are available.")
+        } catch { return (false, error.localizedDescription) }
+    }
+
     static func reachable(_ address: String) async -> Bool {
         guard let url = URL(string: address), url.host != nil else { return false }
         var req = URLRequest(url: url, timeoutInterval: 6)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("text/event-stream, application/json", forHTTPHeaderField: "Accept")
-        // bytes(for:) returns once headers arrive, so an open event stream can't stall the check.
-        guard let answer = try? await URLSession.shared.bytes(for: req) else { return false }
-        answer.0.task.cancel()
-        return answer.1 is HTTPURLResponse
+        req.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": ["protocolVersion": "2024-11-05", "capabilities": [:],
+                       "clientInfo": ["name": "wolf-leader-check", "version": "1"]]
+        ])
+        guard let (data, response) = try? await URLSession.shared.data(for: req),
+              let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return false }
+        return String(decoding: data, as: UTF8.self).contains("\"serverInfo\"")
     }
 }
 

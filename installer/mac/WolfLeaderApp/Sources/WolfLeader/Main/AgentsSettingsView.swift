@@ -10,6 +10,7 @@ struct AgentsSettingsGroup: View {
     @State private var installing: AgentKind?
     @State private var note: (text: String, ok: Bool)?
     @State private var adding = false
+    @AppStorage("wl.claudeModel") private var claudeModel = ""
 
     var body: some View {
         WLGroup(title: "Agents", subtitle: "The AI agents you can start a chat with. Each runs on this Mac with your own account.",
@@ -17,6 +18,18 @@ struct AgentsSettingsGroup: View {
             ForEach(agents.all) { agent in
                 if agent.id != agents.all.first?.id { WLDivider() }
                 AgentRow(agent: agent, busy: runner.running, install: { install(agent) })
+            }
+            WLDivider()
+            VStack(alignment: .leading, spacing: 6) {
+                Picker("Claude model", selection: $claudeModel) {
+                    Text("Claude Code default").tag("")
+                    Text("Fable 5.2").tag("claude-fable-5-2")
+                    Text("Latest Fable").tag("fable")
+                    Text("Latest Opus").tag("opus")
+                    Text("Latest Sonnet").tag("sonnet")
+                }
+                Text("Applies when Claude connects to a chat. Fable 5.2 requires Claude Code 2.1.290 or newer and account access.")
+                    .font(DS.Font.caption).foregroundStyle(p.textMuted)
             }
             WLDivider()
             HStack(spacing: 8) {

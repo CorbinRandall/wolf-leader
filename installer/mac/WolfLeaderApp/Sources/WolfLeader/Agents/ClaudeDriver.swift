@@ -40,6 +40,8 @@ final class ClaudeDriver: AgentDriver {
     func start() async throws {
         var args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                     "--include-partial-messages", "--permission-prompt-tool", "stdio", "--permission-mode", permissionMode]
+        let selectedModel = UserDefaults.standard.string(forKey: "wl.claudeModel")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !selectedModel.isEmpty { args += ["--model", selectedModel] }
         if let resumeID { args += ["--resume", resumeID] }
         if let toolsURL { args += WolfTools.claudeArgs(url: toolsURL) }
         let process = JSONLineProcess(executable: executable, args: args, cwd: cwd, environment: AgentLocator.environment)

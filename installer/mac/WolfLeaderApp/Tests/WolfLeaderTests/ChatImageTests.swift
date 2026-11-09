@@ -19,6 +19,12 @@ final class ChatImageTests: XCTestCase {
         XCTAssertNil(try JSONDecoder().decode(ChatItem.self, from: JSONSerialization.data(withJSONObject: legacy)).images)
     }
 
+    func testDisabledLegacyServerHasTransport() {
+        let args = WolfTools.codexArgs(url: "http://wolf.local:6972/mcp")
+        XCTAssertTrue(args.contains("mcp_servers.ide-storage={command=\"/usr/bin/false\",enabled=false}"))
+        XCTAssertFalse(args.contains("mcp_servers.ide-storage.enabled=false"))
+    }
+
     func testInvalidImageIsRejected() {
         XCTAssertThrowsError(try ChatImage(NSImage()))
     }

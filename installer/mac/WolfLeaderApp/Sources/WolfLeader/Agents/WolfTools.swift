@@ -42,10 +42,11 @@ enum WolfTools {
         let list = blocked.map { "\"\($0)\"" }.joined(separator: ",")
         // Codex holds MCP calls for approval on its own (even with approvals off) unless the server
         // says otherwise; Wolf Leader's tools are always fine to use.
+        // A disabled entry still needs a valid transport when no legacy server is configured.
         return ["-c", "mcp_servers.\(server).url=\"\(url)\"",
                 "-c", "mcp_servers.\(server).disabled_tools=[\(list)]",
                 "-c", "mcp_servers.\(server).default_tools_approval_mode=\"approve\"",
-                "-c", "mcp_servers.ide-storage.enabled=false"]
+                "-c", "mcp_servers.ide-storage={command=\"/usr/bin/false\",enabled=false}"]
     }
 
     /// Agent Client Protocol: an HTTP server in session/new, for agents that take one.

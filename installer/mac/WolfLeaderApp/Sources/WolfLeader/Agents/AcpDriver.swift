@@ -67,10 +67,11 @@ final class AcpDriver: AgentDriver {
         onEvent(.sessionID(id))
     }
 
-    func send(_ text: String) async throws {
+    func send(_ text: String, attachments: [URL]) async throws {
         guard let peer, let sessionID else { throw AgentError.failed("\(name) isn't running.") }
         textID = UUID().uuidString
-        let result = try await peer.request("session/prompt", ["sessionId": sessionID, "prompt": [["type": "text", "text": text]]])
+        let body = [text, Attachments.note(for: attachments)].compactMap { $0 }.joined(separator: "\n\n")
+        let result = try await peer.request("session/prompt", ["sessionId": sessionID, "prompt": [["type": "text", "text": body]]])
         let reason = result["stopReason"] as? String ?? "end_turn"
         onEvent(.turnFinished(error: reason == "refusal" ? "\(name) refused to continue." : nil))
     }

@@ -53,6 +53,7 @@ struct ChatHome: View {
     @AppStorage("wl.chat.agent") private var agentID = "claude"
 
     @State private var draft = ""
+    @State private var files: [URL] = []
     @State private var project: ProjectRef?
     @State private var naming = false
     @State private var newName = ""
@@ -72,7 +73,7 @@ struct ChatHome: View {
         return list
     }
     private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && agent != nil && !starting
+        (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !files.isEmpty) && agent != nil && !starting
             && (!naming || !newName.trimmingCharacters(in: .whitespaces).isEmpty)
     }
 
@@ -190,10 +191,13 @@ struct ChatHome: View {
                 .font(DS.Font.bodyLarge)
                 .lineLimit(3...14)
                 .focused($focus, equals: .message)
+                .shiftReturnNewline()
                 .onSubmit(start)
                 .disabled(starting)
+            AttachmentTray(files: $files)
             HStack(spacing: 10) {
                 agentMenu
+                AttachButton(files: $files)
                 if let project {
                     Label(project.name, systemImage: "folder").font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(1)
                 } else if naming, !newName.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -218,6 +222,7 @@ struct ChatHome: View {
             }
         }
         .padding(16)
+        .acceptsAttachments($files)
         .background(p.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(p.border.opacity(0.8), lineWidth: 0.8))
         .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
@@ -252,6 +257,7 @@ struct ChatHome: View {
     private func start() {
         guard canSend, let agent else { return }
         let text = draft
+        let attached = files
         let name = newName.trimmingCharacters(in: .whitespaces)
         let makeProject = naming
         starting = true
@@ -268,8 +274,9 @@ struct ChatHome: View {
                 }
             }
             let chat = chats.create(project: ref, agent: agent)
-            chats.session(chat.id)?.send(text, config: store)
+            chats.session(chat.id)?.send(text, attachments: attached, config: store)
             draft = ""
+            files = []
             newName = ""
             naming = false
             project = nil

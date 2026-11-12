@@ -57,11 +57,22 @@ final class ClaudeDriver: AgentDriver {
         process.send(["type": "control_request", "request_id": "init", "request": ["subtype": "initialize"]])
     }
 
-    func send(_ text: String) async throws {
+    func send(_ text: String, attachments: [URL]) async throws {
         guard let process, process.isRunning else { throw AgentError.failed("Claude isn't running.") }
+        var content: [[String: Any]] = []
+        var byPath: [URL] = []
+        for url in attachments {
+            if let data = Attachments.inlineData(url) {
+                content.append(["type": "image", "source": ["type": "base64", "media_type": Attachments.mimeType(url), "data": data]])
+            } else {
+                byPath.append(url)
+            }
+        }
+        let body = [text, Attachments.note(for: byPath)].compactMap { $0 }.joined(separator: "\n\n")
+        content.append(["type": "text", "text": body])
         process.send([
             "type": "user",
-            "message": ["role": "user", "content": [["type": "text", "text": text]]],
+            "message": ["role": "user", "content": content],
             "parent_tool_use_id": NSNull(),
             "session_id": "",
         ])

@@ -97,7 +97,8 @@ enum AgentEvent {
 protocol AgentDriver: AnyObject {
     var onEvent: (AgentEvent) -> Void { get set }
     func start() async throws
-    func send(_ text: String) async throws
+    /// Sends a message. Attached images go as images where the agent supports that; other files as paths.
+    func send(_ text: String, attachments: [URL]) async throws
     func interrupt()
     func answer(approval id: String, allow: Bool, always: Bool)
     func stop()

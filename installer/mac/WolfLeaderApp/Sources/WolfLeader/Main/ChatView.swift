@@ -11,6 +11,7 @@ struct ChatView: View {
     @ObservedObject private var rules = ChatRules.shared
     let back: () -> Void
     @State private var draft = ""
+    @State private var files: [URL] = []
     @State private var choosingProject = false
     @State private var snippets: [HubSnippet] = []
     @FocusState private var composing: Bool
@@ -117,8 +118,12 @@ struct ChatView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     if record.items.isEmpty { emptyState }
-                    ForEach(record.items) { item in
-                        ChatItemView(item: item, session: session).id(item.id)
+                    ForEach(ChatSegment.build(record.items)) { segment in
+                        if segment.items.count == 1 {
+                            ChatItemView(item: segment.items[0], session: session).id(segment.id)
+                        } else {
+                            StepGroupView(items: segment.items, session: session).id(segment.id)
+                        }
                     }
                     if session.busy && !session.pendingApprovals {
                         HStack(spacing: 8) {
@@ -145,8 +150,8 @@ struct ChatView: View {
             Text(record.projectName.map { "Ask \(agent?.name ?? "the agent") anything about \($0)." } ?? "Ask \(agent?.name ?? "the agent") anything.")
                 .font(DS.Font.section).foregroundStyle(p.text)
             Text(record.projectID == nil
-                 ? "This chat is saved to Wolf Leader after every reply. Add it to a project any time, and Wolf Leader files it there."
-                 : "It starts with this project's notes, works in the project's folder on the server, and is saved back to the project after every reply.")
+                 ? "Saved after every reply. Add it to a project any time."
+                 : "Starts with this project's notes. Saved after every reply.")
                 .font(DS.Font.bodySmall).foregroundStyle(p.textMuted)
             if !installed, let agent {
                 WLStatusPill(text: "\(agent.name) isn't set up on this Mac yet", kind: .warn)
@@ -167,7 +172,7 @@ struct ChatView: View {
     private func elsewhereBar(_ device: String) -> some View {
         HStack(spacing: 10) {
             ProgressView().controlSize(.small)
-            Text("Working on \(device) right now. Its replies show up here as they're saved; you can send when it's done.")
+            Text("Working on \(device). You can send when it's done.")
                 .font(DS.Font.caption).foregroundStyle(p.text)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
@@ -227,7 +232,7 @@ struct ChatView: View {
     private func signInBar(_ agent: AgentKind) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "person.badge.key").foregroundStyle(p.warn)
-            Text("\(agent.name) needs you to sign in once on this Mac. It opens in Terminal; come back here when it says you're in.")
+            Text("\(agent.name) needs a one-time sign-in. It opens in Terminal.")
                 .font(DS.Font.caption).foregroundStyle(p.text)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
@@ -274,12 +279,17 @@ struct ChatView: View {
     }
 
     private var composer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+        AttachmentTray(files: $files)
         HStack(alignment: .bottom, spacing: 10) {
             snippetMenu
+            AttachButton(files: $files)
+                .disabled(session.busy || busyElsewhere != nil)
             TextField("Message \(agent?.name ?? "the agent")…", text: $draft, axis: .vertical)
                 .lineLimit(1...10)
                 .focused($composing)
                 .mainField()
+                .shiftReturnNewline()
                 .onSubmit(send)
                 .disabled(session.busy || busyElsewhere != nil)
             if session.busy {
@@ -290,9 +300,11 @@ struct ChatView: View {
                 Button("Send", action: send)
                     .buttonStyle(PrimaryButtonStyle())
                     .keyboardShortcut(.return, modifiers: .command)
-                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && files.isEmpty)
             }
         }
+        }
+        .acceptsAttachments($files)
         .padding(.horizontal, DS.Spacing.lg).padding(.vertical, 12)
         .frame(maxWidth: 860 + DS.Spacing.lg * 2)
         .frame(maxWidth: .infinity)
@@ -302,9 +314,11 @@ struct ChatView: View {
 
     private func send() {
         let text = draft
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !session.busy else { return }
+        let attached = files
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attached.isEmpty, !session.busy else { return }
         draft = ""
-        session.send(text, config: store)
+        files = []
+        session.send(text, attachments: attached, config: store)
         composing = true
     }
 }
@@ -456,5 +470,75 @@ struct MarkdownText: View {
     static func attributed(_ text: String) -> AttributedString {
         let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+    }
+}
+
+/// A run of the agent's working steps (tool calls, thinking), or a single other line.
+struct ChatSegment: Identifiable {
+    let items: [ChatItem]
+    var id: String { items.first?.id ?? UUID().uuidString }
+
+    private static func isStep(_ item: ChatItem) -> Bool { item.kind == .tool || item.kind == .thinking }
+
+    static func build(_ items: [ChatItem]) -> [ChatSegment] {
+        var out: [ChatSegment] = []
+        var run: [ChatItem] = []
+        func flush() {
+            guard !run.isEmpty else { return }
+            out.append(ChatSegment(items: run))
+            run = []
+        }
+        for item in items {
+            if isStep(item) { run.append(item) } else { flush(); out.append(ChatSegment(items: [item])) }
+        }
+        flush()
+        return out
+    }
+}
+
+/// Several steps folded into one quiet row: "7 steps", or the step in progress while it runs.
+private struct StepGroupView: View {
+    @Environment(\.palette) private var p
+    let items: [ChatItem]
+    @ObservedObject var session: ChatSession
+    @State private var open = false
+
+    private var tools: [ChatItem] { items.filter { $0.kind == .tool } }
+    private var running: ChatItem? { tools.last { $0.status == .running } }
+    private var failed: Int { tools.filter { $0.status == .failed }.count }
+
+    private var summary: String {
+        if let running { return running.text }
+        let n = tools.count
+        var text = n == 0 ? "Thought it through" : "\(n) step\(n == 1 ? "" : "s")"
+        if failed > 0 { text += " · \(failed) failed" }
+        return text
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button { withAnimation(.easeInOut(duration: 0.15)) { open.toggle() } } label: {
+                HStack(spacing: 8) {
+                    if running != nil {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Image(systemName: failed > 0 ? "exclamationmark.circle" : "checkmark.circle")
+                            .font(.system(size: 11)).foregroundStyle(failed > 0 ? p.bad : p.textFaint)
+                    }
+                    Text(summary).font(DS.Font.caption).foregroundStyle(p.textMuted).lineLimit(1)
+                    Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold)).foregroundStyle(p.textFaint)
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if open {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(items) { ChatItemView(item: $0, session: session) }
+                }
+                .padding(.leading, 18)
+            }
+        }
     }
 }

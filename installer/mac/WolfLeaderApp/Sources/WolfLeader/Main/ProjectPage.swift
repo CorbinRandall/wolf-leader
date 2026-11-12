@@ -71,7 +71,7 @@ struct ProjectPage: View {
             goals
             if let suggestions = progress?.suggestions, !suggestions.isEmpty { fromNotes(suggestions) }
             if let problems = progress?.openProblems, !problems.isEmpty {
-                WLGroup(title: "Still unverified", subtitle: "Open problems from the journal.", icon: "exclamationmark.triangle") {
+                WLGroup(title: "Still unverified", subtitle: "Open problems from the journal.", icon: "exclamationmark.triangle", foldKey: "project.unverified", startsOpen: false) {
                     ForEach(problems) { Text("• \($0.text)").font(DS.Font.bodySmall).foregroundStyle(p.text).textSelection(.enabled) }
                 }
             }
@@ -227,7 +227,7 @@ struct ProjectPage: View {
                     }
                 }
             } else {
-                Text("Where is this project heading? One or two sentences. It is fine to be unsure, and normal for it to change.")
+                Text("Where is this heading? A sentence or two.")
                     .font(DS.Font.bodySmall).foregroundStyle(p.textMuted).fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -265,7 +265,7 @@ struct ProjectPage: View {
     }
 
     private var connected: some View {
-        WLGroup(title: "Connected to", subtitle: "Projects whose journals overlap with this one.", icon: "point.3.connected.trianglepath.dotted") {
+        WLGroup(title: "Connected to", subtitle: "Projects whose journals overlap with this one.", icon: "point.3.connected.trianglepath.dotted", foldKey: "project.connected", startsOpen: false) {
             HStack(spacing: 8) {
                 ForEach(related.prefix(6)) { other in
                     Button(other.name) { open(other.id) }.buttonStyle(OutlineButtonStyle())
@@ -280,7 +280,7 @@ struct ProjectPage: View {
     private var milestones: [HubMilestone] { progress?.milestones ?? [] }
 
     private var goals: some View {
-        WLGroup(title: "The path", subtitle: "A few milestones between here and the North Star, in order, with the goals under each. Re-order or drop them as the star moves.", icon: "point.topleft.down.to.point.bottomright.curvepath") {
+        WLGroup(title: "The path", subtitle: "Milestones toward the North Star, with goals under each.", icon: "point.topleft.down.to.point.bottomright.curvepath") {
             let all = progress?.goals ?? []
             ForEach(Array(milestones.enumerated()), id: \.element.id) { index, milestone in
                 milestoneHeader(milestone, number: index + 1)
@@ -298,7 +298,7 @@ struct ProjectPage: View {
                 WLDivider()
             }
             if all.isEmpty && milestones.isEmpty {
-                Text("Nothing mapped out yet. Add the big chunks first, then the small steps.")
+                Text("Nothing mapped out yet.")
                     .font(DS.Font.bodySmall).foregroundStyle(p.textMuted)
             }
             HStack(spacing: 8) {
@@ -423,7 +423,7 @@ struct ProjectPage: View {
     }
 
     private func fromNotes(_ notes: [HubProgressProject.Note]) -> some View {
-        WLGroup(title: "From your notes", subtitle: "Things the journal says are in progress. Make one a goal if it is worth finishing.", icon: "lightbulb") {
+        WLGroup(title: "From your notes", subtitle: "Things the journal says are in progress. Make one a goal if it is worth finishing.", icon: "lightbulb", foldKey: "project.fromNotes", startsOpen: false) {
             ForEach(notes) { note in
                 HStack(alignment: .top) {
                     Text(note.text).font(DS.Font.bodySmall).foregroundStyle(p.text)
@@ -464,7 +464,7 @@ struct ProjectPage: View {
     // MARK: Logbook
 
     private var logbookGroup: some View {
-        WLGroup(title: "Logbook", subtitle: "What each session did, newest first. Open one to read it.", icon: "book") {
+        WLGroup(title: "Logbook", subtitle: "What each session did, newest first. Open one to read it.", icon: "book", foldKey: "project.logbook", startsOpen: false) {
             VStack(alignment: .leading, spacing: 6) {
                 TextField("Write an entry: what you did, decided or learned", text: $journalText, axis: .vertical)
                     .lineLimit(2...6).mainField()
@@ -528,7 +528,7 @@ struct ProjectPage: View {
             let items = memories.filter { $0.kind == kind }
             return items.isEmpty ? nil : (kind, items)
         }
-        WLGroup(title: "What the journal knows", subtitle: "\(memories.count) memories, by kind. Add one, or remove what is wrong.", icon: "brain") {
+        WLGroup(title: "What the journal knows", subtitle: "\(memories.count) memories", icon: "brain", foldKey: "project.memories", startsOpen: false) {
             HStack(alignment: .top, spacing: 8) {
                 Picker("", selection: $memoryKind) {
                     ForEach(MemoryKind.allCases, id: \.rawValue) { Text($0.label).tag($0.rawValue) }
@@ -545,12 +545,12 @@ struct ProjectPage: View {
                 }
                 .buttonStyle(SecondaryButtonStyle()).disabled(memoryText.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-        }
-        ForEach(groups, id: \.kind) { group in
-            MemoryKindGroup(kind: group.kind, items: group.items) { memory in
-                Task {
-                    do { try await store.hub.deleteMemory(id: memory.id); await load(); await model.reload() }
-                    catch { model.error = error.localizedDescription }
+            ForEach(groups, id: \.kind) { group in
+                MemoryKindGroup(kind: group.kind, items: group.items) { memory in
+                    Task {
+                        do { try await store.hub.deleteMemory(id: memory.id); await load(); await model.reload() }
+                        catch { model.error = error.localizedDescription }
+                    }
                 }
             }
         }
@@ -573,7 +573,7 @@ struct ProjectPage: View {
     // MARK: Brief and where it lives
 
     private var knowledge: some View {
-        WLGroup(title: "Project brief", subtitle: briefSubtitle, icon: "doc.text") {
+        WLGroup(title: "Project brief", subtitle: briefSubtitle, icon: "doc.text", foldKey: "project.brief", startsOpen: false) {
             if let text = brief?.briefMarkdown, !text.isEmpty {
                 if showBrief {
                     Text(text).font(.system(size: 12, design: .monospaced)).foregroundStyle(p.text)
@@ -612,7 +612,7 @@ struct ProjectPage: View {
     @ViewBuilder
     private var whereItLives: some View {
         Group {
-            WLGroup(title: "Where it lives", icon: "folder") {
+            WLGroup(title: "Where it lives", icon: "folder", foldKey: "project.whereItLives", startsOpen: false) {
                 if !entry.project.tags.isEmpty {
                     HStack(spacing: 6) {
                         Text("Topics").font(DS.Font.micro).foregroundStyle(p.textMuted)
@@ -716,9 +716,11 @@ private struct MemoryKindGroup: View {
     let items: [HubMemory]
     let remove: (HubMemory) -> Void
     @State private var expanded = false
+    @State private var open = false
 
     var body: some View {
-        WLGroup(title: kind.label, subtitle: "\(items.count) \(items.count == 1 ? "memory" : "memories")", icon: kind.symbol) {
+        DisclosureGroup(isExpanded: $open) {
+          VStack(alignment: .leading, spacing: 10) {
             ForEach(expanded ? items : Array(items.prefix(5))) { memory in
                 if memory.id != items.first?.id { WLDivider() }
                 HStack(alignment: .top) {
@@ -731,6 +733,11 @@ private struct MemoryKindGroup: View {
             if items.count > 5 {
                 Button(expanded ? "Show fewer" : "Show all \(items.count)") { expanded.toggle() }.buttonStyle(OutlineButtonStyle())
             }
+          }
+          .padding(.top, 6)
+        } label: {
+            Label("\(kind.label) · \(items.count)", systemImage: kind.symbol)
+                .font(DS.Font.body).foregroundStyle(p.text)
         }
     }
 }

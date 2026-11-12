@@ -14,7 +14,7 @@ struct ProjectChatsGroup: View {
     private var mine: [ChatRecord] { chats.chats(projectID: entry.id) }
 
     var body: some View {
-        WLGroup(title: "Chats", subtitle: "Talk to any AI agent about this project. Each chat starts with the project's notes, works in the project's folder on the server, and is saved here.",
+        WLGroup(title: "Chats", subtitle: "Every chat starts with this project's notes and is saved here.",
                 icon: "bubble.left.and.bubble.right") {
             Button { nav.newChat(project: ProjectRef(entry.project)) } label: { Label("New chat", systemImage: "plus.bubble") }
                 .buttonStyle(PrimaryButtonStyle())

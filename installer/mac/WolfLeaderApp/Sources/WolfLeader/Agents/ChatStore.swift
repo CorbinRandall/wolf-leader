@@ -243,9 +243,9 @@ final class ChatSession: ObservableObject, Identifiable {
     /// This device, as the other devices see it.
     private var thisDevice: String { ChatSync.shared.device }
 
-    func send(_ text: String, config: ConfigStore) {
+    func send(_ text: String, attachments: [URL] = [], config: ConfigStore) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !busy else { return }
+        guard !text.isEmpty || !attachments.isEmpty, !busy else { return }
         if let other = record.busyElsewhere(than: thisDevice) {
             append(ChatItem(id: UUID().uuidString, kind: .note,
                             text: "This chat is working on \(other) right now. Send again when it's done there."))
@@ -268,8 +268,9 @@ final class ChatSession: ObservableObject, Identifiable {
             append(ChatItem(id: UUID().uuidString, kind: .note, text: "Skills updated — reconnecting to pick them up."))
         }
         let earlier = record.items
-        append(ChatItem(id: UUID().uuidString, kind: .user, text: text))
-        if record.title == "New chat" { record.title = AgentText.oneLine(text, limit: 60) }
+        let shown = [text, attachments.isEmpty ? "" : Attachments.label(for: attachments)].filter { !$0.isEmpty }.joined(separator: "\n\n")
+        append(ChatItem(id: UUID().uuidString, kind: .user, text: shown))
+        if record.title == "New chat" { record.title = AgentText.oneLine(text.isEmpty ? shown : text, limit: 60) }
         busy = true
         claim()
         persist()
@@ -292,10 +293,10 @@ final class ChatSession: ObservableObject, Identifiable {
                 if record.needsHandoff == true, let handoff = WolfChatSync.handoff(earlier, agentName: record.agent?.name ?? "the agent") {
                     parts.append(handoff)
                 }
-                parts.append(text)
+                if !text.isEmpty { parts.append(text) }
                 record.contextSent = true
                 record.needsHandoff = nil
-                try await driver?.send(parts.joined(separator: "\n\n"))
+                try await driver?.send(parts.joined(separator: "\n\n"), attachments: attachments)
             } catch {
                 fail(error.localizedDescription)
             }

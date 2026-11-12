@@ -346,7 +346,7 @@ private struct FocusCard: View {
                 if let star = entry.progress?.northStar, !star.isEmpty {
                     HStack(alignment: .top, spacing: 5) {
                         Image(systemName: "star.fill").font(.system(size: 9)).foregroundStyle(p.accent2).padding(.top, 2)
-                        Text(star).font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(2).multilineTextAlignment(.leading)
+                        Text(star).font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(1).multilineTextAlignment(.leading)
                     }
                 }
                 if let progress = entry.progress, let milestone = progress.currentMilestone,
@@ -357,26 +357,13 @@ private struct FocusCard: View {
                 if let next = entry.progress?.nextStep {
                     VStack(alignment: .leading, spacing: 3) {
                         WLEyebrow("Next step", color: p.accent)
-                        Text(next.text).font(DS.Font.bodySmall.weight(.medium)).foregroundStyle(p.text).lineLimit(3)
+                        Text(next.text).font(DS.Font.bodySmall.weight(.medium)).foregroundStyle(p.text).lineLimit(2)
                             .multilineTextAlignment(.leading)
-                        if !next.doneWhen.isEmpty {
-                            Text("Done when: \(next.doneWhen)").font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(2)
-                        }
+                            .help(next.doneWhen.isEmpty ? next.text : "Done when: \(next.doneWhen)")
                     }
                 } else {
-                    Text(entry.whereItStands.isEmpty ? "No next step yet. Open it and add a goal." : entry.whereItStands)
-                        .font(DS.Font.bodySmall).foregroundStyle(p.textMuted).lineLimit(3).multilineTextAlignment(.leading)
-                }
-                let goals = entry.openGoals.filter { $0.phase == "now" }.prefix(3)
-                if goals.count > 1 {
-                    VStack(alignment: .leading, spacing: 4) {
-                        ForEach(Array(goals.dropFirst())) { goal in
-                            HStack(spacing: 6) {
-                                Image(systemName: "circle").font(.system(size: 8)).foregroundStyle(p.textFaint)
-                                Text(goal.title).font(DS.Font.micro).foregroundStyle(p.text).lineLimit(1)
-                            }
-                        }
-                    }
+                    Text(entry.whereItStands.isEmpty ? "No next step yet." : entry.whereItStands)
+                        .font(DS.Font.bodySmall).foregroundStyle(p.textMuted).lineLimit(2).multilineTextAlignment(.leading)
                 }
                 HStack { ProjectCounts(entry: entry); Spacer(minLength: 0) }
             }
@@ -405,7 +392,7 @@ private struct LooseSessionsSheet: View {
                 VStack(alignment: .leading, spacing: 4) {
                     WLEyebrow("Loose sessions")
                     Text("Chats that belong to no project").font(DS.Font.section).foregroundStyle(p.text)
-                    Text("Chats that match a project are filed by themselves. Move the rest to One-offs to keep things tidy.")
+                    Text("Matching chats file themselves. Move the rest to One-offs.")
                         .font(DS.Font.micro).foregroundStyle(p.textMuted).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
@@ -437,7 +424,7 @@ private struct LooseSessionsSheet: View {
                                         Text(session.summary).font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(2)
                                             .multilineTextAlignment(.leading)
                                     }
-                                    Text("\(HubDate.format(session.happenedAt)) · \(session.messages) messages · click to read")
+                                    Text("\(HubDate.format(session.happenedAt)) · \(session.messages) messages")
                                         .font(DS.Font.micro).foregroundStyle(p.textFaint)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
@@ -550,9 +537,9 @@ struct ProjectBoard: View {
                 OwnerTag(entry: entry, model: model)
             }
             if let next = entry.progress?.nextStep {
-                Text("Next: \(next.text)").font(DS.Font.micro).foregroundStyle(p.text).lineLimit(3)
+                Text("Next: \(next.text)").font(DS.Font.micro).foregroundStyle(p.text).lineLimit(2)
             } else if let description = entry.project.description {
-                Text(description).font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(3)
+                Text(description).font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(2)
             }
             ProjectCounts(entry: entry)
             HStack {
@@ -652,7 +639,7 @@ struct BuildPromptSheet: View {
             WLEyebrow("Start a build")
             Text(entry.name).font(DS.Font.page).foregroundStyle(p.text)
             if let prompt {
-                Text("Ready. Start building and the AI you pick gets this in a new chat in the project, along with everything Wolf Leader knows about it.")
+                Text("Ready. The AI you pick gets this plus the project's context.")
                     .font(DS.Font.bodySmall).foregroundStyle(p.textMuted)
                 ScrollView {
                     Text(prompt.body).font(.system(size: 12, design: .monospaced)).foregroundStyle(p.text)
@@ -684,7 +671,7 @@ struct BuildPromptSheet: View {
                     .menuStyle(.button).fixedSize()
                 }
             } else {
-                Text("Choose what to build. The prompt includes only these goals, plus the constraints and decisions that bear on them.")
+                Text("Pick the goals to build.")
                     .font(DS.Font.bodySmall).foregroundStyle(p.textMuted)
                 if let error { WLStatusPill(text: error, kind: .bad) }
                 ScrollView {
@@ -769,7 +756,7 @@ struct NewProjectSheet: View {
             VStack(alignment: .leading, spacing: 4) {
                 WLEyebrow("New project")
                 Text("Start something").font(DS.Font.page).foregroundStyle(p.text)
-                Text("Only the name is needed. Everything else can be filled in or changed later.")
+                Text("Just a name. The rest can come later.")
                     .font(DS.Font.bodySmall).foregroundStyle(p.textMuted)
             }
             .padding(24)

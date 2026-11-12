@@ -71,10 +71,12 @@ struct MainView: View {
     @AppStorage("wl.sidebar.showLibrary") private var showLibrary: Bool = true
     @State private var hubOK: Bool? = nil
     @State private var toolbarQuery = ""
+    @State private var showAllProjects = false
     @State private var removingChat: ChatRecord?
 
     var body: some View {
         NavigationSplitView {
+            VStack(spacing: 0) {
             List(selection: Binding<SidebarItem?>(
                 get: { SidebarItem(nav.route) },
                 set: { if let item = $0 { item.open(in: nav) } }
@@ -93,25 +95,8 @@ struct MainView: View {
                     Label("New chat", systemImage: "square.and.pencil").tag(SidebarItem.newChat)
                     Label(MainSection.ask.label, systemImage: MainSection.ask.symbol).tag(SidebarItem.section(.ask))
                 }
-                Section("Projects") {
-                    Label("All projects", systemImage: "list.bullet").tag(SidebarItem.projects)
-                    if showNoProject {
-                        let loose = chats.records.filter { $0.projectID == nil }
-                        DisclosureGroup {
-                            if loose.isEmpty {
-                                Text("No chats yet").font(DS.Font.caption).foregroundStyle(p.textFaint).selectionDisabled()
-                            } else {
-                                ForEach(loose.prefix(8), id: \.id) { chat in
-                                    let symbol = chat.agent?.symbol ?? "bubble.left"
-                                    Label(chat.title, systemImage: symbol).tag(SidebarItem.chat(chat.id))
-                                }
-                            }
-                        } label: {
-                            Label("No project", systemImage: "questionmark.folder")
-                        }
-                    }
-                    SidebarProjectFolders(model: projectsModel)
-                }
+                SidebarProjectsSection(showAll: $showAllProjects)
+                SidebarChatsSection(removing: $removingChat)
                 Section {
                     Label(MainSection.library.label, systemImage: MainSection.library.symbol).tag(SidebarItem.library)
                     Label(MainSection.shares.label, systemImage: MainSection.shares.symbol).tag(SidebarItem.section(.shares))
@@ -134,18 +119,32 @@ struct MainView: View {
             }
             .listStyle(.sidebar)
             .tint(p.accent)
-            .contextMenu {
-                Button("Sidebar settings") { nav.open(section: .settings) }
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
+            .frame(maxHeight: .infinity)
+            Divider()
                 VStack(spacing: 0) {
                     if updates.appUpdateAvailable || updates.appPhase.active {
                         SidebarUpdateCard()
                     }
+                    HubSwitcher().padding(.horizontal, 10).padding(.top, 6)
+                    Menu {
+                        ForEach(updates.branches.isEmpty ? [updates.branch] : updates.branches, id: \.self) { branch in
+                            Button(branch + (branch == updates.branch ? " ✓" : "")) {
+                                updates.setBranch(branch)
+                                nav.pendingSettingsTab = "updates"
+                                nav.open(section: .settings)
+                            }
+                        }
+                    } label: { Label("App branch: \(updates.branch)", systemImage: "arrow.triangle.branch").lineLimit(1) }
+                    .help("Select an app branch, then install its update in Settings. Your hub stays unchanged.")
+                    .task { await updates.loadBranches() }
+                    .padding(.horizontal, 10).padding(.vertical, 4)
                     HubStatusCard(hubOK: hubOK, hubURL: store.config.hubURL) {
                         nav.open(section: .settings)
                     }
                 }
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity)
+                .background(p.background)
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 320)
         } detail: {
@@ -319,11 +318,12 @@ private struct SidebarChatsSection: View {
     @Environment(\.palette) private var p
     @ObservedObject private var chats = ChatStore.shared
     @Binding var removing: ChatRecord?
+    @AppStorage("wl.sidebar.chatsExpanded") private var expanded = false
 
     var body: some View {
         let running = chats.records.filter { chats.isRunning($0.id) || needsYou($0) }
         let recent = running + chats.records.filter { r in !running.contains { $0.id == r.id } }.prefix(max(0, 15 - running.count))
-        Section("Chats") {
+        Section("Chats", isExpanded: $expanded) {
             if recent.isEmpty {
                 Text("No chats yet").font(DS.Font.caption).foregroundStyle(p.textFaint).selectionDisabled()
             }
@@ -445,12 +445,11 @@ private struct HubStatusCard: View {
     }
 
     var body: some View {
-        let host = URL(string: hubURL)?.host ?? hubURL
         let (symbol, tint, caption): (String, Color, String) = {
             switch hubOK {
-            case .some(true): return ("server.rack", p.good, "Hub online · \(host)")
-            case .some(false): return ("wifi.exclamationmark", p.bad, "Can't reach hub at \(host)")
-            case .none: return ("hourglass", p.textMuted, "Checking hub · \(host)")
+            case .some(true): return ("server.rack", p.good, "Hub online")
+            case .some(false): return ("wifi.exclamationmark", p.bad, "Hub offline")
+            case .none: return ("hourglass", p.textMuted, "Checking hub")
             }
         }()
         Button(action: action) {

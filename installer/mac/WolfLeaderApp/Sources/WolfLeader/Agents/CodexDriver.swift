@@ -95,11 +95,11 @@ final class CodexDriver: AgentDriver {
         return nil
     }
 
-    func send(_ text: String) async throws {
+    func send(_ text: String, images: [ChatImage]) async throws {
         guard let peer, let threadID else { throw AgentError.failed("Codex isn't running.") }
         let result = try await peer.request("turn/start", [
             "threadId": threadID,
-            "input": [["type": "text", "text": text]],
+            "input": [["type": "text", "text": text]] + images.map { ["type": "image", "url": "data:image/png;base64," + $0.data.base64EncodedString()] },
         ])
         turnID = (result["turn"] as? [String: Any])?["id"] as? String
     }

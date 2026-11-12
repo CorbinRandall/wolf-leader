@@ -40,6 +40,8 @@ final class ClaudeDriver: AgentDriver {
     func start() async throws {
         var args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                     "--include-partial-messages", "--permission-prompt-tool", "stdio", "--permission-mode", permissionMode]
+        let selectedModel = UserDefaults.standard.string(forKey: "wl.claudeModel")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !selectedModel.isEmpty { args += ["--model", selectedModel] }
         if let resumeID { args += ["--resume", resumeID] }
         if let toolsURL { args += WolfTools.claudeArgs(url: toolsURL) }
         let process = JSONLineProcess(executable: executable, args: args, cwd: cwd, environment: AgentLocator.environment)
@@ -57,11 +59,11 @@ final class ClaudeDriver: AgentDriver {
         process.send(["type": "control_request", "request_id": "init", "request": ["subtype": "initialize"]])
     }
 
-    func send(_ text: String) async throws {
+    func send(_ text: String, images: [ChatImage]) async throws {
         guard let process, process.isRunning else { throw AgentError.failed("Claude isn't running.") }
         process.send([
             "type": "user",
-            "message": ["role": "user", "content": [["type": "text", "text": text]]],
+            "message": ["role": "user", "content": [["type": "text", "text": text] as [String: Any]] + images.map { ["type": "image", "source": ["type": "base64", "media_type": "image/png", "data": $0.data.base64EncodedString()]] }],
             "parent_tool_use_id": NSNull(),
             "session_id": "",
         ])

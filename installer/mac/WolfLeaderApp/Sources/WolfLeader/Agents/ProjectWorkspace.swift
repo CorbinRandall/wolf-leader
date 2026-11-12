@@ -8,8 +8,8 @@ enum ProjectWorkspace {
     /// The SSH host for the server; `wolf` is the alias Wolf Leader's setup adds to ~/.ssh/config.
     static var sshHost: String { UserDefaults.standard.string(forKey: "wl.serverSSHHost") ?? "wolf" }
 
-    static var root: URL { ConfigStore.supportDir.appendingPathComponent("projects", isDirectory: true) }
-    static var looseRoot: URL { ConfigStore.supportDir.appendingPathComponent("loose-chats", isDirectory: true) }
+    static var root: URL { ConfigStore.sessionDir.appendingPathComponent("projects", isDirectory: true) }
+    static var looseRoot: URL { ConfigStore.sessionDir.appendingPathComponent("loose-chats", isDirectory: true) }
 
     static func folder(slug: String) -> URL { root.appendingPathComponent(safe(slug), isDirectory: true) }
 

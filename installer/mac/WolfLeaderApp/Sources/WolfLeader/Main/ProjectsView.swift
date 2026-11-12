@@ -84,7 +84,7 @@ struct ProjectsView: View {
                     Button { starting = true } label: { Label("New project", systemImage: "plus") }
                         .buttonStyle(PrimaryButtonStyle())
                         .keyboardShortcut("n", modifiers: .command)
-                    if tab.wrappedValue == .board {
+                    if tab.wrappedValue == .board && !model.columns.isEmpty {
                         Button("Add column") { columnEditor = ColumnEditorContext() }.buttonStyle(SecondaryButtonStyle())
                     }
                     Button { Task { await model.reload() } } label: { Image(systemName: "arrow.clockwise") }
@@ -100,8 +100,8 @@ struct ProjectsView: View {
             if model.loading && model.entries.isEmpty {
                 ProgressView("Reading the journal…")
             } else if model.entries.isEmpty, model.error != nil {
-                MainNotice(symbol: "wifi.exclamationmark", title: "Can't reach your hub at \(store.config.hubURL)",
-                           message: "Check the hub address in Settings.") {
+                MainNotice(symbol: "wifi.exclamationmark", title: "Couldn't load projects",
+                           message: model.error ?? "Check the connection in Settings.") {
                     Button("Check Settings", action: openSettings).buttonStyle(OutlineButtonStyle())
                     Button("Try again") { Task { await model.reload() } }.buttonStyle(SecondaryButtonStyle())
                 }
@@ -109,7 +109,11 @@ struct ProjectsView: View {
                 switch tab.wrappedValue {
                 case .focus: focus
                 case .board:
+                    if model.columns.isEmpty {
+                        MainNotice(symbol: "rectangle.3.group", title: "Board unavailable on this hub", message: "Use All projects to view this hub's projects. Board features require a newer hub.") { }
+                    } else {
                     ProjectBoard(model: model, entries: shown, open: { openID = $0.id }, editColumn: { columnEditor = ColumnEditorContext(column: $0) })
+                    }
                 case .all: list
                 }
             }

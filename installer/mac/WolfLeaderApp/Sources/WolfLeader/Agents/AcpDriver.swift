@@ -67,7 +67,8 @@ final class AcpDriver: AgentDriver {
         onEvent(.sessionID(id))
     }
 
-    func send(_ text: String) async throws {
+    func send(_ text: String, images: [ChatImage]) async throws {
+        guard images.isEmpty else { throw AgentError.failed("Image attachments are supported by Claude and Codex chats.") }
         guard let peer, let sessionID else { throw AgentError.failed("\(name) isn't running.") }
         textID = UUID().uuidString
         let result = try await peer.request("session/prompt", ["sessionId": sessionID, "prompt": [["type": "text", "text": text]]])

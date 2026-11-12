@@ -480,7 +480,12 @@ extension HubClient {
     }
 
     func kanbanColumns() async throws -> [HubKanbanColumn] {
-        try await get("/api/kanban/columns", as: HubList<HubKanbanColumn>.self).items
+        do {
+            return try await get("/api/kanban/columns", as: HubList<HubKanbanColumn>.self).items
+        } catch HubError.http(404) {
+            // Original hubs expose projects but predate customizable boards.
+            return []
+        }
     }
 
     func createKanbanColumn(label: String, description: String) async throws -> [HubKanbanColumn] {

@@ -276,6 +276,15 @@ class SkillImport(BaseModel):
     overwrite: bool = False
 
 
+class NewSkill(BaseModel):
+    name: str
+    description: str = ""
+
+
+class SkillFileUpdate(BaseModel):
+    content: str
+
+
 class SnippetCreate(BaseModel):
     title: Optional[str] = None
     language: Optional[str] = None
@@ -1470,6 +1479,58 @@ async def api_get_skill(skill_name: str):
         raise HTTPException(status_code=404, detail="Skill not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/skills")
+async def api_create_skill(body: NewSkill):
+    from ide_storage.skill_registry import create_skill
+
+    try:
+        skill = create_skill(body.name, body.description)
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=f"Skill already exists: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"skill": skill, "message": f"Created {skill['name']}"}
+
+
+@app.get("/api/skills/{skill_name}/files/{file_path:path}")
+async def api_read_skill_file(skill_name: str, file_path: str):
+    from ide_storage.skill_registry import read_skill_file
+
+    try:
+        content = read_skill_file(skill_name, file_path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"content": content, "path": file_path}
+
+
+@app.put("/api/skills/{skill_name}/files/{file_path:path}")
+async def api_write_skill_file(skill_name: str, file_path: str, body: SkillFileUpdate):
+    from ide_storage.skill_registry import write_skill_file
+
+    try:
+        skill = write_skill_file(skill_name, file_path, body.content)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"skill": skill, "message": f"Saved {file_path}"}
+
+
+@app.delete("/api/skills/{skill_name}/files/{file_path:path}")
+async def api_delete_skill_file(skill_name: str, file_path: str):
+    from ide_storage.skill_registry import delete_skill_file
+
+    try:
+        skill = delete_skill_file(skill_name, file_path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"skill": skill, "message": f"Deleted {file_path}"}
 
 
 @app.get("/api/projects/{project_id}/chats")

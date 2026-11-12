@@ -27,7 +27,9 @@ def guess_kind(text: str, default: str = "about") -> str:
         return "avoid"
     if re.search(r"\b(reply|replies|answer|short|plain|tone|wording|write|explain|bullet|jargon)\b", t):
         return "style"
-    if re.search(r"\b(mac|windows|linux|server|ssh|cursor|codex|claude|editor|terminal|unraid|docker)\b", t):
+    if re.search(r"\b(ssh|tailscale|proxmox|subnet|vlan|firewall|router|opnsense|pfsense|nas|vm|lxc|homelab server|ip address|dns|port forward|reverse proxy|nginx|caddy|bbq|babyprox)\b", t):
+        return "infrastructure"
+    if re.search(r"\b(mac|windows|linux|server|cursor|codex|claude|editor|terminal|unraid|docker)\b", t):
         return "tools"
     if re.search(r"\b(prefer|likes?|wants?|always|first|before|ask)\b", t):
         return "preference"

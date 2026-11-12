@@ -17,6 +17,7 @@ KINDS = {
     "preference": "How I like to work",
     "style": "How I like answers written",
     "tools": "My tools and setup",
+    "infrastructure": "My infrastructure",
     "avoid": "Please don't",
 }
 SOURCES = ("manual", "claude", "codex", "cursor", "chatgpt", "journal", "import", "history", "ai")

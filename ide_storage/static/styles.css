@@ -897,6 +897,74 @@ body {
 }
 .empty-library h3 { color: var(--text); margin-bottom: 0.35rem; }
 
+/* Live skill editor */
+.skill-editor {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-top: 0.75rem;
+}
+.skill-editor-files {
+  display: flex;
+  overflow-x: auto;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+  scrollbar-width: thin;
+}
+.skill-editor-file-tab {
+  padding: 0.45rem 1rem;
+  font-size: 0.78rem;
+  font-family: var(--mono);
+  color: var(--text-muted);
+  cursor: pointer;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  white-space: nowrap;
+  transition: color 0.1s, background 0.1s;
+}
+.skill-editor-file-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: var(--bg);
+}
+.skill-editor-file-tab:hover:not(.active) { background: var(--bg-hover); }
+.skill-editor-textarea {
+  width: 100%;
+  min-height: 420px;
+  padding: 1rem;
+  background: var(--bg);
+  color: var(--text);
+  border: none;
+  font-family: var(--mono);
+  font-size: 0.84rem;
+  line-height: 1.65;
+  resize: vertical;
+  outline: none;
+  tab-size: 2;
+}
+.skill-editor-textarea:focus { background: #0d1016; }
+.skill-editor-actions {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.65rem 0.75rem;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.btn-danger {
+  background: transparent;
+  border: 1px solid #ef4444;
+  color: #ef4444;
+}
+.btn-danger:hover { background: rgba(239, 68, 68, 0.1); }
+
 .modal-note {
   margin-bottom: 0.9rem;
   color: var(--text-muted);

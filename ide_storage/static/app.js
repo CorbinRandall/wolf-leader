@@ -29,6 +29,10 @@ let state = {
   skills: [],
   skillsLibrary: null,
   activeSkillId: null,
+  // live editor
+  editorSkillId: null,
+  editorFilePath: null,
+  editorSkillFiles: [],
 };
 
 const $ = (s) => document.querySelector(s);
@@ -498,14 +502,221 @@ async function selectSkill(skillId) {
   state.activeSkillId = skillId;
   renderSidebar();
   renderSkills();
+  exitEditMode();
   const detail = await api(`/api/skills/${encodeURIComponent(skillId)}`);
+  state.editorSkillFiles = detail.files || [];
   $("#skill-detail").classList.remove("hidden");
   $("#skill-detail-title").textContent = detail.name;
   $("#skill-detail-meta").textContent = `${detail.file_count} files · ${formatBytes(detail.size_bytes)} · ${detail.files.join(", ")}`;
   $("#skill-detail-content").innerHTML = md(skillInstructions(detail.content));
+  $("#skill-detail-content").classList.remove("hidden");
   $("#download-skill-btn").href = `/api/skills/${encodeURIComponent(skillId)}/download`;
   $("#skill-detail").scrollIntoView({ behavior: "smooth", block: "start" });
 }
+
+// ---------------------------------------------------------------------------
+// Live skill editor
+// ---------------------------------------------------------------------------
+
+const TEXT_EXTS = new Set([
+  ".md", ".txt", ".py", ".js", ".ts", ".sh", ".yaml", ".yml", ".json",
+  ".toml", ".ini", ".cfg", ".conf", ".env", ".bat", ".cmd", ".ps1",
+  ".rb", ".go", ".rs", ".css", ".html", ".xml", ".sql", ".tf",
+]);
+
+function isTextFile(path) {
+  const dot = path.lastIndexOf(".");
+  const ext = dot >= 0 ? path.slice(dot).toLowerCase() : "";
+  return TEXT_EXTS.has(ext) || ext === "";
+}
+
+function exitEditMode() {
+  state.editorSkillId = null;
+  state.editorFilePath = null;
+  $("#skill-editor")?.classList.add("hidden");
+  $("#skill-detail-content")?.classList.remove("hidden");
+  $("#edit-skill-btn")?.classList.remove("hidden");
+}
+
+function renderEditorFileTabs() {
+  const container = $("#skill-editor-files");
+  if (!container) return;
+  const textFiles = state.editorSkillFiles.filter(isTextFile);
+  container.innerHTML = textFiles.map((f) =>
+    `<button type="button" class="skill-editor-file-tab${f === state.editorFilePath ? " active" : ""}" data-file="${escapeHtml(f)}">${escapeHtml(f)}</button>`
+  ).join("");
+  container.querySelectorAll("[data-file]").forEach((btn) =>
+    btn.addEventListener("click", () => loadEditorFile(btn.dataset.file))
+  );
+  // Show delete-file button only for non-SKILL.md files
+  const delBtn = $("#delete-editor-file-btn");
+  if (delBtn) {
+    delBtn.classList.toggle("hidden", state.editorFilePath === "SKILL.md" || !state.editorFilePath);
+  }
+}
+
+async function loadEditorFile(filePath) {
+  state.editorFilePath = filePath;
+  renderEditorFileTabs();
+  const area = $("#skill-editor-textarea");
+  area.value = "Loading…";
+  area.disabled = true;
+  try {
+    const res = await api(`/api/skills/${encodeURIComponent(state.editorSkillId)}/files/${encodeURIComponent(filePath)}`);
+    area.value = res.content;
+  } catch (err) {
+    area.value = "";
+    showToast(`Could not load ${filePath}: ${err.message}`);
+  } finally {
+    area.disabled = false;
+    area.focus();
+  }
+}
+
+async function enterEditMode(skillId) {
+  state.editorSkillId = skillId;
+  state.editorFilePath = null;
+  $("#skill-detail-content").classList.add("hidden");
+  $("#edit-skill-btn").classList.add("hidden");
+  const editor = $("#skill-editor");
+  editor.classList.remove("hidden");
+  renderEditorFileTabs();
+  // Load SKILL.md by default
+  const firstText = state.editorSkillFiles.filter(isTextFile)[0] || "SKILL.md";
+  await loadEditorFile(firstText);
+  editor.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function saveEditorFile() {
+  if (!state.editorSkillId || !state.editorFilePath) return;
+  const content = $("#skill-editor-textarea").value;
+  const btn = $("#save-skill-btn");
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+  try {
+    const res = await fetch(`${API}/api/skills/${encodeURIComponent(state.editorSkillId)}/files/${encodeURIComponent(state.editorFilePath)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.detail || res.statusText);
+    // Refresh skill in state
+    state.skillsLibrary = await api("/api/skills");
+    state.skills = state.skillsLibrary.skills || [];
+    state.editorSkillFiles = body.skill?.files || state.editorSkillFiles;
+    renderSkills();
+    showToast(`Saved ${state.editorFilePath}`);
+    // If SKILL.md was saved, refresh the preview title/meta in the background
+    if (state.editorFilePath === "SKILL.md") {
+      $("#skill-detail-title").textContent = body.skill?.name || state.editorSkillId;
+      const f = body.skill?.file_count ?? "?";
+      const s = body.skill?.size_bytes ?? 0;
+      $("#skill-detail-meta").textContent = `${f} files · ${formatBytes(s)} · ${(body.skill?.files || []).join(", ")}`;
+    }
+  } catch (err) {
+    showToast(`Save failed: ${err.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Save";
+  }
+}
+
+async function addEditorFile() {
+  const raw = prompt("New file path (e.g. scripts/run.sh or notes.md):");
+  if (!raw) return;
+  const filePath = raw.trim();
+  if (!filePath || filePath.includes("..") || filePath.startsWith("/")) {
+    showToast("Invalid file path");
+    return;
+  }
+  if (!state.editorSkillFiles.includes(filePath)) {
+    state.editorSkillFiles = [...state.editorSkillFiles, filePath];
+  }
+  await loadEditorFile(filePath);
+}
+
+async function deleteEditorFile() {
+  if (!state.editorSkillId || !state.editorFilePath || state.editorFilePath === "SKILL.md") return;
+  if (!confirm(`Delete ${state.editorFilePath} from this skill?`)) return;
+  try {
+    const res = await fetch(`${API}/api/skills/${encodeURIComponent(state.editorSkillId)}/files/${encodeURIComponent(state.editorFilePath)}`, {
+      method: "DELETE",
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.detail || res.statusText);
+    state.editorSkillFiles = body.skill?.files || state.editorSkillFiles.filter((f) => f !== state.editorFilePath);
+    state.skillsLibrary = await api("/api/skills");
+    state.skills = state.skillsLibrary.skills || [];
+    renderSkills();
+    showToast(`Deleted ${state.editorFilePath}`);
+    const firstText = state.editorSkillFiles.filter(isTextFile)[0] || "SKILL.md";
+    await loadEditorFile(firstText);
+  } catch (err) {
+    showToast(`Delete failed: ${err.message}`);
+  }
+}
+
+async function deleteCurrentSkill() {
+  if (!state.activeSkillId) return;
+  const skill = state.skills.find((s) => s.id === state.activeSkillId);
+  if (!confirm(`Delete the skill "${skill?.name || state.activeSkillId}"? It will be moved to trash.`)) return;
+  try {
+    const res = await fetch(`${API}/api/skills/${encodeURIComponent(state.activeSkillId)}`, { method: "DELETE" });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.detail || res.statusText);
+    state.activeSkillId = null;
+    state.skillsLibrary = await api("/api/skills");
+    state.skills = state.skillsLibrary.skills || [];
+    exitEditMode();
+    $("#skill-detail").classList.add("hidden");
+    renderSidebar();
+    renderSkills();
+    showToast("Skill deleted");
+  } catch (err) {
+    showToast(`Delete failed: ${err.message}`);
+  }
+}
+
+async function createNewSkill() {
+  const rawName = prompt("Skill name (lowercase letters, numbers, hyphens):");
+  if (!rawName) return;
+  const name = rawName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/^-+|-+$/g, "");
+  if (!name) { showToast("Invalid skill name"); return; }
+  const description = prompt("One-line description (optional):") ?? "";
+  try {
+    const res = await fetch(`${API}/api/skills`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, description: description.trim() }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.status === 409) { showToast(`A skill named "${name}" already exists`); return; }
+    if (!res.ok) throw new Error(body.detail || res.statusText);
+    state.skillsLibrary = await api("/api/skills");
+    state.skills = state.skillsLibrary.skills || [];
+    renderSidebar();
+    renderSkills();
+    showToast(`Created ${body.skill?.name || name}`);
+    await selectSkill(name);
+    await enterEditMode(name);
+  } catch (err) {
+    showToast(`Could not create skill: ${err.message}`);
+  }
+}
+
+$("#new-skill-btn").addEventListener("click", createNewSkill);
+$("#edit-skill-btn").addEventListener("click", () => {
+  if (state.activeSkillId) enterEditMode(state.activeSkillId);
+});
+$("#cancel-edit-btn").addEventListener("click", () => {
+  exitEditMode();
+  if (state.activeSkillId) selectSkill(state.activeSkillId);
+});
+$("#save-skill-btn").addEventListener("click", saveEditorFile);
+$("#add-skill-file-btn").addEventListener("click", addEditorFile);
+$("#delete-editor-file-btn").addEventListener("click", deleteEditorFile);
+$("#delete-skill-btn").addEventListener("click", deleteCurrentSkill);
 
 // Add a skill: upload button, click-to-choose, or drag a folder / ZIP / SKILL.md onto the page.
 function fileToBase64(file) {

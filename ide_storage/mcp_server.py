@@ -164,8 +164,9 @@ def remember(
 def add_to_profile(text: str, kind: str = "about", person: Optional[str] = None) -> dict:
     """Save something lasting the user said about themselves to their Wolf Leader profile, which
     every AI tool they use reads. Use it when they say "remember that I...", or state a preference
-    that holds beyond this task. kind: about, preference, style, tools, infrastructure, avoid.
-    Use infrastructure for servers, networking, SSH details, and homelab topology. Tell them in one line."""
+    that holds beyond this task. kind: about, preference, style, tools, environment, avoid.
+    Use environment for anything about their technical setup that spans projects: servers, networking,
+    SSH access, how they run agents locally, global config, homelab topology. Tell them in one line."""
     from .owners import configured_owners
     from .profiles import add_item
 

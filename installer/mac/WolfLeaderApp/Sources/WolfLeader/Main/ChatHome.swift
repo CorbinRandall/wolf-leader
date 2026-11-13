@@ -203,6 +203,7 @@ struct ChatHome: View {
             HStack(spacing: 10) {
                 agentMenu
                 AttachButton(files: $files)
+                MicButton(id: "new-chat", draft: $draft)
                 ModelMenu(agent: agent, model: model, effort: effort) { m, e in
                     model = m
                     effort = e
@@ -270,6 +271,7 @@ struct ChatHome: View {
 
     private func start() {
         guard canSend, let agent else { return }
+        Dictation.shared.stop()
         let text = draft
         let attached = files
         let name = newName.trimmingCharacters(in: .whitespaces)

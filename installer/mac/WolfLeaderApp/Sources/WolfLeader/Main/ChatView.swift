@@ -31,7 +31,14 @@ struct ChatView: View {
             composer
         }
         .background(p.background)
-        .onAppear { composing = true }
+        .onAppear {
+            composing = true
+            Speaker.shared.activeChatID = session.record.id
+        }
+        .onDisappear {
+            if Speaker.shared.activeChatID == session.record.id { Speaker.shared.activeChatID = nil; Speaker.shared.stop() }
+            if Dictation.shared.isListening(session.record.id) { Dictation.shared.stop() }
+        }
         .sheet(isPresented: $choosingProject) {
             ProjectPickerSheet(current: record.projectID) { session.attach(to: $0, config: store) }
                 .environment(\.palette, p)
@@ -288,6 +295,9 @@ struct ChatView: View {
             snippetMenu
             AttachButton(files: $files)
                 .disabled(session.busy || busyElsewhere != nil)
+            MicButton(id: session.record.id, draft: $draft)
+                .disabled(session.busy || busyElsewhere != nil)
+            ReadAloudButton()
             TextField("Message \(agent?.name ?? "the agent")…", text: $draft, axis: .vertical)
                 .lineLimit(1...10)
                 .focused($composing)
@@ -319,6 +329,8 @@ struct ChatView: View {
         let text = draft
         let attached = files
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attached.isEmpty, !session.busy else { return }
+        Dictation.shared.stop()
+        Speaker.shared.stop()
         draft = ""
         files = []
         session.send(text, attachments: attached, config: store)

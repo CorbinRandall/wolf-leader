@@ -497,6 +497,10 @@ final class ChatSession: ObservableObject, Identifiable {
         persist()
         saveToHub()
         sendFilesToServer()
+        // Read the reply aloud, when that's turned on and this chat is on screen.
+        let lastUser = record.items.lastIndex { $0.kind == .user } ?? -1
+        let reply = record.items[(lastUser + 1)...].filter { $0.kind == .agent }.map(\.text).joined(separator: "\n\n")
+        Speaker.shared.replyFinished(chatID: record.id, text: reply)
     }
 
     /// The agent's changes go back to the project's folder on the server after every reply.

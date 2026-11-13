@@ -38,9 +38,15 @@ enum SidebarItem: Hashable {
 
     @MainActor init(_ route: Route) {
         switch route.section {
-        case .chats: self = route.chatID.map { .chat($0) } ?? (route.chatList ? .allChats : .newChat)
+        case .chats:
+            // A chat in a project keeps its project lit in the sidebar: that's where you are.
+            if let id = route.chatID {
+                self = ChatStore.shared.record(id)?.projectID.map { .project($0) } ?? .chat(id)
+            } else {
+                self = route.chatList ? .allChats : .newChat
+            }
         case .projects: self = route.projectID.map { .project($0) } ?? .projects
-        case .library: self = .library
+        case .library, .shares: self = .section(.settings)
         default: self = .section(route.section)
         }
     }
@@ -68,7 +74,6 @@ struct MainView: View {
     @StateObject private var projectsModel = ProjectsModel()
     @ObservedObject private var chats = ChatStore.shared
     @AppStorage("wl.sidebar.showNoProject") private var showNoProject: Bool = true
-    @AppStorage("wl.sidebar.showLibrary") private var showLibrary: Bool = true
     @State private var hubOK: Bool? = nil
     @State private var toolbarQuery = ""
     @State private var removingChat: ChatRecord?
@@ -94,27 +99,13 @@ struct MainView: View {
                     Label(MainSection.ask.label, systemImage: MainSection.ask.symbol).tag(SidebarItem.section(.ask))
                 }
                 Section("Projects") {
-                    Label("All projects", systemImage: "list.bullet").tag(SidebarItem.projects)
-                    if showNoProject {
-                        let loose = chats.records.filter { $0.projectID == nil }
-                        DisclosureGroup {
-                            if loose.isEmpty {
-                                Text("No chats yet").font(DS.Font.caption).foregroundStyle(p.textFaint).selectionDisabled()
-                            } else {
-                                ForEach(loose.prefix(8), id: \.id) { chat in
-                                    let symbol = chat.agent?.symbol ?? "bubble.left"
-                                    Label(chat.title, systemImage: symbol).tag(SidebarItem.chat(chat.id))
-                                }
-                            }
-                        } label: {
-                            Label("No project", systemImage: "questionmark.folder")
-                        }
-                    }
                     SidebarProjectFolders(model: projectsModel)
+                    Label("All projects", systemImage: "list.bullet").tag(SidebarItem.projects)
+                    if showNoProject, chats.records.contains(where: { $0.projectID == nil }) {
+                        Label("Loose chats", systemImage: "tray").tag(SidebarItem.allChats)
+                    }
                 }
                 Section {
-                    Label(MainSection.library.label, systemImage: MainSection.library.symbol).tag(SidebarItem.library)
-                    Label(MainSection.shares.label, systemImage: MainSection.shares.symbol).tag(SidebarItem.section(.shares))
                     Label {
                         HStack(spacing: 6) {
                             Text(MainSection.settings.label)
@@ -232,7 +223,7 @@ struct MainView: View {
             } else if nav.route.chatList {
                 AllChatsView()
             } else {
-                ChatHome()
+                ChatHome(model: projectsModel)
             }
         case .projects:
             ProjectsView(openSettings: { nav.open(section: .settings) }, model: projectsModel)
@@ -245,132 +236,6 @@ struct MainView: View {
         case .settings:
             SettingsView()
         }
-    }
-}
-
-/// Sidebar: open projects, most recently used first. Click one to open it; its + starts a chat in it.
-private struct SidebarProjectsSection: View {
-    @EnvironmentObject private var nav: Navigator
-    @Environment(\.palette) private var p
-    @ObservedObject private var projects = RecentProjects.shared
-    @ObservedObject private var chats = ChatStore.shared
-    @Binding var showAll: Bool
-
-    var body: some View {
-        let recent = projects.recent(chats: chats.records)
-        let shown = showAll ? Array(recent.prefix(25)) : Array(recent.prefix(6))
-        Section {
-            ForEach(shown) { project in
-                SidebarProjectRow(project: project,
-                                  working: chats.records.contains { $0.projectID == project.id && chats.isRunning($0.id) })
-                    .tag(SidebarItem.project(project.id))
-            }
-            if recent.count > 6 {
-                Button(showAll ? "Show fewer" : "Show more") { showAll.toggle() }
-                    .buttonStyle(.plain).font(DS.Font.caption).foregroundStyle(p.textMuted)
-                    .selectionDisabled()
-            }
-            Label("All projects", systemImage: "square.grid.2x2").tag(SidebarItem.projects)
-        } header: {
-            HStack {
-                Text("Projects")
-                Spacer()
-                Button { nav.newChat(newProject: true) } label: { Image(systemName: "plus") }
-                    .buttonStyle(.plain)
-                    .help("New project: name it, then say what you want")
-            }
-        }
-    }
-}
-
-private struct SidebarProjectRow: View {
-    @EnvironmentObject private var nav: Navigator
-    @Environment(\.palette) private var p
-    let project: HubProject
-    let working: Bool
-    @State private var hovering = false
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Label(project.name, systemImage: "folder").lineLimit(1)
-            Spacer(minLength: 0)
-            if working { ProgressView().controlSize(.mini) }
-            if hovering {
-                Button { nav.newChat(project: ProjectRef(project)) } label: {
-                    Image(systemName: "plus.bubble").font(.system(size: 11, weight: .semibold))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(p.accent)
-                .help("New chat in \(project.name)")
-            }
-        }
-        .onHover { hovering = $0 }
-        .contextMenu {
-            Button("New chat in \(project.name)") { nav.newChat(project: ProjectRef(project)) }
-            Button("Open project") { nav.open(project: project.id) }
-        }
-    }
-}
-
-/// Sidebar: recent chats from every project. A chat that's working shows a spinner, one that
-/// needs your OK shows a dot, and both stay listed however old they are.
-private struct SidebarChatsSection: View {
-    @EnvironmentObject private var nav: Navigator
-    @Environment(\.palette) private var p
-    @ObservedObject private var chats = ChatStore.shared
-    @Binding var removing: ChatRecord?
-
-    var body: some View {
-        let running = chats.records.filter { chats.isRunning($0.id) || needsYou($0) }
-        let recent = running + chats.records.filter { r in !running.contains { $0.id == r.id } }.prefix(max(0, 15 - running.count))
-        Section("Chats") {
-            if recent.isEmpty {
-                Text("No chats yet").font(DS.Font.caption).foregroundStyle(p.textFaint).selectionDisabled()
-            }
-            ForEach(recent) { chat in
-                SidebarChatRow(chat: chat, working: chats.isRunning(chat.id), needsYou: needsYou(chat))
-                    .tag(SidebarItem.chat(chat.id))
-                    .contextMenu {
-                        if let id = chat.projectID { Button("Open \(chat.projectName ?? "project")") { nav.open(project: id) } }
-                        Button("Remove from Chats…", role: .destructive) { removing = chat }
-                    }
-            }
-            if chats.records.count > recent.count {
-                Label("All chats", systemImage: "list.bullet").tag(SidebarItem.allChats)
-            }
-        }
-    }
-
-    private func needsYou(_ chat: ChatRecord) -> Bool {
-        chats.isRunning(chat.id) && chat.items.contains { $0.kind == .approval && $0.status == .pending }
-    }
-}
-
-private struct SidebarChatRow: View {
-    @Environment(\.palette) private var p
-    let chat: ChatRecord
-    let working: Bool
-    let needsYou: Bool
-
-    var body: some View {
-        HStack(spacing: 6) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(chat.title).lineLimit(1)
-                if let project = chat.projectName {
-                    Text(project).font(DS.Font.micro).foregroundStyle(p.textFaint).lineLimit(1)
-                }
-            }
-            Spacer(minLength: 0)
-            if needsYou {
-                Circle().fill(p.accent2).frame(width: 7, height: 7).help("Waiting for your OK")
-            } else if working {
-                ProgressView().controlSize(.mini).help("Working")
-            } else if chat.busyElsewhere(than: ChatSync.shared.device) != nil {
-                Image(systemName: "desktopcomputer").font(.system(size: 10)).foregroundStyle(p.textFaint)
-                    .help("Working on another device")
-            }
-        }
-        .help([chat.title, chat.projectName, chat.agent?.name].compactMap { $0 }.joined(separator: " · "))
     }
 }
 

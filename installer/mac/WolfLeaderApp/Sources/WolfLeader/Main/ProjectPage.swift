@@ -63,10 +63,10 @@ struct ProjectPage: View {
             if let notice { WLStatusPill(text: notice, kind: .good) }
             if let error = model.error { WLStatusPill(text: error, kind: .bad) }
 
+            ContinueCard(entry: entry, lastSession: logbook.first)
             ProjectChatsGroup(entry: entry)
 
             northStarCard
-            stands
             if !related.isEmpty { connected }
             goals
             if let suggestions = progress?.suggestions, !suggestions.isEmpty { fromNotes(suggestions) }
@@ -241,26 +241,6 @@ struct ProjectPage: View {
         Task {
             do { try await store.hub.deleteNorthStarVersion(id: version.id); await load() }
             catch { model.error = error.localizedDescription }
-        }
-    }
-
-    // MARK: Where it stands
-
-    private var stands: some View {
-        WLGroup(title: "Where it stands", icon: "location") {
-            Text(entry.whereItStands.isEmpty ? "Nothing saved yet." : entry.whereItStands)
-                .font(DS.Font.bodySmall).foregroundStyle(p.text).textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-            if let next = progress?.nextStep {
-                VStack(alignment: .leading, spacing: 3) {
-                    WLEyebrow("Next useful step", color: p.accent)
-                    Text(next.text).font(DS.Font.bodySmall.weight(.medium)).foregroundStyle(p.text)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if !next.doneWhen.isEmpty {
-                        Text("Done when: \(next.doneWhen)").font(DS.Font.micro).foregroundStyle(p.textMuted)
-                    }
-                }
-            }
         }
     }
 

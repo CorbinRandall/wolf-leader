@@ -14,11 +14,12 @@ struct ProjectChatsGroup: View {
     private var mine: [ChatRecord] { chats.chats(projectID: entry.id) }
 
     var body: some View {
-        WLGroup(title: "Chats", subtitle: "Every chat starts with this project's notes and is saved here.",
-                icon: "bubble.left.and.bubble.right") {
-            Button { nav.newChat(project: ProjectRef(entry.project)) } label: { Label("New chat", systemImage: "plus.bubble") }
-                .buttonStyle(PrimaryButtonStyle())
-            if !mine.isEmpty { WLDivider() }
+        if mine.count > 1 { timeline }
+    }
+
+    private var timeline: some View {
+        WLGroup(title: "Conversations", subtitle: "\(mine.count) in this project, newest first.",
+                icon: "bubble.left.and.bubble.right", foldKey: "project.chats", startsOpen: false) {
             let shown = showAll ? mine : Array(mine.prefix(6))
             ForEach(shown) { chat in
                 if chat.id != shown.first?.id { WLDivider() }

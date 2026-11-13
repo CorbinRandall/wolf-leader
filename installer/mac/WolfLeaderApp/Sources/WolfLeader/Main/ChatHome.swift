@@ -51,6 +51,7 @@ struct ChatHome: View {
     @ObservedObject private var projects = RecentProjects.shared
     @ObservedObject private var chats = ChatStore.shared
     @AppStorage("wl.chat.agent") private var agentID = "claude"
+    @ObservedObject var model: ProjectsModel
 
     @State private var draft = ""
     @State private var files: [URL] = []
@@ -89,6 +90,7 @@ struct ChatHome: View {
                 composer
                 if let error { WLStatusPill(text: error, kind: .bad) }
                 if ready.isEmpty && !agents.scanning { noAgents }
+                if project == nil && !naming && draft.isEmpty { PickUpStrip(model: model).padding(.top, DS.Spacing.sm) }
                 Spacer(minLength: 40)
             }
             .padding(.horizontal, DS.Spacing.lg)

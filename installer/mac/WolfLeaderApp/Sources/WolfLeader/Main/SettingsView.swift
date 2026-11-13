@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum SettingsTab: String, Hashable {
-    case general, rules, hub, updates, about, sidebar
+    case general, rules, hub, updates, about, sidebar, library, shares
 }
 
 struct SettingsView: View {
@@ -17,6 +17,8 @@ struct SettingsView: View {
             WLTab(id: .hub, title: "Hub", icon: "server.rack"),
             WLTab(id: .updates, title: "Updates", icon: "arrow.triangle.2.circlepath", attention: updates.needsAttention),
             WLTab(id: .sidebar, title: "Sidebar", icon: "sidebar.left"),
+            WLTab(id: .library, title: "Library", icon: "rectangle.3.group"),
+            WLTab(id: .shares, title: "Shares", icon: "externaldrive.connected.to.line.below"),
             WLTab(id: .about, title: "About", icon: "info.circle"),
         ]
     }
@@ -42,9 +44,16 @@ struct SettingsView: View {
                 SettingsUpdatesGroup(runner: updates.runner)
             case .sidebar:
                 SettingsSidebarGroup()
+            case .library, .shares:
+                EmptyView()
             case .about:
                 SettingsAboutGroup()
             }
+        }
+        .onChange(of: tab) { _, picked in
+            // Library and Shares are full pages of their own; the tab is the way in.
+            if picked == .library { tab = .general; nav.open(libraryTab: nav.route.libraryTab) }
+            if picked == .shares { tab = .general; nav.open(section: .shares) }
         }
         .onAppear(perform: takePendingTab)
         .onChange(of: nav.pendingSettingsTab) { _, _ in takePendingTab() }
@@ -616,16 +625,11 @@ struct SettingsLogBox: View {
 
 private struct SettingsSidebarGroup: View {
     @AppStorage("wl.sidebar.showNoProject") private var showNoProject: Bool = true
-    @AppStorage("wl.sidebar.showLibrary") private var showLibrary: Bool = true
 
     var body: some View {
         WLGroup(title: "Sidebar", subtitle: "Control what shows up in the sidebar.", icon: "sidebar.left") {
-            WLRow(title: "Show \u{201C}No project\u{201D} folder", detail: "Chats not yet connected to a project.") {
+            WLRow(title: "Show \u{201C}Loose chats\u{201D}", detail: "Chats not yet connected to a project.") {
                 Toggle("", isOn: $showNoProject).wlSwitch()
-            }
-            WLDivider()
-            WLRow(title: "Show Library section", detail: "Skills, People, Bring in, My tools, Backups, Cleanup, Snippets.") {
-                Toggle("", isOn: $showLibrary).wlSwitch()
             }
             WLDivider()
             WLRow(title: "Project order", detail: "Drag projects in the sidebar to reorder them.") {
@@ -638,7 +642,6 @@ private struct SettingsSidebarGroup: View {
             WLRow(title: "Show everything") {
                 Button("Reset") {
                     showNoProject = true
-                    showLibrary = true
                     UserDefaults.standard.removeObject(forKey: "wl.sidebar.projectOrder")
                 }
                 .buttonStyle(SecondaryButtonStyle())

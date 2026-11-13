@@ -22,9 +22,12 @@ final class ClaudeDriver: AgentDriver {
     private let toolsURL: String?
     private let model: String?
     private let effort: String?
+    /// The screen tools, when Screen control is on for this chat.
+    private let screen: ScreenControl.Command?
 
     init(executable: String, cwd: String, mode: PermissionMode, resumeID: String?, toolsURL: String? = nil,
-         model: String? = nil, effort: String? = nil) {
+         model: String? = nil, effort: String? = nil, screen: ScreenControl.Command? = nil) {
+        self.screen = screen
         self.model = model
         self.effort = effort
         self.executable = executable
@@ -48,7 +51,7 @@ final class ClaudeDriver: AgentDriver {
         if let resumeID { args += ["--resume", resumeID] }
         if let model { args += ["--model", model] }
         if let effort { args += ["--effort", effort] }
-        if let toolsURL { args += WolfTools.claudeArgs(url: toolsURL) }
+        args += WolfTools.claudeArgs(url: toolsURL, screen: screen)
         let process = JSONLineProcess(executable: executable, args: args, cwd: cwd, environment: AgentLocator.environment)
         process.onMessage = { [weak self] message in MainActor.assumeIsolated { self?.handle(message) } }
         process.onExit = { [weak self] code, tail in

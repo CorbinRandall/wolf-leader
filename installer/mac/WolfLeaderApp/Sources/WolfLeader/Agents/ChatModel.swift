@@ -54,6 +54,8 @@ struct ChatRecord: Identifiable, Codable, Hashable {
     /// The model and effort level to run, as the agent names them. nil = the agent's own default.
     var model: String?
     var effort: String?
+    /// The device where Screen control is on for this chat (the AI may see and use that Mac). nil: off.
+    var screenControlDevice: String?
     /// The agent's own session or thread id, so a chat can be resumed after the app restarts.
     var agentSessionID: String?
     var items: [ChatItem]

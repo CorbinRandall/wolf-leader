@@ -247,6 +247,8 @@ final class ChatSession: ObservableObject, Identifiable {
 
     /// This device, as the other devices see it.
     private var thisDevice: String { ChatSync.shared.device }
+    /// The AI has been told it has the screen tools (said once each time they're turned on, per app run).
+    private var screenToldOn = false
 
     func send(_ text: String, attachments: [URL] = [], config: ConfigStore) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -294,6 +296,10 @@ final class ChatSession: ObservableObject, Identifiable {
                     // Your rules and skills for every chat, whichever agent runs it.
                     if let rules = await ChatRules.shared.contextBlock(hub: hub) { parts.append(rules) }
                     if ChatRules.shared.hubTools { parts.append(WolfTools.instructions(projectSlug: record.projectSlug)) }
+                }
+                if screenControl, !screenToldOn {
+                    parts.append(ScreenControl.instructions)
+                    screenToldOn = true
                 }
                 if record.needsHandoff == true, let handoff = WolfChatSync.handoff(earlier, agentName: record.agent?.name ?? "the agent") {
                     parts.append(handoff)
@@ -371,6 +377,26 @@ final class ChatSession: ObservableObject, Identifiable {
         if !busy { driver?.stop(); driver = nil }
     }
 
+    /// Screen control is on for this chat, on this Mac.
+    var screenControl: Bool { record.screenControlDevice == thisDevice }
+
+    /// Let the AI see and use this Mac in this chat, or stop. Like the mode, the tools are fixed
+    /// when the agent starts, so it restarts (resuming its session) for the next message.
+    func setScreenControl(_ on: Bool) {
+        guard on != screenControl else { return }
+        if on, ScreenControl.command == nil {
+            append(ChatItem(id: UUID().uuidString, kind: .error, text: ScreenControl.missing))
+            return
+        }
+        record.screenControlDevice = on ? thisDevice : nil
+        screenToldOn = false
+        append(ChatItem(id: UUID().uuidString, kind: .note,
+                        text: on ? "Screen control is on: \(record.agent?.name ?? "the AI") can see and use this Mac in this chat, starting with your next message."
+                                 : "Screen control is off."))
+        persist()
+        if !busy { driver?.stop(); driver = nil }
+    }
+
     /// Connect a chat to a project (or move it to another one). The hub refiles it, and the next
     /// message brings in that project's notes.
     func attach(to project: ProjectRef, config: ConfigStore) {
@@ -411,17 +437,18 @@ final class ChatSession: ObservableObject, Identifiable {
         if resumeID == nil, record.items.filter({ $0.kind == .user }).count > 1 { record.needsHandoff = true }
         // Wolf Leader's tools (search, recall, remember…) in the chat, unless the rules turn them off.
         let tools = WolfTools.url(hubURL: hubURL)
+        let screen = screenControl ? ScreenControl.command : nil
         let driver: AgentDriver
         switch agent.proto {
         case .claude:
             driver = ClaudeDriver(executable: executable, cwd: record.cwd, mode: record.mode, resumeID: resumeID, toolsURL: tools,
-                                  model: record.model, effort: record.effort)
+                                  model: record.model, effort: record.effort, screen: screen)
         case .codex:
             driver = CodexDriver(executable: executable, args: agent.args, cwd: record.cwd, mode: record.mode, resumeID: resumeID,
-                                 toolsURL: tools, model: record.model, effort: record.effort)
+                                 toolsURL: tools, model: record.model, effort: record.effort, screen: screen)
         case .acp:
             driver = AcpDriver(name: agent.name, executable: executable, args: agent.args, cwd: record.cwd, mode: record.mode,
-                               resumeID: resumeID, toolsURL: tools)
+                               resumeID: resumeID, toolsURL: tools, screen: screen)
         }
         driver.onEvent = { [weak self] event in self?.apply(event) }
         self.driver = driver

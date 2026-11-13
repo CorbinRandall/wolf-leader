@@ -22,9 +22,11 @@ final class AcpDriver: AgentDriver {
 
     /// The hub's MCP address (Wolf Leader's tools in this chat), or nil for none.
     private let toolsURL: String?
+    private let screen: ScreenControl.Command?
 
     init(name: String, executable: String, args: [String], cwd: String, mode: PermissionMode, resumeID: String?,
-         toolsURL: String? = nil) {
+         toolsURL: String? = nil, screen: ScreenControl.Command? = nil) {
+        self.screen = screen
         self.toolsURL = toolsURL
         self.name = name
         self.executable = executable
@@ -54,7 +56,7 @@ final class AcpDriver: AgentDriver {
         let capabilities = hello["agentCapabilities"] as? [String: Any]
         let canLoad = capabilities?["loadSession"] as? Bool ?? false
         // Wolf Leader's tools, for agents that can take an HTTP MCP server.
-        let servers = WolfTools.acpServers(url: toolsURL, capabilities: capabilities)
+        let servers = WolfTools.acpServers(url: toolsURL, capabilities: capabilities) + (screen.map { [ScreenControl.acpServer($0)] } ?? [])
         if let sessionID, canLoad {
             replaying = true
             defer { replaying = false }

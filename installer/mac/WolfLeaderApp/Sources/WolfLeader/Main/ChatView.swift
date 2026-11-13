@@ -13,6 +13,7 @@ struct ChatView: View {
     @State private var draft = ""
     @State private var files: [URL] = []
     @State private var choosingProject = false
+    @State private var confirmingScreen = false
     @State private var snippets: [HubSnippet] = []
     @FocusState private var composing: Bool
 
@@ -38,6 +39,14 @@ struct ChatView: View {
         .onDisappear {
             if Speaker.shared.activeChatID == session.record.id { Speaker.shared.activeChatID = nil; Speaker.shared.stop() }
             if Dictation.shared.isListening(session.record.id) { Dictation.shared.stop() }
+        }
+        .confirmationDialog("Let \(agent?.name ?? "the AI") control this Mac?", isPresented: $confirmingScreen) {
+            Button("Turn on Screen control") { session.setScreenControl(true) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(rules.neverAsk || record.mode == .auto
+                 ? "In this chat it will be able to see your screen, click and type in any app. This chat doesn't ask first, so it will act without checking with you. Switch to \u{201C}Ask first\u{201D} if you want to approve each step."
+                 : "In this chat it will be able to see your screen, click and type in any app. It asks before each step. Turn it off when you're done.")
         }
         .sheet(isPresented: $choosingProject) {
             ProjectPickerSheet(current: record.projectID) { session.attach(to: $0, config: store) }
@@ -74,6 +83,18 @@ struct ChatView: View {
                 .buttonStyle(.borderless)
                 .help(record.projectID == nil ? "Connect this chat to a project. Wolf Leader files it there." : "Move this chat to another project")
                 saveBadge
+                Button {
+                    if session.screenControl { session.setScreenControl(false) } else { confirmingScreen = true }
+                } label: {
+                    Label(session.screenControl ? "Controlling this Mac" : "Screen control",
+                          systemImage: session.screenControl ? "cursorarrow.rays" : "cursorarrow")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(session.screenControl ? p.bad : p.textMuted)
+                }
+                .buttonStyle(.borderless)
+                .disabled(session.busy)
+                .help(session.screenControl ? "\(agent?.name ?? "The AI") can see and use this Mac in this chat. Click to stop."
+                      : "Let \(agent?.name ?? "the AI") see and use this Mac in this chat")
                 ModelMenu(agent: agent, model: record.model, effort: record.effort,
                           choose: { session.setModel($0, effort: $1) },
                           font: .system(size: 11, weight: .semibold))

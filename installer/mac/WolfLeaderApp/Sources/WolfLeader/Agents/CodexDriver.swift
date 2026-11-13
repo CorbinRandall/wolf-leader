@@ -17,12 +17,13 @@ final class CodexDriver: AgentDriver {
     private let model: String?
 
     init(executable: String, args: [String], cwd: String, mode: PermissionMode, resumeID: String?, toolsURL: String? = nil,
-         model: String? = nil, effort: String? = nil) {
+         model: String? = nil, effort: String? = nil, screen: ScreenControl.Command? = nil) {
         self.executable = executable
         self.model = model
         // Config overrides go before the subcommand (`codex -c … app-server`).
         let effortArgs = effort.map { ["-c", "model_reasoning_effort=\"\($0)\""] } ?? []
-        self.args = (toolsURL.map { WolfTools.codexArgs(url: $0) } ?? []) + effortArgs + args
+        self.args = (toolsURL.map { WolfTools.codexArgs(url: $0) } ?? []) + (screen.map { ScreenControl.codexArgs($0) } ?? [])
+            + effortArgs + args
         self.cwd = cwd
         self.mode = mode
         self.threadID = resumeID

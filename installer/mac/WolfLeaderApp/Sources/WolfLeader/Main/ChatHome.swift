@@ -203,6 +203,7 @@ struct ChatHome: View {
             HStack(spacing: 10) {
                 agentMenu
                 AttachButton(files: $files)
+                ScreenButton(files: $files)
                 MicButton(id: "new-chat", draft: $draft)
                 ModelMenu(agent: agent, model: model, effort: effort) { m, e in
                     model = m
@@ -290,7 +291,7 @@ struct ChatHome: View {
                 }
             }
             let chat = chats.create(project: ref, agent: agent, model: model, effort: effort)
-            chats.session(chat.id)?.send(text, attachments: attached, config: store)
+            chats.session(chat.id)?.send(text, attachments: await ScreenShare.shared.adding(to: attached), config: store)
             draft = ""
             files = []
             newName = ""

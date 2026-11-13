@@ -295,6 +295,8 @@ struct ChatView: View {
             snippetMenu
             AttachButton(files: $files)
                 .disabled(session.busy || busyElsewhere != nil)
+            ScreenButton(files: $files)
+                .disabled(session.busy || busyElsewhere != nil)
             MicButton(id: session.record.id, draft: $draft)
                 .disabled(session.busy || busyElsewhere != nil)
             ReadAloudButton()
@@ -333,7 +335,12 @@ struct ChatView: View {
         Speaker.shared.stop()
         draft = ""
         files = []
-        session.send(text, attachments: attached, config: store)
+        if ScreenShare.shared.everyMessage {
+            // Sharing the screen: take a fresh picture to go with this message.
+            Task { session.send(text, attachments: await ScreenShare.shared.adding(to: attached), config: store) }
+        } else {
+            session.send(text, attachments: attached, config: store)
+        }
         composing = true
     }
 }

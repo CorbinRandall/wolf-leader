@@ -356,6 +356,15 @@ class MemoryUpdate(BaseModel):
     semantic_descriptor: Optional[str] = None
 
 
+@app.get("/chat")
+async def web_chat():
+    """The chat app. It talks to the helper on the person's own computer (ide_storage.bridge)."""
+    page = STATIC_DIR / "chat.html"
+    if not page.is_file():
+        raise HTTPException(status_code=404, detail="Chat page not installed")
+    return FileResponse(page, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
 @app.get("/")
 async def web_ui():
     """Chat directory web UI."""

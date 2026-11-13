@@ -64,6 +64,16 @@ jobs:
           test -f ~/.claude/skills/wolfhowl/SKILL.md
           grep -q wolf-leader-save.sh ~/.claude/settings.json
 
+      - name: The chat app starts and shows its page
+        run: |
+          set -e
+          grep -q "bridge.py" ~/.local/share/applications/wolf-leader.desktop
+          python3 ~/.local/share/wolf-leader/chat/bridge.py --hub http://127.0.0.1:6971 &
+          sleep 3
+          curl -fsS http://127.0.0.1:6974/bridge/status | grep -q '"ok": true'
+          curl -fsS http://127.0.0.1:6974/chat | grep -q "Wolf Leader"
+          curl -fsS http://127.0.0.1:6974/health | grep -q healthy
+
       - name: A Claude Code chat saves itself through the hook
         run: |
           set -e

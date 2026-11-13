@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wolf Leader</title>
+<style>
+  :root { --bg:#0f1117; --panel:#171a22; --hover:#1e2230; --border:#2a3040; --text:#e8eaef; --muted:#8b93a7;
+          --accent:#6c9eff; --user:#1a2438; --good:#4ade80; --bad:#f87171; --warn:#fbbf24; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif; display: flex; }
+  button, select, textarea, input { font: inherit; color: inherit; }
+  aside { width: 280px; flex: none; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+  .brand { padding: 16px; font-weight: 700; letter-spacing: .04em; display: flex; align-items: center; gap: 8px; }
+  .side-btn { margin: 0 12px 8px; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--border); background: transparent; cursor: pointer; text-align: left; }
+  .side-btn:hover { background: var(--hover); }
+  .side-btn.primary { background: var(--accent); color: #0b1020; border-color: transparent; font-weight: 600; }
+  .side-title { padding: 10px 16px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  #list { overflow-y: auto; flex: 1; padding-bottom: 12px; }
+  .row { padding: 8px 16px; cursor: pointer; border-left: 3px solid transparent; }
+  .row:hover { background: var(--hover); }
+  .row.on { background: var(--hover); border-left-color: var(--accent); }
+  .row b { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row small { color: var(--muted); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row small.live { color: var(--accent); }
+  .foot { padding: 10px 16px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+  .foot a { color: var(--accent); text-decoration: none; }
+  main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  header { padding: 12px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; min-height: 54px; }
+  header h2 { margin: 0; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tag { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px; background: rgba(108,158,255,.14); color: var(--accent); white-space: nowrap; }
+  .tag.warn { background: rgba(251,191,36,.14); color: var(--warn); }
+  #log { flex: 1; overflow-y: auto; padding: 24px; }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  .msg { margin: 0 0 14px; white-space: pre-wrap; word-wrap: break-word; }
+  .msg.user { background: var(--user); padding: 10px 14px; border-radius: 14px; margin-left: 80px; width: fit-content; max-width: calc(100% - 80px); margin-left: auto; }
+  .msg.thinking { color: var(--muted); font-style: italic; font-size: 13px; }
+  .msg.note { color: var(--muted); font-size: 13px; }
+  .msg.error { color: var(--bad); }
+  .msg code { background: var(--panel); padding: 1px 5px; border-radius: 4px; font: 13px ui-monospace, Menlo, Consolas, monospace; }
+  .msg pre { background: var(--panel); border: 1px solid var(--border); padding: 10px 12px; border-radius: 8px; overflow-x: auto; white-space: pre; }
+  .msg pre code { background: none; padding: 0; }
+  details.step { margin: 0 0 8px; color: var(--muted); font-size: 13px; }
+  details.step summary { cursor: pointer; }
+  details.step pre { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; overflow-x: auto; max-height: 260px; color: var(--text); white-space: pre-wrap; }
+  .ask { border: 1px solid var(--warn); border-radius: 10px; padding: 12px 14px; margin: 0 0 14px; }
+  .ask p { margin: 0 0 8px; }
+  .ask pre { margin: 0 0 10px; color: var(--muted); font-size: 12px; white-space: pre-wrap; max-height: 160px; overflow: auto; }
+  .btn { padding: 7px 14px; border-radius: 8px; border: 1px solid var(--border); background: transparent; cursor: pointer; }
+  .btn.primary { background: var(--accent); color: #0b1020; border-color: transparent; font-weight: 600; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  footer { border-top: 1px solid var(--border); padding: 12px 24px 16px; }
+  .composer { max-width: 860px; margin: 0 auto; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
+  textarea { width: 100%; border: 0; outline: 0; background: transparent; resize: none; min-height: 48px; max-height: 240px; }
+  .bar { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+  select { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; max-width: 220px; }
+  .grow { flex: 1; }
+  .hero { max-width: 620px; margin: 12vh auto 0; text-align: center; }
+  .hero h1 { font-size: 26px; margin: 0 0 6px; }
+  .hero p { color: var(--muted); margin: 0 0 18px; }
+  .pick { text-align: left; margin: 26px auto 0; max-width: 620px; }
+  .pick .card { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; background: var(--panel); }
+  .pick .card div { flex: 1; min-width: 0; }
+  .pick .card b, .pick .card small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pick .card small { color: var(--muted); }
+  .hidden { display: none !important; }
+  @media (max-width: 760px) { aside { display: none; } }
+</style>
+</head>
+<body>
+<aside>
+  <div class="brand">🐺 WOLF LEADER</div>
+  <button class="side-btn primary" id="new-btn">New chat</button>
+  <div class="side-title">Projects</div>
+  <div id="list"></div>
+  <div class="foot"><span id="status">Starting…</span><br><a href="/">Projects, skills and setup</a></div>
+</aside>
+<main>
+  <header>
+    <h2 id="title">New chat</h2>
+    <span class="tag hidden" id="agent-tag"></span>
+    <span class="tag hidden" id="project-tag"></span>
+    <span class="grow"></span>
+    <span class="tag warn hidden" id="busy-tag">Working…</span>
+  </header>
+  <div id="log"><div class="wrap" id="items"></div></div>
+  <footer>
+    <div class="composer">
+      <textarea id="draft" placeholder="Message…" rows="2"></textarea>
+      <div class="bar">
+        <select id="agent" title="Which AI"></select>
+        <select id="project" title="Project"></select>
+        <span class="grow"></span>
+        <button class="btn hidden" id="stop-btn">Stop</button>
+        <button class="btn primary" id="send-btn">Send</button>
+      </div>
+    </div>
+  </footer>
+</main>
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const APPLE = 978307200;
+const state = { bridge: null, projects: [], chats: [], progress: {}, chatId: null, record: null, busy: false, version: -1, poll: 0 };
+
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => { const r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3 | 8)).toString(16); })).toUpperCase();
+const oneLine = (s, n = 80) => { const t = String(s || "").replace(/\s+/g, " ").trim(); return t.length > n ? t.slice(0, n) + "…" : t; };
+
+async function api(path, options) {
+  const reply = await fetch(path, options);
+  if (!reply.ok) { let why = reply.statusText; try { why = (await reply.json()).detail || why; } catch (_) {} throw new Error(typeof why === "string" ? why : JSON.stringify(why)); }
+  return reply.json();
+}
+const post = (path, body) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+
+// A small, safe Markdown: code blocks, inline code, bold, links as text.
+function md(text) {
+  const parts = String(text || "").split(/```/);
+  return parts.map((part, i) => {
+    if (i % 2) return `<pre><code>${esc(part.replace(/^[a-zA-Z0-9_+-]*\n/, ""))}</code></pre>`;
+    return esc(part).replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+  }).join("");
+}
+
+function when(apple) {
+  if (!apple) return "";
+  const d = new Date((apple + APPLE) * 1000), now = new Date();
+  return d.toDateString() === now.toDateString() ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : d.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+// ---- sidebar: open projects, the ones used last on top, each with where it stands
+function projectLine(p) {
+  const chats = state.chats.filter((c) => c.projectID === p.id);
+  if (chats.some((c) => c.id === state.chatId && state.busy)) return ["Working…", true];
+  const pr = state.progress[p.id];
+  if (pr && pr.next_step && pr.next_step.text) return ["Next: " + oneLine(pr.next_step.text), false];
+  if (pr && pr.where_it_stands) return [oneLine(pr.where_it_stands), false];
+  return [oneLine(p.description || "Not started"), false];
+}
+function lastUsed(p) {
+  const chat = Math.max(0, ...state.chats.filter((c) => c.projectID === p.id).map((c) => (c.updated || 0) + APPLE));
+  return Math.max(chat, Date.parse(p.updated_at || 0) / 1000 || 0);
+}
+function renderSidebar() {
+  const open = state.projects.filter((p) => !["done", "archived"].includes(p.status)).sort((a, b) => lastUsed(b) - lastUsed(a));
+  const current = state.record && state.record.projectID;
+  let html = open.slice(0, 12).map((p) => {
+    const [line, live] = projectLine(p);
+    return `<div class="row ${p.id === current ? "on" : ""}" data-project="${p.id}"><b>${esc(p.name)}</b><small class="${live ? "live" : ""}">${esc(line)}</small></div>`;
+  }).join("");
+  const loose = state.chats.filter((c) => c.projectID == null).slice(0, 6);
+  if (loose.length) {
+    html += `<div class="side-title">Loose chats</div>` + loose.map((c) =>
+      `<div class="row ${c.id === state.chatId ? "on" : ""}" data-chat="${esc(c.id)}"><b>${esc(c.title || "Chat")}</b><small>${esc(when(c.updated))}</small></div>`).join("");
+  }
+  $("#list").innerHTML = html || `<div class="row"><small>No projects yet. Start a chat.</small></div>`;
+}
+
+// ---- transcript
+function renderItems() {
+  const items = (state.record && state.record.items) || [];
+  const box = $("#items");
+  if (!state.record) { box.innerHTML = home(); return; }
+  box.innerHTML = items.map((item) => {
+    if (item.kind === "user") return `<div class="msg user">${esc(item.text)}</div>`;
+    if (item.kind === "agent") return `<div class="msg">${md(item.text)}</div>`;
+    if (item.kind === "thinking") return `<details class="step"><summary>Thinking</summary><pre>${esc(item.text)}</pre></details>`;
+    if (item.kind === "tool") {
+      const mark = item.status === "failed" ? "✕" : item.status === "running" ? "…" : "✓";
+      return `<details class="step"><summary>${mark} ${esc(item.text)}</summary><pre>${esc([item.detail, item.output].filter(Boolean).join("\n\n"))}</pre></details>`;
+    }
+    if (item.kind === "approval") {
+      if (item.status !== "pending") return `<div class="msg note">${item.status === "allowed" ? "Allowed" : "Not allowed"}: ${esc(item.text)}</div>`;
+      return `<div class="ask"><p><b>Allow this step?</b> ${esc(item.text)}</p>${item.detail ? `<pre>${esc(item.detail)}</pre>` : ""}
+        <button class="btn primary" data-allow="${esc(item.id)}">Allow</button> <button class="btn" data-deny="${esc(item.id)}">Don't allow</button></div>`;
+    }
+    return `<div class="msg ${item.kind === "error" ? "error" : "note"}">${esc(item.text)}</div>`;
+  }).join("");
+  const log = $("#log");
+  log.scrollTop = log.scrollHeight;
+}
+
+// ---- home: pick up where you left off
+function home() {
+  if (!state.bridge) {
+    return `<div class="hero"><h1>Chat runs on your own computer</h1><p>Your AI tools (Claude, Codex) live on your computer, so chat opens from there. Use the Wolf Leader shortcut on this computer, or open <code>http://127.0.0.1:6974/chat</code>.</p><a class="btn" href="/">Back to projects</a></div>`;
+  }
+  const open = state.projects.filter((p) => !["done", "archived"].includes(p.status) && lastUsed(p) > 0).sort((a, b) => lastUsed(b) - lastUsed(a)).slice(0, 3);
+  const cards = open.map((p) => `<div class="card"><div><b>${esc(p.name)}</b><small>${esc(projectLine(p)[0])}</small></div><button class="btn" data-continue="${p.id}">Continue</button></div>`).join("");
+  return `<div class="hero"><h1>What do you want to work on?</h1><p>Pick a project and an AI below, type, and press Enter.</p></div>
+    ${cards ? `<div class="pick"><div class="side-title" style="padding-left:0">Pick up where you left off</div>${cards}</div>` : ""}`;
+}
+
+function renderHeader() {
+  const r = state.record;
+  $("#title").textContent = r ? (r.title || "New chat") : "New chat";
+  const agent = r && state.bridge && state.bridge.agents.find((a) => a.id === r.agentID);
+  $("#agent-tag").textContent = agent ? `${agent.name} · ${agent.company}` : (r ? r.agentID : "");
+  $("#agent-tag").classList.toggle("hidden", !r);
+  $("#project-tag").textContent = r && r.projectName ? `In ${r.projectName}` : "";
+  $("#project-tag").classList.toggle("hidden", !(r && r.projectName));
+  $("#busy-tag").classList.toggle("hidden", !state.busy);
+  $("#stop-btn").classList.toggle("hidden", !state.busy);
+  $("#send-btn").disabled = state.busy || !state.bridge;
+  // A chat already has its AI and project; a new one picks them.
+  $("#agent").classList.toggle("hidden", !!r);
+  $("#project").classList.toggle("hidden", !!r);
+}
+function render() { renderHeader(); renderItems(); renderSidebar(); }
+
+// ---- a chat
+function show(snapshot) {
+  state.record = snapshot.record; state.busy = snapshot.busy; state.version = snapshot.version;
+  const i = state.chats.findIndex((c) => c.id === snapshot.record.id);
+  if (i >= 0) state.chats[i] = snapshot.record; else state.chats.unshift(snapshot.record);
+  render();
+}
+async function open(chatId) {
+  state.chatId = chatId; state.version = -1;
+  const mine = ++state.poll;
+  try { show(await api(`/bridge/chats/${chatId}`)); } catch (e) { state.record = null; state.chatId = null; render(); return; }
+  history.replaceState(null, "", `/chat?c=${chatId}`);
+  while (mine === state.poll) {
+    try { const snap = await api(`/bridge/chats/${chatId}/events?after=${state.version}`); if (mine === state.poll && snap.version !== state.version) show(snap); }
+    catch (_) { await new Promise((r) => setTimeout(r, 2000)); }
+  }
+}
+function newChat(projectId) {
+  state.poll++; state.chatId = null; state.record = null; state.busy = false;
+  if (projectId != null) $("#project").value = String(projectId);
+  history.replaceState(null, "", "/chat");
+  render(); $("#draft").focus();
+}
+function continueProject(projectId) {
+  const latest = state.chats.filter((c) => c.projectID === projectId).sort((a, b) => (b.updated || 0) - (a.updated || 0))[0];
+  if (latest) open(latest.id); else newChat(projectId);
+}
+async function send() {
+  const text = $("#draft").value.trim();
+  if (!text || state.busy || !state.bridge) return;
+  $("#draft").value = "";
+  try {
+    if (state.record) {
+      await post(`/bridge/chats/${state.chatId}/send`, { text });
+    } else {
+      const id = uuid(), project = state.projects.find((p) => String(p.id) === $("#project").value);
+      const fresh = { agentID: $("#agent").value };
+      if (project) Object.assign(fresh, { projectID: project.id, projectName: project.name, projectSlug: project.slug || String(project.id) });
+      await post(`/bridge/chats/${id}/send`, { text, new: fresh });
+      open(id);
+    }
+  } catch (e) { $("#draft").value = text; alert(e.message); }
+}
+
+// ---- wiring
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-project],[data-chat],[data-continue],[data-allow],[data-deny]");
+  if (!t) return;
+  if (t.dataset.project) continueProject(Number(t.dataset.project));
+  else if (t.dataset.chat) open(t.dataset.chat);
+  else if (t.dataset.continue) continueProject(Number(t.dataset.continue));
+  else if (t.dataset.allow) post(`/bridge/chats/${state.chatId}/answer`, { item: t.dataset.allow, allow: true });
+  else if (t.dataset.deny) post(`/bridge/chats/${state.chatId}/answer`, { item: t.dataset.deny, allow: false });
+});
+$("#new-btn").onclick = () => newChat();
+$("#send-btn").onclick = send;
+$("#stop-btn").onclick = () => post(`/bridge/chats/${state.chatId}/stop`);
+$("#draft").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
+
+async function start() {
+  try { state.bridge = await api("/bridge/status"); } catch (_) { state.bridge = null; }
+  const [projects, chats, progress] = await Promise.all([
+    api("/api/projects").catch(() => ({ projects: [] })),
+    api("/api/app-chats?include_deleted=false&limit=500").catch(() => ({ chats: [] })),
+    api("/api/progress").catch(() => ({ projects: [] })),
+  ]);
+  state.projects = projects.projects || [];
+  state.chats = (chats.chats || []).map((c) => c.record).filter(Boolean).sort((a, b) => (b.updated || 0) - (a.updated || 0));
+  for (const p of progress.projects || []) state.progress[p.id] = p;
+  if (state.bridge) {
+    const ready = state.bridge.agents.filter((a) => a.found);
+    $("#agent").innerHTML = ready.map((a) => `<option value="${a.id}">${esc(a.name)}</option>`).join("") || `<option value="">No AI tool found</option>`;
+    $("#status").textContent = ready.length ? `On ${state.bridge.device} · ${ready.map((a) => a.name).join(", ")}` : `No AI tool found. ${state.bridge.agents[0].hint}`;
+  } else {
+    $("#status").textContent = "Chat isn't running on this computer";
+    $("#draft").disabled = true;
+  }
+  const open_ = state.projects.filter((p) => !["done", "archived"].includes(p.status)).sort((a, b) => lastUsed(b) - lastUsed(a));
+  $("#project").innerHTML = `<option value="">No project</option>` + open_.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
+  render();
+  const wanted = new URLSearchParams(location.search).get("c");
+  if (wanted && state.bridge) open(wanted);
+}
+start();
+</script>
+</body>
+</html>

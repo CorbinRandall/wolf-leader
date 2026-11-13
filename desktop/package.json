@@ -1,0 +1,37 @@
+{
+  "name": "wolf-leader",
+  "productName": "Wolf Leader",
+  "version": "3.1.11",
+  "description": "Your projects and AI history, with any AI. One app for Windows, Mac and Linux.",
+  "author": "Wolf Leader",
+  "license": "MIT",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "node build.mjs && electron .",
+    "shots": "node build.mjs && node shots.mjs",
+    "dist:win": "node build.mjs && electron-builder --win nsis --x64 --publish never",
+    "dist:mac": "node build.mjs && electron-builder --mac dmg --publish never",
+    "dist:linux": "node build.mjs && electron-builder --linux AppImage --publish never"
+  },
+  "dependencies": {
+    "cross-spawn": "^7.0.6"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.24.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "build": {
+    "appId": "app.wolfleader.desktop",
+    "productName": "Wolf Leader",
+    "files": ["dist/**/*", "package.json"],
+    "directories": { "output": "release" },
+    "win": { "icon": "../installer/assets/wolfleader.ico", "artifactName": "WolfLeader-${version}-windows.exe" },
+    "nsis": { "oneClick": true, "perMachine": false, "shortcutName": "Wolf Leader" },
+    "mac": { "icon": "../installer/assets/mac-icon.png", "artifactName": "WolfLeader-desktop-${version}-mac.dmg", "identity": null },
+    "linux": { "icon": "../installer/assets/app-icon.png", "artifactName": "WolfLeader-${version}-linux.AppImage", "category": "Development" }
+  }
+}

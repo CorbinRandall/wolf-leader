@@ -1,0 +1,77 @@
+name: Desktop app
+
+# The shared Wolf Leader app (desktop/): one codebase for Windows, Mac and Linux.
+# Every push that touches it builds the Windows app, starts it on a fresh Windows machine and
+# saves a picture of each screen. On a release tag the Windows download is added to the release.
+
+on:
+  push:
+    tags: ["v*"]
+    branches: [main]
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Use the release's version
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
+
+      - name: Build
+        run: npm run build
+
+      - name: Start the app on Windows and picture each screen
+        shell: bash
+        run: |
+          set -e
+          export WOLF_LEADER_HOME="$RUNNER_TEMP/wolf-data" WOLF_SHOTS="$RUNNER_TEMP/shots" WOLF_ROUTES="home,projects,settings,settings:agents,settings:hub"
+          timeout 120 ./node_modules/.bin/electron . || true
+          ls -la "$RUNNER_TEMP/shots"
+          test -s "$RUNNER_TEMP/shots/home.png"
+          test -s "$RUNNER_TEMP/shots/settings.png"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-screens
+          path: ${{ runner.temp }}/shots
+
+      - name: Package the Windows app
+        run: npx electron-builder --win nsis --x64 --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-app
+          path: desktop/release/*.exe
+
+      - name: Add the Windows app to the release
+        if: github.ref_type == 'tag'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          # The release may not exist yet when the tag is pushed first: make it, so the upload has somewhere to go.
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --title "Wolf Leader ${GITHUB_REF_NAME#v}" --notes "Wolf Leader ${GITHUB_REF_NAME#v}" --verify-tag
+          gh release upload "$GITHUB_REF_NAME" release/*.exe --clobber

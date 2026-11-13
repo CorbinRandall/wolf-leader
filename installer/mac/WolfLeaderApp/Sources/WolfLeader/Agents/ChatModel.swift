@@ -91,7 +91,8 @@ enum AgentEvent {
     case thinkingDelta(id: String, String)
     case toolStarted(id: String, title: String, detail: String)
     case toolUpdated(id: String, output: String?, status: ChatItem.Status?)
-    case approval(id: String, title: String, detail: String)
+    /// `mustAsk`: a step the person approves every time, whatever the chat's mode (an AI using the screen).
+    case approval(id: String, title: String, detail: String, mustAsk: Bool = false)
     case note(String)
     case turnFinished(error: String?)
     case exited(String?)

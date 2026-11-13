@@ -44,9 +44,7 @@ struct ChatView: View {
             Button("Turn on Screen control") { session.setScreenControl(true) }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(rules.neverAsk || record.mode == .auto
-                 ? "In this chat it will be able to see your screen, click and type in any app. This chat doesn't ask first, so it will act without checking with you. Switch to \u{201C}Ask first\u{201D} if you want to approve each step."
-                 : "In this chat it will be able to see your screen, click and type in any app. It asks before each step. Turn it off when you're done.")
+            Text("In this chat it will be able to see your screen. It asks you before every click, keystroke or other action on your Mac, even when the chat is set to never ask. Turn it off when you're done.")
         }
         .sheet(isPresented: $choosingProject) {
             ProjectPickerSheet(current: record.projectID) { session.attach(to: $0, config: store) }

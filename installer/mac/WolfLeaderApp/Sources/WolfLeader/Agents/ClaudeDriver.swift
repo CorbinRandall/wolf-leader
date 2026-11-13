@@ -41,7 +41,9 @@ final class ClaudeDriver: AgentDriver {
         switch mode {
         case .ask: return "default"
         case .edits: return "acceptEdits"
-        case .auto: return "bypassPermissions"
+        // With Screen control on, Claude keeps asking, so screen actions reach the person;
+        // everything else is let through here, as "Full auto" promises (see handleControl).
+        case .auto: return screen == nil ? "bypassPermissions" : "default"
         }
     }
 
@@ -195,9 +197,18 @@ final class ClaudeDriver: AgentDriver {
             return
         }
         approvals[id] = request
+        let tool = request["tool_name"] as? String ?? ""
         let name = request["display_name"] as? String ?? request["tool_name"] as? String ?? "a tool"
         let input = request["input"] as? [String: Any] ?? [:]
-        onEvent(.approval(id: id, title: Self.title(name, input), detail: AgentText.describe(input)))
+        let screenAction = ScreenControl.isScreenTool(tool) && !ScreenControl.onlyLooks(tool)
+        // Looking at the screen was agreed to when Screen control was turned on. In Full auto,
+        // anything that isn't a screen action goes through without asking.
+        if ScreenControl.onlyLooks(tool) || (screen != nil && mode == .auto && !screenAction) {
+            answer(approval: id, allow: true, always: false)
+            return
+        }
+        let title = screenAction ? "On your Mac: " + Self.title(name, input) : Self.title(name, input)
+        onEvent(.approval(id: id, title: title, detail: AgentText.describe(input), mustAsk: screenAction))
     }
 
     /// "Ran ls", "Edited main.swift": the tool and its main argument in a few words.

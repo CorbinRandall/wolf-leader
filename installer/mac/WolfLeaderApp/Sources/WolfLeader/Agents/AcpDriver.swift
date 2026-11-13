@@ -143,13 +143,18 @@ final class AcpDriver: AgentDriver {
         let call = params["toolCall"] as? [String: Any] ?? [:]
         let kind = call["kind"] as? String ?? ""
         // Auto-edit lets file edits and reads through; Full auto lets everything through.
-        if mode == .auto || (mode == .edits && ["edit", "read", "search", "think", "fetch"].contains(kind)), let allow {
+        // With Screen control on, a step that isn't one of the agent's own kinds may be a screen
+        // action, so it is always put to the person.
+        let known = ["edit", "read", "search", "think", "fetch", "execute", "delete", "move"].contains(kind)
+        let mustAsk = screen != nil && !known
+        if !mustAsk, mode == .auto || (mode == .edits && ["edit", "read", "search", "think", "fetch"].contains(kind)), let allow {
             peer?.respond(id, result: ["outcome": ["outcome": "selected", "optionId": allow]])
             return
         }
         let key = UUID().uuidString
         approvals[key] = pending
-        onEvent(.approval(id: key, title: call["title"] as? String ?? "Allow this step?", detail: AgentText.describe(call["rawInput"])))
+        onEvent(.approval(id: key, title: call["title"] as? String ?? "Allow this step?", detail: AgentText.describe(call["rawInput"]),
+                          mustAsk: mustAsk))
     }
 
     private static func text(_ content: Any?) -> String? {

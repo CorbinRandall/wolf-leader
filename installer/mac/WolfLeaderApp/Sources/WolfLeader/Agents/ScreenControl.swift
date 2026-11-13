@@ -34,6 +34,17 @@ enum ScreenControl {
     </screen_control>
     """
 
+    /// Tools that only look or wait. Turning Screen control on is the OK for these; everything
+    /// else (click, type, press, drag, menus, apps, windows, the clipboard…) asks every time.
+    static let lookOnly: Set<String> = ["see", "capture", "image", "inspect_ui", "permissions", "sleep", "verify_state", "analyze"]
+
+    /// A Claude tool name such as `mcp__peekaboo__click`.
+    static func isScreenTool(_ name: String) -> Bool { name.hasPrefix("mcp__\(server)__") }
+
+    static func onlyLooks(_ name: String) -> Bool {
+        isScreenTool(name) && lookOnly.contains(String(name.dropFirst("mcp__\(server)__".count)))
+    }
+
     // MARK: Per agent
 
     static func claudeServer(_ command: Command) -> [String: Any] {

@@ -13,6 +13,8 @@ final class CodexDriver: AgentDriver {
     private var turnID: String?
     private var peer: JSONRPCPeer?
     private var approvals: [String: Any] = [:]
+    /// Approvals that are a tool's own question rather than a command or file change.
+    private var toolQuestions: Set<String> = []
     private var exitReported = false
     private let model: String?
 
@@ -121,6 +123,11 @@ final class CodexDriver: AgentDriver {
 
     func answer(approval id: String, allow: Bool, always: Bool) {
         guard let requestID = approvals.removeValue(forKey: id) else { return }
+        if toolQuestions.remove(id) != nil {
+            // A tool's own question (MCP elicitation) is answered accept / decline.
+            peer?.respond(requestID, result: ["action": allow ? "accept" : "decline", "content": NSNull(), "_meta": NSNull()])
+            return
+        }
         peer?.respond(requestID, result: ["decision": allow ? (always ? "acceptForSession" : "accept") : "decline"])
     }
 
@@ -205,6 +212,16 @@ final class CodexDriver: AgentDriver {
             var detail = params["reason"] as? String ?? ""
             if let cwd = params["cwd"] as? String { detail += (detail.isEmpty ? "" : "\n") + "In \(cwd)" }
             onEvent(.approval(id: key, title: title, detail: detail))
+        case "mcpServer/elicitation/request":
+            // Codex asks before it calls a tool from an MCP server it wasn't told to trust.
+            let key = UUID().uuidString
+            approvals[key] = id
+            toolQuestions.insert(key)
+            let server = params["serverName"] as? String ?? "a tool"
+            let onScreen = server == ScreenControl.server
+            let message = params["message"] as? String ?? ""
+            onEvent(.approval(id: key, title: onScreen ? "On your Mac: use the screen" : "Use \(server)",
+                              detail: message, mustAsk: onScreen))
         default:
             peer?.respondError(id, message: "Wolf Leader doesn't handle \(method) yet.")
         }

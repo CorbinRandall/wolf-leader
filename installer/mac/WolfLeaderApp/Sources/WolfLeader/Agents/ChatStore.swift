@@ -249,6 +249,8 @@ final class ChatSession: ObservableObject, Identifiable {
     private var thisDevice: String { ChatSync.shared.device }
     /// The AI has been told it has the screen tools (said once each time they're turned on, per app run).
     private var screenToldOn = false
+    /// Approvals the person answers each time, whatever the mode (screen actions).
+    private var askEveryTime: Set<String> = []
 
     func send(_ text: String, attachments: [URL] = [], config: ConfigStore) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -356,7 +358,8 @@ final class ChatSession: ObservableObject, Identifiable {
     func answer(_ itemID: String, allow: Bool, always: Bool = false) {
         guard let index = record.items.firstIndex(where: { $0.id == itemID }) else { return }
         record.items[index].status = allow ? .allowed : .denied
-        driver?.answer(approval: itemID, allow: allow, always: always)
+        // A step that asks every time can't be allowed for good.
+        driver?.answer(approval: itemID, allow: allow, always: always && !askEveryTime.contains(itemID))
     }
 
     func setMode(_ mode: PermissionMode) {
@@ -496,8 +499,9 @@ final class ChatSession: ObservableObject, Identifiable {
             guard let index = index(id, .tool) else { return }
             if let output, !output.isEmpty { record.items[index].output = output }
             if let status { record.items[index].status = status }
-        case .approval(let id, let title, let detail):
-            if ChatRules.shared.neverAsk || record.mode == .auto {
+        case .approval(let id, let title, let detail, let mustAsk):
+            if mustAsk { askEveryTime.insert(id) }
+            if !mustAsk, ChatRules.shared.neverAsk || record.mode == .auto {
                 // "Never ask": approve it for good, so the agent doesn't ask about this again.
                 append(ChatItem(id: id, kind: .approval, text: title, detail: detail, status: .allowed))
                 DispatchQueue.main.async { [weak self] in self?.driver?.answer(approval: id, allow: true, always: true) }

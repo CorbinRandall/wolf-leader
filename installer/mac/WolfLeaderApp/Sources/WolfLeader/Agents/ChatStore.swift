@@ -43,15 +43,20 @@ final class ChatStore: ObservableObject {
 
     /// A new chat. In a project, the agent works in the project's copy from the server; without
     /// one, in a scratch folder of its own until it's connected to a project.
-    func create(project: ProjectRef?, agent: AgentKind, mode: PermissionMode? = nil) -> ChatRecord {
+    func create(project: ProjectRef?, agent: AgentKind, mode: PermissionMode? = nil,
+                model: String? = nil, effort: String? = nil) -> ChatRecord {
         // New chats start the way the rules for every chat say (Full auto unless changed).
         let mode = mode ?? ChatRules.shared.defaultMode
         let now = Date()
         let id = UUID().uuidString.lowercased()
         let cwd = project.map { ProjectWorkspace.folder(slug: $0.slug).path } ?? ProjectWorkspace.looseFolder(chatID: id).path
-        let record = ChatRecord(id: id, projectID: project?.id, projectName: project?.name, projectSlug: project?.slug,
+        var record = ChatRecord(id: id, projectID: project?.id, projectName: project?.name, projectSlug: project?.slug,
                                 agentID: agent.id, title: "New chat", cwd: cwd, mode: mode, agentSessionID: nil,
                                 items: [], created: now, updated: now)
+        if ModelCatalog.supports(agent) {
+            record.model = model
+            record.effort = effort
+        }
         write(record)
         return record
     }
@@ -356,6 +361,16 @@ final class ChatSession: ObservableObject, Identifiable {
         if !busy { driver?.stop(); driver = nil }
     }
 
+    /// Pick the model and effort. Like the mode, they're fixed when the agent starts, so the
+    /// agent restarts (resuming its session) for the next message.
+    func setModel(_ model: String?, effort: String?) {
+        guard model != record.model || effort != record.effort else { return }
+        record.model = model
+        record.effort = effort
+        persist()
+        if !busy { driver?.stop(); driver = nil }
+    }
+
     /// Connect a chat to a project (or move it to another one). The hub refiles it, and the next
     /// message brings in that project's notes.
     func attach(to project: ProjectRef, config: ConfigStore) {
@@ -399,10 +414,11 @@ final class ChatSession: ObservableObject, Identifiable {
         let driver: AgentDriver
         switch agent.proto {
         case .claude:
-            driver = ClaudeDriver(executable: executable, cwd: record.cwd, mode: record.mode, resumeID: resumeID, toolsURL: tools)
+            driver = ClaudeDriver(executable: executable, cwd: record.cwd, mode: record.mode, resumeID: resumeID, toolsURL: tools,
+                                  model: record.model, effort: record.effort)
         case .codex:
             driver = CodexDriver(executable: executable, args: agent.args, cwd: record.cwd, mode: record.mode, resumeID: resumeID,
-                                 toolsURL: tools)
+                                 toolsURL: tools, model: record.model, effort: record.effort)
         case .acp:
             driver = AcpDriver(name: agent.name, executable: executable, args: agent.args, cwd: record.cwd, mode: record.mode,
                                resumeID: resumeID, toolsURL: tools)

@@ -147,6 +147,13 @@ struct ProjectPage: View {
                     }
                     Divider()
                     Button("Edit name, description and topics…") { editing = true }
+                    Toggle("Share with every project", isOn: Binding(
+                        get: { entry.project.shared },
+                        set: { on in
+                            model.perform(on ? "Shared: every chat now gets this project's notes and memories." : "No longer shared.") {
+                                try await $0.setShared(projectID: entry.id, on)
+                            }
+                        }))
                     Divider()
                     Button("Delete project…", role: .destructive) { deleting = true }
                 } label: { Image(systemName: "ellipsis.circle") }
@@ -171,6 +178,11 @@ struct ProjectPage: View {
                 .menuStyle(.borderlessButton).fixedSize()
                 .help("Stage on the board")
                 OwnerTag(entry: entry, model: model)
+                if entry.project.shared {
+                    Label("Shared with every project", systemImage: "globe")
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(p.accent)
+                        .help("Every chat, in any project, gets this project's notes and memories")
+                }
                 ProjectCounts(entry: entry)
                 Text("\(entry.project.chatCount) sessions · \(entry.project.memoryCount) memories · last worked on \(HubDate.format(entry.lastWorked))")
                     .font(DS.Font.micro).foregroundStyle(p.textMuted)

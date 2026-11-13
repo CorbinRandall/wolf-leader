@@ -16,11 +16,20 @@ enum WolfChatSync {
         async let briefTask = project != nil ? (try? await hub.brief(projectKey: project!.slug)) : nil
         async let memoriesTask = project != nil ? (try? await hub.memories(projectID: project!.id, limit: 200)) : nil
         async let ledgerTask = project != nil ? ledger(hub: hub, projectID: project!.id, excluding: excludingSession) : nil
-        let (about, brief, memories, ledger) = await (aboutTask, briefTask, memoriesTask, ledgerTask)
+        async let sharedTask = try? await hub.sharedContextText(excluding: project?.id)
+        let (about, brief, memories, ledger, shared) = await (aboutTask, briefTask, memoriesTask, ledgerTask, sharedTask)
 
         var sections: [String] = []
         if let about = about?.trimmingCharacters(in: .whitespacesAndNewlines), !about.isEmpty {
             sections.append("<about_you person=\"\(person ?? "")\">\n\(clip(about, 3000))\n</about_you>")
+        }
+        if let shared = shared?.trimmingCharacters(in: .whitespacesAndNewlines), !shared.isEmpty {
+            sections.append("""
+            <shared_context>
+            Applies to every project: things the user set up once (servers, network, accounts and how to reach them).
+            \(clip(shared, 12_000))
+            </shared_context>
+            """)
         }
         if let project {
             var parts: [String] = []

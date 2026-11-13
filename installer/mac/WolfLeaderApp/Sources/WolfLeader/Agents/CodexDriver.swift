@@ -14,11 +14,15 @@ final class CodexDriver: AgentDriver {
     private var peer: JSONRPCPeer?
     private var approvals: [String: Any] = [:]
     private var exitReported = false
+    private let model: String?
 
-    init(executable: String, args: [String], cwd: String, mode: PermissionMode, resumeID: String?, toolsURL: String? = nil) {
+    init(executable: String, args: [String], cwd: String, mode: PermissionMode, resumeID: String?, toolsURL: String? = nil,
+         model: String? = nil, effort: String? = nil) {
         self.executable = executable
+        self.model = model
         // Config overrides go before the subcommand (`codex -c … app-server`).
-        self.args = (toolsURL.map { WolfTools.codexArgs(url: $0) } ?? []) + args
+        let effortArgs = effort.map { ["-c", "model_reasoning_effort=\"\($0)\""] } ?? []
+        self.args = (toolsURL.map { WolfTools.codexArgs(url: $0) } ?? []) + effortArgs + args
         self.cwd = cwd
         self.mode = mode
         self.threadID = resumeID
@@ -49,7 +53,7 @@ final class CodexDriver: AgentDriver {
         _ = try await peer.request("initialize", ["clientInfo": ["name": "wolf-leader", "title": "Wolf Leader", "version": "3"]])
         peer.notify("initialized")
         var settings: [String: Any] = ["cwd": cwd, "approvalPolicy": approvalPolicy, "sandbox": sandbox]
-        if let model = await usableModel(peer) { settings["model"] = model }
+        if let model { settings["model"] = model } else if let model = await usableModel(peer) { settings["model"] = model }
         if let threadID {
             do {
                 _ = try await peer.request("thread/resume", settings.merging(["threadId": threadID]) { a, _ in a })

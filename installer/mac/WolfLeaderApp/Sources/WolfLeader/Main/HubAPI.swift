@@ -161,6 +161,8 @@ struct HubProject: Decodable, Identifiable, Hashable {
     var owner: String?
     var ownerSource: String?
     var tags: [String]
+    /// Marked shared: its notes and memories go to every chat, whatever project it is in.
+    var shared: Bool
 
     var updated: Date? { HubDate.parse(updatedAt) }
     /// `slug` when the hub has one, else the numeric id (both work for agent-brief).
@@ -180,6 +182,12 @@ struct HubProject: Decodable, Identifiable, Hashable {
         updatedAt = c.str("updated_at", "last_activity", "created_at")
         owner = c.str("owner")
         ownerSource = c.str("owner_source")
+        if let raw = c.str("metadata"), let data = raw.data(using: .utf8),
+           let meta = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            shared = (meta["shared"] as? Bool) ?? false
+        } else {
+            shared = false
+        }
         // Tags arrive as a list or as JSON text.
         if let list = try? c.decode([String].self, forKey: HubJSONKey("tags")) {
             tags = list
@@ -1025,6 +1033,18 @@ extension HubClient {
     func updateProject(id: Int, name: String, description: String) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["name": name, "description": description])
         _ = try await data("/api/projects/\(id)", method: "PUT", body: body, timeout: 60)
+    }
+
+    /// Share (or stop sharing) a project's notes and memories with every chat.
+    func setShared(projectID: Int, _ shared: Bool) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["metadata": ["shared": shared]])
+        _ = try await data("/api/projects/\(projectID)", method: "PUT", body: body, timeout: 60)
+    }
+
+    /// Shared projects' context as one block of text, leaving out `excluding` (the chat's own project).
+    func sharedContextText(excluding projectID: Int?) async throws -> String {
+        let raw = try await data("/api/shared-context", query: projectID.map { ["exclude": String($0)] } ?? [:], timeout: 30)
+        return ((try JSONSerialization.jsonObject(with: raw) as? [String: Any])?["text"] as? String) ?? ""
     }
 
     /// Regenerate the project's brief from its memories and sessions.

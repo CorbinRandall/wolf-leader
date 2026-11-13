@@ -67,6 +67,9 @@ struct ChatView: View {
                 .buttonStyle(.borderless)
                 .help(record.projectID == nil ? "Connect this chat to a project. Wolf Leader files it there." : "Move this chat to another project")
                 saveBadge
+                ModelMenu(agent: agent, model: record.model, effort: record.effort,
+                          choose: { session.setModel($0, effort: $1) },
+                          font: .system(size: 11, weight: .semibold))
                 Menu {
                     if rules.neverAsk {
                         Text("Never ask is on for every chat: agents act without asking.")

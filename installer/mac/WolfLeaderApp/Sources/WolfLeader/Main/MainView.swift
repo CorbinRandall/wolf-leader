@@ -223,7 +223,7 @@ struct MainView: View {
             } else if nav.route.chatList {
                 AllChatsView()
             } else {
-                ChatHome(model: projectsModel)
+                ChatHome(projectsModel: projectsModel)
             }
         case .projects:
             ProjectsView(openSettings: { nav.open(section: .settings) }, model: projectsModel)

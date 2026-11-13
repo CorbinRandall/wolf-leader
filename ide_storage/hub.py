@@ -419,6 +419,12 @@ def get_bootstrap(
     }
     data["agent_brief"] = handoff.get("brief_md") or read_agent_brief(pslug)
     data["recent_sessions"] = handoff.get("sessions") or []
+    # Shared projects (network, servers, …) apply to every project.
+    from .shared_context import shared_context
+
+    shared = shared_context(exclude_project_id=pid)
+    if shared:
+        data["shared_context"] = shared
     if not data.get("paste_text"):
         data["paste_text"] = format_project_context_text(
             build_project_agent_context(project, [], [], read_project_md(pslug) or "")

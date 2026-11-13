@@ -51,6 +51,9 @@ struct ChatRecord: Identifiable, Codable, Hashable {
     var title: String
     var cwd: String
     var mode: PermissionMode
+    /// The model and effort level to run, as the agent names them. nil = the agent's own default.
+    var model: String?
+    var effort: String?
     /// The agent's own session or thread id, so a chat can be resumed after the app restarts.
     var agentSessionID: String?
     var items: [ChatItem]

@@ -92,6 +92,14 @@ class JobUpdate(BaseModel):
 
 
 # ------------------------------------------------------------- howl / eat
+@router.get("/shared-context")
+async def get_shared_context(exclude: Optional[int] = None):
+    """Projects marked shared (e.g. servers and network) whose context every chat gets."""
+    from .shared_context import shared_context, shared_context_text
+
+    return {"shared": shared_context(exclude), "text": shared_context_text(exclude)}
+
+
 @router.get("/howl-guide")
 async def get_howl_guide():
     from ide_storage.howl import howl_guide

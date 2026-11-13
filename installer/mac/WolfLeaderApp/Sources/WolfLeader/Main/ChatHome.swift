@@ -51,10 +51,13 @@ struct ChatHome: View {
     @ObservedObject private var projects = RecentProjects.shared
     @ObservedObject private var chats = ChatStore.shared
     @AppStorage("wl.chat.agent") private var agentID = "claude"
-    @ObservedObject var model: ProjectsModel
+    @ObservedObject var projectsModel: ProjectsModel
 
     @State private var draft = ""
     @State private var files: [URL] = []
+    /// The model and effort for the next chat; remembered per agent.
+    @State private var model: String?
+    @State private var effort: String?
     @State private var project: ProjectRef?
     @State private var naming = false
     @State private var newName = ""
@@ -90,7 +93,7 @@ struct ChatHome: View {
                 composer
                 if let error { WLStatusPill(text: error, kind: .bad) }
                 if ready.isEmpty && !agents.scanning { noAgents }
-                if project == nil && !naming && draft.isEmpty { PickUpStrip(model: model).padding(.top, DS.Spacing.sm) }
+                if project == nil && !naming && draft.isEmpty { PickUpStrip(model: projectsModel).padding(.top, DS.Spacing.sm) }
                 Spacer(minLength: 40)
             }
             .padding(.horizontal, DS.Spacing.lg)
@@ -200,6 +203,15 @@ struct ChatHome: View {
             HStack(spacing: 10) {
                 agentMenu
                 AttachButton(files: $files)
+                ModelMenu(agent: agent, model: model, effort: effort) { m, e in
+                    model = m
+                    effort = e
+                    if let agent { ModelDefaults.set(agent.id, model: m, effort: e) }
+                }
+                .task(id: agent?.id) {
+                    model = agent.flatMap { ModelDefaults.model($0.id) }
+                    effort = agent.flatMap { ModelDefaults.effort($0.id) }
+                }
                 if let project {
                     Label(project.name, systemImage: "folder").font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(1)
                 } else if naming, !newName.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -219,7 +231,7 @@ struct ChatHome: View {
                     .buttonStyle(.plain)
                     .keyboardShortcut(.return, modifiers: .command)
                     .disabled(!canSend)
-                    .help("Start the chat (Return)")
+                    .help("Start the chat (Return; Shift-Return for a new line)")
                 }
             }
         }
@@ -275,7 +287,7 @@ struct ChatHome: View {
                     return
                 }
             }
-            let chat = chats.create(project: ref, agent: agent)
+            let chat = chats.create(project: ref, agent: agent, model: model, effort: effort)
             chats.session(chat.id)?.send(text, attachments: attached, config: store)
             draft = ""
             files = []

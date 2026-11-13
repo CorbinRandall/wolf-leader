@@ -2,84 +2,15 @@
 // projects first in the sidebar, a home page to start or pick up, a chat, a project's page,
 // search and settings.
 import { createRoot } from "react-dom/client";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { APPLE, call, Group, isOpen, Line, Markdown, oneLine, when, whenISO } from "./kit";
+import { Library } from "./library";
+import { NorthStarCard, PathCard, ProjectMenu, MemoryAdd } from "./project-edit";
 
-declare global {
-  interface Window {
-    wolf: { call: (name: string, ...args: any[]) => Promise<any>; on: (channel: string, listener: (payload: any) => void) => () => void };
-    __nav?: (route: string) => void;
-  }
-}
-const call = window.wolf.call;
-const APPLE = 978307200;
+type Route = { page: "home" | "chat" | "project" | "projects" | "chats" | "search" | "settings" | "library"; id?: string; tab?: string; q?: string; project?: any };
+export type { Route };
 
-// ---------------------------------------------------------------- helpers
-type Route = { page: "home" | "chat" | "project" | "projects" | "chats" | "search" | "settings"; id?: string; tab?: string; q?: string; project?: any };
 
-const oneLine = (s: any, n = 80) => {
-  const t = String(s ?? "").replace(/\s+/g, " ").trim();
-  return t.length > n ? t.slice(0, n) + "…" : t;
-};
-function when(apple?: number | null): string {
-  if (!apple) return "";
-  const d = new Date((apple + APPLE) * 1000);
-  const now = new Date();
-  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  return d.toLocaleDateString([], { month: "short", day: "numeric", year: d.getFullYear() === now.getFullYear() ? undefined : "numeric" });
-}
-const whenISO = (iso?: string | null) => (iso ? when(Date.parse(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z") / 1000 - APPLE) : "");
-const isOpen = (p: any) => !["done", "archived"].includes(p.status);
-
-/** A small, safe Markdown: headings, lists, code, bold, links. Enough to read an AI's reply. */
-function inline(text: string, key: string): ReactNode[] {
-  const out: ReactNode[] = [];
-  const pattern = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\((https?:\/\/[^)\s]+)\))|(https?:\/\/[^\s)]+)/g;
-  let last = 0;
-  let match: RegExpExecArray | null;
-  let n = 0;
-  while ((match = pattern.exec(text))) {
-    if (match.index > last) out.push(text.slice(last, match.index));
-    const k = `${key}-${n++}`;
-    if (match[1]) out.push(<code key={k}>{match[1].slice(1, -1)}</code>);
-    else if (match[2]) out.push(<b key={k}>{match[2].slice(2, -2)}</b>);
-    else if (match[3]) out.push(<a key={k} href={match[4]} target="_blank" rel="noreferrer">{match[3].slice(1, match[3].indexOf("]"))}</a>);
-    else out.push(<a key={k} href={match[5]} target="_blank" rel="noreferrer">{match[5]}</a>);
-    last = match.index + match[0].length;
-  }
-  if (last < text.length) out.push(text.slice(last));
-  return out;
-}
-function Markdown({ text }: { text: string }) {
-  const blocks = useMemo(() => {
-    const nodes: ReactNode[] = [];
-    const parts = String(text ?? "").split(/```/);
-    parts.forEach((part, i) => {
-      if (i % 2) {
-        nodes.push(<pre key={`c${i}`}><code>{part.replace(/^[a-zA-Z0-9_+-]*\n/, "")}</code></pre>);
-        return;
-      }
-      let list: ReactNode[] = [];
-      const flush = () => {
-        if (list.length) nodes.push(<ul key={`u${i}-${nodes.length}`}>{list}</ul>);
-        list = [];
-      };
-      part.split("\n").forEach((line, j) => {
-        const key = `${i}-${j}`;
-        const heading = line.match(/^(#{1,4})\s+(.*)$/);
-        const bullet = line.match(/^\s*(?:[-*•]|\d+\.)\s+(.*)$/);
-        if (bullet) list.push(<li key={key}>{inline(bullet[1], key)}</li>);
-        else {
-          flush();
-          if (heading) nodes.push(<div key={key} className={`md-h md-h${heading[1].length}`}>{inline(heading[2], key)}</div>);
-          else if (line.trim()) nodes.push(<p key={key}>{inline(line, key)}</p>);
-        }
-      });
-      flush();
-    });
-    return nodes;
-  }, [text]);
-  return <div className="md">{blocks}</div>;
-}
 
 // ------------------------------------------------------------------ data
 interface AppState { version: string; platform: string; config: any; agents: any[]; rules: any; hubOK: boolean; chats: any[] }
@@ -174,6 +105,7 @@ function Sidebar({ ctx }: { ctx: Ctx }) {
         {item("All projects", "☰", ctx.route.page === "projects", () => ctx.go({ page: "projects" }))}
         {loose ? item("Loose chats", "▤", ctx.route.page === "chats", () => ctx.go({ page: "chats" })) : null}
         <div className="gap" />
+        {item("Library", "▧", ctx.route.page === "library", () => ctx.go({ page: "library", tab: "skills" }))}
         {item("Settings", "⚙", ctx.route.page === "settings", () => ctx.go({ page: "settings" }))}
       </div>
       <div className="hub-card" onClick={() => ctx.go({ page: "settings", tab: "hub" })} title={ctx.app.config.hubDisplay}>
@@ -486,21 +418,6 @@ function Chat({ ctx, id }: { ctx: Ctx; id: string }) {
 }
 
 // ---------------------------------------------------------------- project
-function Group({ title, subtitle, icon, fold, children }: { title: string; subtitle?: string; icon?: string; fold?: string; children: ReactNode }) {
-  const key = fold ? `fold.${fold}` : null;
-  const [open, setOpen] = useState(() => (key ? localStorage.getItem(key) === "1" : true));
-  const toggle = () => { if (!key) return; localStorage.setItem(key, open ? "0" : "1"); setOpen(!open); };
-  return (
-    <section className="group">
-      <div className={`group-head ${key ? "click" : ""}`} onClick={toggle}>
-        {icon ? <span className="badge">{icon}</span> : null}
-        <div className="grow min0"><div className="group-title">{title}</div>{subtitle ? <div className="sub">{subtitle}</div> : null}</div>
-        {key ? <span className="caret">{open ? "▾" : "▸"}</span> : null}
-      </div>
-      {open ? <div className="group-body">{children}</div> : null}
-    </section>
-  );
-}
 function ChatRow({ ctx, chat, showProject }: { ctx: Ctx; chat: any; showProject?: boolean }) {
   const agent = ctx.app.agents.find((a) => a.id === chat.agentID);
   return (
@@ -523,12 +440,21 @@ function Project({ ctx, id }: { ctx: Ctx; id: number }) {
   const [star, setStar] = useState<any>(null);
   const [brief, setBrief] = useState<any>(null);
   const [reading, setReading] = useState<any>(null);
+  const [columns, setColumns] = useState<any[]>([]);
+  const [owners, setOwners] = useState<string[]>([]);
+  const loadEdits = () => {
+    call("hub.get", `/api/memories?project_id=${id}&limit=200`).then((d) => setMemories(Array.isArray(d) ? d : d?.memories ?? [])).catch(() => {});
+    call("hub.get", `/api/projects/${id}/north-star`).then(setStar).catch(() => {});
+  };
+  // After any change here: the project list and progress, then this page's own pieces.
+  const reload = async () => { await ctx.loadProjects(); loadEdits(); };
   useEffect(() => {
     setLogbook([]); setMemories([]); setStar(null); setBrief(null);
     call("hub.get", `/api/projects/${id}/where-left-off`).then((d) => setLogbook(d?.entries ?? [])).catch(() => {});
-    call("hub.get", `/api/memories?project_id=${id}&limit=200`).then((d) => setMemories(Array.isArray(d) ? d : d?.memories ?? [])).catch(() => {});
-    call("hub.get", `/api/projects/${id}/north-star`).then(setStar).catch(() => {});
+    loadEdits();
     call("hub.get", `/api/projects/${id}/agent-brief`).then(setBrief).catch(() => {});
+    call("hub.get", "/api/kanban/columns").then((d) => setColumns(d?.columns ?? [])).catch(() => {});
+    call("hub.get", "/api/owners").then((d) => setOwners(d?.owners ?? [])).catch(() => {});
   }, [id]);
   if (!project) return <div className="page"><div className="muted pad">Loading the project…</div></div>;
   const state = pulse(ctx, project);
@@ -536,7 +462,6 @@ function Project({ ctx, id }: { ctx: Ctx; id: number }) {
   const latest = chats[0];
   const stands = String(pr?.where_it_stands ?? project.description ?? "").replace(/\*\*/g, "");
   const last = logbook[0];
-  const goals: any[] = pr?.goals ?? [];
   const byType: Record<string, any[]> = {};
   for (const m of memories) (byType[m.type || "note"] ||= []).push(m);
   return (
@@ -545,8 +470,7 @@ function Project({ ctx, id }: { ctx: Ctx; id: number }) {
       <div className="eyebrow">Project</div>
       <h1 className="h-project">{project.name}</h1>
       <div className="meta">
-        <span className="tag">{String(project.status ?? "").replace(/_/g, " ")}</span>
-        {project.owner ? <span className="tag soft">{project.owner}</span> : null}
+        <ProjectMenu project={project} columns={columns} owners={owners} reload={reload} onDeleted={() => ctx.go({ page: "projects" })} />
         <span className="faint">{project.chat_count ?? 0} sessions · {project.memory_count ?? 0} memories{pr?.last_session ? ` · last worked on ${whenISO(pr.last_session)}` : ""}</span>
       </div>
 
@@ -572,21 +496,8 @@ function Project({ ctx, id }: { ctx: Ctx; id: number }) {
         </Group>
       ) : null}
 
-      <section className="group">
-        <div className="eyebrow gold">★ North Star</div>
-        <p className={star?.current?.body ? "stands" : "sub"}>{star?.current?.body || "Where is this heading? A sentence or two."}</p>
-      </section>
-
-      {goals.length ? (
-        <Group title="The path" subtitle="Goals toward the North Star." icon="⚑">
-          {goals.map((g) => (
-            <div className="row line" key={g.id}>
-              <div className="grow min0"><b>{g.title}</b>{g.done_when ? <div className="sub">Done when: {g.done_when}</div> : null}</div>
-              <span className={`tag ${g.status === "verified" ? "good" : "soft"}`}>{String(g.status ?? g.phase ?? "").replace(/_/g, " ")}</span>
-            </div>
-          ))}
-        </Group>
-      ) : null}
+      <NorthStarCard projectID={id} star={star} suggestion={project.description ?? ""} reload={reload} />
+      <PathCard projectID={id} progress={pr} reload={reload} />
 
       <Group title="Logbook" subtitle="What each session did, newest first. Open one to read it." icon="▥" fold="project.logbook">
         {logbook.length ? logbook.slice(0, 30).map((e) => (
@@ -599,8 +510,11 @@ function Project({ ctx, id }: { ctx: Ctx; id: number }) {
 
       <Group title="What the journal knows" subtitle={`${memories.length} memories`} icon="◈" fold="project.memories">
         {Object.keys(byType).sort().map((type) => (
-          <div key={type}><div className="eyebrow">{type.replace(/_/g, " ")}</div>{byType[type].slice(0, 40).map((m) => <p className="memory" key={m.id}>• {m.content}</p>)}</div>
+          <div key={type}><div className="eyebrow">{type.replace(/_/g, " ")}</div>{byType[type].slice(0, 40).map((m) => (
+            <div className="row memory-row" key={m.id}><p className="memory grow">• {m.content}</p><span className="x" title="Forget this" onClick={async () => { await call("hub.request", "DELETE", `/api/memories/${m.id}`).catch(() => {}); loadEdits(); }}>×</span></div>
+          ))}</div>
         ))}
+        <MemoryAdd projectID={id} reload={reload} />
         {!memories.length ? <p className="sub">Nothing yet.</p> : null}
       </Group>
 
@@ -723,9 +637,6 @@ function Settings({ ctx }: { ctx: Ctx }) {
     </div>
   );
 }
-function Line({ title, detail, children }: { title: string; detail?: string; children?: ReactNode }) {
-  return <div className="row line"><div className="grow min0"><b>{title}</b>{detail ? <div className="sub">{detail}</div> : null}</div>{children}</div>;
-}
 function SettingsGeneral({ ctx }: { ctx: Ctx }) {
   const [owners, setOwners] = useState<string[]>([]);
   useEffect(() => { call("hub.get", "/api/owners").then((d) => setOwners(d?.owners ?? [])).catch(() => {}); }, []);
@@ -840,7 +751,7 @@ function App() {
     // For checking screens without a person (see main.ts takeShots).
     window.__nav = (r: string) => {
       const [page, id] = r.split(":");
-      setRoute({ page: page as any, id, tab: page === "settings" ? id : undefined });
+      setRoute({ page: page as any, id, tab: page === "settings" || page === "library" ? id : undefined });
     };
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -860,6 +771,7 @@ function App() {
   else if (route.page === "chats") page = <Chats ctx={ctx} />;
   else if (route.page === "search") page = <Search ctx={ctx} />;
   else if (route.page === "settings") page = <Settings ctx={ctx} />;
+  else if (route.page === "library") page = <Library app={ctx.app} setApp={data.setApp} tab={route.tab ?? "skills"} setTab={(tab) => setRoute({ page: "library", tab })} />;
   else page = <Home ctx={ctx} />;
   return (
     <div className="app">

@@ -42,5 +42,5 @@ npm run dist:linux   # Linux AppImage
 
 ## Not here yet (the Mac app has them)
 
-Voice, sharing your screen, screen control, Library (skills, people, bring in, backups),
-shares, editing goals and the North Star, and project files synced to the server.
+Voice, sharing your screen, screen control, the rest of Library (bring in, AI tools setup,
+backups, cleanup), shares, the project board, and project files synced to the server.

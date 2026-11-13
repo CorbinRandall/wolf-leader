@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          export WOLF_LEADER_HOME="$RUNNER_TEMP/wolf-data" WOLF_SHOTS="$RUNNER_TEMP/shots" WOLF_ROUTES="home,projects,settings,settings:agents,settings:hub"
+          export WOLF_LEADER_HOME="$RUNNER_TEMP/wolf-data" WOLF_SHOTS="$RUNNER_TEMP/shots" WOLF_ROUTES="home,projects,library:skills,settings,settings:agents,settings:hub"
           timeout 120 ./node_modules/.bin/electron . || true
           ls -la "$RUNNER_TEMP/shots"
           test -s "$RUNNER_TEMP/shots/home.png"

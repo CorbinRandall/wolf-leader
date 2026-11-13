@@ -203,9 +203,10 @@ class Session {
     if (!this.record.contextSent || this.record.needsHandoff) {
       const context = await this.store.context(this.record);
       if (context) parts.push(context);
+      // Your rules and skills for every chat, whichever agent runs it.
+      const rules = await this.store.rulesBlock();
+      if (rules) parts.push(rules);
       if (this.store.rules.hub_tools !== false) parts.push(TOOLS_NOTE(this.record.projectSlug));
-      const rules = String(this.store.rules.rules ?? "").trim();
-      if (rules) parts.push(`<your_rules>\n${rules}\n</your_rules>`);
     }
     if (this.record.needsHandoff) {
       const handoff = Store.handoff(earlier, agentByID(this.record.agentID)?.name ?? "the agent");
@@ -582,6 +583,27 @@ export class Store {
     }
     if (!sections.length) return null;
     return `<wolf_leader_context>\nWolf Leader is the user's own memory across every AI assistant they use. Use this to pick up where things are; don't recite it back.\n${sections.join("\n\n")}\n</wolf_leader_context>`;
+  }
+
+  /** The rules and the chosen skills' instructions, for the start of a chat (any agent). */
+  async rulesBlock(): Promise<string | null> {
+    const sections: string[] = [];
+    const rules = String(this.rules.rules ?? "").trim();
+    if (rules) sections.push(`<user_rules>\nAlways follow these, in every chat:\n${rules}\n</user_rules>`);
+    const skills: string[] = [];
+    let total = 0;
+    for (const name of Array.isArray(this.rules.skills) ? this.rules.skills : []) {
+      const skill = await this.hub.tryGet(`/api/skills/${encodeURIComponent(name)}`);
+      if (typeof skill?.content !== "string") continue;
+      const body = skill.content.slice(0, 8000);
+      if (total + body.length > 24_000) break;
+      total += body.length;
+      skills.push(`<skill name="${name}">\n${body}\n</skill>`);
+    }
+    if (skills.length) {
+      sections.push(`<user_skills>\nThe user's own skills. Use each one whenever it applies, as you would a skill you have installed.\n${skills.join("\n\n")}\n</user_skills>`);
+    }
+    return sections.length ? sections.join("\n\n") : null;
   }
 
   /** The conversation so far, for an agent that is picking a chat up (another device or another AI). */

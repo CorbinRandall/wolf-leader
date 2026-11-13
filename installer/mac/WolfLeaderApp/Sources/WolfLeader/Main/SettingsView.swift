@@ -287,7 +287,8 @@ private struct SettingsPeopleGroup: View {
     @State private var resetting: HubClient.AccessPerson?
 
     var body: some View {
-        Group {
+        // A VStack, not a Group: an empty Group has no view, so its load would never run.
+        VStack(spacing: 0) {
             if !people.isEmpty {
                 WLGroup(title: "People", subtitle: "Each person signs in with their own address and sees only their own projects.", icon: "person.2") {
                     ForEach(people) { person in

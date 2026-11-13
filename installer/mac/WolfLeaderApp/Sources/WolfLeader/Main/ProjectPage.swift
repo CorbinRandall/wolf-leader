@@ -154,6 +154,13 @@ struct ProjectPage: View {
                                 try await $0.setShared(projectID: entry.id, on)
                             }
                         }))
+                    Toggle("Let everyone on this hub see it", isOn: Binding(
+                        get: { entry.project.everyone },
+                        set: { on in
+                            model.perform(on ? "Everyone on this hub can now see this project." : "Only its owner sees this project now.") {
+                                try await $0.setEveryone(projectID: entry.id, on)
+                            }
+                        }))
                     Divider()
                     Button("Delete project…", role: .destructive) { deleting = true }
                 } label: { Image(systemName: "ellipsis.circle") }

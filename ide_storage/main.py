@@ -11,7 +11,7 @@ from typing import List, Optional, Dict, Any
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -107,6 +107,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Who is asking (access keys); outermost, so everything below runs as that person.
+from ide_storage.access import AccessMiddleware  # noqa: E402
+
+app.add_middleware(AccessMiddleware)
 
 if STATIC_DIR.is_dir():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -1420,6 +1425,60 @@ async def api_export_skills():
     )
 
 
+def _require_admin() -> None:
+    from ide_storage.access import restricted_person
+
+    if restricted_person():
+        raise HTTPException(status_code=403, detail="Only the hub's admin can do that.")
+
+
+def _access_link(key: str) -> dict:
+    from urllib.parse import urlsplit
+
+    from ide_storage.runtime_config import runtime_config
+
+    # WOLF_SHARE_URL: the address other people reach this hub at, when it differs from its own.
+    public = (os.environ.get("WOLF_SHARE_URL", "").strip() or runtime_config().public_url).rstrip("/")
+    parts = urlsplit(public)
+    mcp_port = (parts.port or 6971) + 1
+    return {"hub": f"{public}/k/{key}", "mcp": f"{parts.scheme}://{parts.hostname}:{mcp_port}/k/{key}/mcp"}
+
+
+@app.get("/api/whoami")
+async def api_whoami(request: Request):
+    """Who this request is signed in as (None: no key, on a trusted address)."""
+    from ide_storage.access import admin_name, is_admin, public_ports, restricted_person
+
+    person = getattr(request.state, "wolf_person", None)
+    return {"person": person, "admin": person is None or is_admin(person), "limited": restricted_person() is not None,
+            "hub_admin": admin_name() or None, "keys_required": bool(public_ports())}
+
+
+@app.get("/api/access")
+async def api_access():
+    """Each person's access key and the two addresses that carry it. Admin only."""
+    from ide_storage.access import admin_name, key_for
+    from ide_storage.owners import configured_owners
+
+    _require_admin()
+    people = [{"person": name, "admin": name.lower() == admin_name().lower(), **_access_link(key_for(name))}
+              for name in configured_owners()]
+    return {"admin": admin_name() or None, "people": people}
+
+
+@app.post("/api/access/{person}/reset")
+async def api_access_reset(person: str):
+    """Give a person a new key; the old one stops working at once."""
+    from ide_storage.access import key_for
+    from ide_storage.owners import canonical_owner
+
+    _require_admin()
+    name = canonical_owner(person)
+    if not name:
+        raise HTTPException(status_code=404, detail="No such person on this hub")
+    return {"person": name, **_access_link(key_for(name, new=True))}
+
+
 @app.get("/api/export.zip")
 def api_export_everything():
     """Everything this hub holds, as one ZIP: readable Markdown plus exact JSON, and the skills."""
@@ -1430,6 +1489,7 @@ def api_export_everything():
 
     from ide_storage.export_all import export_to_temp
 
+    _require_admin()
     path = export_to_temp()
     return FileResponse(
         path,
@@ -2204,4 +2264,7 @@ async def project_web_ui(project_slug: str):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 6971))
     host = os.environ.get("HOST", "0.0.0.0")
-    uvicorn.run(app, host=host, port=port)
+    from ide_storage.access import serve
+
+    public = os.environ.get("WOLF_PUBLIC_PORT", "").strip()
+    serve(app, host, port, int(public) if public.isdigit() else None)

@@ -163,6 +163,8 @@ struct HubProject: Decodable, Identifiable, Hashable {
     var tags: [String]
     /// Marked shared: its notes and memories go to every chat, whatever project it is in.
     var shared: Bool
+    /// Everyone on the hub can see it, not just its owner.
+    var everyone: Bool
 
     var updated: Date? { HubDate.parse(updatedAt) }
     /// `slug` when the hub has one, else the numeric id (both work for agent-brief).
@@ -185,8 +187,10 @@ struct HubProject: Decodable, Identifiable, Hashable {
         if let raw = c.str("metadata"), let data = raw.data(using: .utf8),
            let meta = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             shared = (meta["shared"] as? Bool) ?? false
+            everyone = (meta["everyone"] as? Bool) ?? false
         } else {
             shared = false
+            everyone = false
         }
         // Tags arrive as a list or as JSON text.
         if let list = try? c.decode([String].self, forKey: HubJSONKey("tags")) {
@@ -1039,6 +1043,35 @@ extension HubClient {
     func setShared(projectID: Int, _ shared: Bool) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["metadata": ["shared": shared]])
         _ = try await data("/api/projects/\(projectID)", method: "PUT", body: body, timeout: 60)
+    }
+
+    /// Let everyone on the hub see a project (or only its owner again).
+    func setEveryone(projectID: Int, _ everyone: Bool) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["metadata": ["everyone": everyone]])
+        _ = try await data("/api/projects/\(projectID)", method: "PUT", body: body, timeout: 60)
+    }
+
+    struct AccessPerson: Identifiable, Hashable {
+        var person: String
+        var admin: Bool
+        var hub: String
+        var mcp: String
+        var id: String { person }
+    }
+
+    /// Each person's sign-in addresses. Only the hub's admin gets an answer.
+    func accessPeople() async throws -> [AccessPerson] {
+        let raw = try await data("/api/access", timeout: 30)
+        let people = ((try JSONSerialization.jsonObject(with: raw) as? [String: Any])?["people"] as? [[String: Any]]) ?? []
+        return people.compactMap { p in
+            guard let name = p["person"] as? String, let hub = p["hub"] as? String, let mcp = p["mcp"] as? String else { return nil }
+            return AccessPerson(person: name, admin: (p["admin"] as? Bool) ?? false, hub: hub, mcp: mcp)
+        }
+    }
+
+    func resetAccess(person: String) async throws {
+        let safe = person.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? person
+        _ = try await data("/api/access/\(safe)/reset", method: "POST", timeout: 30)
     }
 
     /// Shared projects' context as one block of text, leaving out `excluding` (the chat's own project).

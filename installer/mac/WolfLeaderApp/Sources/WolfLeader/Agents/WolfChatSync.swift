@@ -162,7 +162,9 @@ actor HubMCP {
     static func endpoint(_ hubURL: String) -> URL? {
         guard var parts = URLComponents(string: hubURL.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))) else { return nil }
         parts.port = (parts.port ?? 6971) + 1
-        parts.path = "/mcp"
+        // A personal hub address carries its access key in the path (/k/<key>); keep it.
+        parts.path = parts.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).isEmpty
+            ? "/mcp" : "/" + parts.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/mcp"
         return parts.url
     }
 

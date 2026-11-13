@@ -40,6 +40,7 @@ struct SettingsView: View {
             case .hub:
                 SettingsHubGroup()
                 SettingsExportGroup()
+                SettingsPeopleGroup()
                 SettingsOriginalGroup()
             case .updates:
                 SettingsUpdatesGroup(runner: updates.runner)
@@ -276,6 +277,63 @@ private struct SettingsSetupGroup: View {
 }
 
 // MARK: - Hub
+
+/// Who can sign in to the hub. Each person has their own address; it carries their key.
+private struct SettingsPeopleGroup: View {
+    @EnvironmentObject private var store: ConfigStore
+    @Environment(\.palette) private var p
+    @State private var people: [HubClient.AccessPerson] = []
+    @State private var note: String?
+    @State private var resetting: HubClient.AccessPerson?
+
+    var body: some View {
+        Group {
+            if !people.isEmpty {
+                WLGroup(title: "People", subtitle: "Each person signs in with their own address and sees only their own projects.", icon: "person.2") {
+                    ForEach(people) { person in
+                        if person.id != people.first?.id { WLDivider() }
+                        WLRow(title: person.person,
+                              detail: person.admin ? "Admin: sees everything." : "Sees their own projects, and ones marked for everyone.") {
+                            HStack(spacing: 8) {
+                                Button("Copy hub address") { copy(person.hub, "\(person.person)'s hub address copied. They paste it into Settings > Hub.") }
+                                    .buttonStyle(SecondaryButtonStyle())
+                                Button("Copy MCP address") { copy(person.mcp, "\(person.person)'s MCP address copied, for Claude Code, Codex or Cursor.") }
+                                    .buttonStyle(SecondaryButtonStyle())
+                                Button("New key") { resetting = person }.buttonStyle(OutlineButtonStyle())
+                            }
+                        }
+                    }
+                    if let note { Text(note).font(DS.Font.micro).foregroundStyle(p.textMuted) }
+                }
+            }
+        }
+        .task(id: store.config.hubURL) { await load() }
+        .confirmationDialog("Give \(resetting?.person ?? "") a new key?",
+                            isPresented: Binding(get: { resetting != nil }, set: { if !$0 { resetting = nil } })) {
+            Button("New key", role: .destructive) {
+                if let person = resetting {
+                    Task {
+                        try? await store.hub.resetAccess(person: person.person)
+                        await load()
+                        note = "\(person.person) has a new key. Send them the new addresses."
+                    }
+                }
+                resetting = nil
+            }
+            Button("Cancel", role: .cancel) { resetting = nil }
+        } message: {
+            Text("Their old addresses stop working right away, on every device and tool.")
+        }
+    }
+
+    private func load() async { people = (try? await store.hub.accessPeople()) ?? [] }
+
+    private func copy(_ text: String, _ said: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        note = said
+    }
+}
 
 /// Your data is yours: one button saves all of it to this Mac.
 private struct SettingsExportGroup: View {

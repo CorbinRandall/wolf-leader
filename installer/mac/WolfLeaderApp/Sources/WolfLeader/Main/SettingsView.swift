@@ -39,6 +39,7 @@ struct SettingsView: View {
                 ChatRulesSettings()
             case .hub:
                 SettingsHubGroup()
+                SettingsExportGroup()
                 SettingsOriginalGroup()
             case .updates:
                 SettingsUpdatesGroup(runner: updates.runner)
@@ -275,6 +276,58 @@ private struct SettingsSetupGroup: View {
 }
 
 // MARK: - Hub
+
+/// Your data is yours: one button saves all of it to this Mac.
+private struct SettingsExportGroup: View {
+    @EnvironmentObject private var store: ConfigStore
+    @State private var working = false
+    @State private var result: (ok: Bool, text: String)?
+
+    var body: some View {
+        WLGroup(title: "Your data", subtitle: "Everything the hub holds, in files you can open anywhere.", icon: "square.and.arrow.down") {
+            WLRow(title: "Export everything",
+                  detail: result?.text ?? "One ZIP in Downloads: every project, memory, chat, your profile and skills, as readable Markdown and as exact JSON.") {
+                Button {
+                    Task { await export() }
+                } label: {
+                    HStack(spacing: 6) {
+                        if working { ProgressView().controlSize(.small) }
+                        Text(working ? "Exporting…" : "Export")
+                    }
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .disabled(working)
+            }
+        }
+    }
+
+    private func export() async {
+        working = true
+        defer { working = false }
+        do {
+            var request = URLRequest(url: try store.hub.url("/api/export.zip"), timeoutInterval: 600)
+            request.httpMethod = "GET"
+            let (file, response) = try await URLSession.shared.download(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                result = (false, "The hub couldn't make the export. Update the hub and try again.")
+                return
+            }
+            let stamp = ISO8601DateFormatter().string(from: Date()).prefix(10)
+            let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+            var target = downloads.appendingPathComponent("wolf-leader-export-\(stamp).zip")
+            var n = 2
+            while FileManager.default.fileExists(atPath: target.path) {
+                target = downloads.appendingPathComponent("wolf-leader-export-\(stamp) \(n).zip")
+                n += 1
+            }
+            try FileManager.default.moveItem(at: file, to: target)
+            NSWorkspace.shared.activateFileViewerSelecting([target])
+            result = (true, "Saved \(target.lastPathComponent) to Downloads.")
+        } catch {
+            result = (false, "Export didn't finish: \(error.localizedDescription)")
+        }
+    }
+}
 
 private struct SettingsHubGroup: View {
     @EnvironmentObject private var store: ConfigStore

@@ -1420,6 +1420,25 @@ async def api_export_skills():
     )
 
 
+@app.get("/api/export.zip")
+def api_export_everything():
+    """Everything this hub holds, as one ZIP: readable Markdown plus exact JSON, and the skills."""
+    from datetime import date
+
+    from starlette.background import BackgroundTask
+    from starlette.responses import FileResponse
+
+    from ide_storage.export_all import export_to_temp
+
+    path = export_to_temp()
+    return FileResponse(
+        path,
+        media_type="application/zip",
+        filename=f"wolf-leader-export-{date.today().isoformat()}.zip",
+        background=BackgroundTask(os.unlink, path),
+    )
+
+
 @app.post("/api/skills/import")
 async def api_import_skill(body: SkillImport):
     from ide_storage.skill_registry import import_skill, import_skill_files

@@ -132,8 +132,14 @@ struct PickUpStrip: View {
             .prefix(3).map { $0 }
     }
 
+    private var looseChats: [ChatRecord] {
+        chats.records
+            .filter { $0.projectID == nil && $0.title != "New chat" }
+            .prefix(3).map { $0 }
+    }
+
     var body: some View {
-        if !recent.isEmpty {
+        if !recent.isEmpty || !looseChats.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 WLEyebrow("Pick up where you left off", color: p.textMuted)
                 ForEach(recent) { entry in
@@ -152,6 +158,29 @@ struct PickUpStrip: View {
                         Text(HubDate.format(ProjectPulse.lastUsed(entry, chats: chats)))
                             .font(DS.Font.micro.monospacedDigit()).foregroundStyle(p.textFaint)
                         Button("Continue") { ProjectPulse.resume(entry, nav: nav, chats: chats) }
+                            .buttonStyle(OutlineButtonStyle())
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .background(p.surface, in: RoundedRectangle(cornerRadius: DS.Radius.row, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: DS.Radius.row, style: .continuous).strokeBorder(p.border.opacity(0.7), lineWidth: 0.6))
+                }
+                ForEach(looseChats) { chat in
+                    HStack(spacing: 10) {
+                        Button { nav.open(chat: chat.id) } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(chat.title).font(DS.Font.bodySmall.weight(.semibold)).foregroundStyle(p.text).lineLimit(1)
+                                Text([chat.agent?.name ?? chat.agentID,
+                                      "\(chat.items.filter { $0.kind == .user }.count) messages"]
+                                    .joined(separator: " · "))
+                                    .font(DS.Font.micro).foregroundStyle(p.textMuted).lineLimit(1)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        Text(HubDate.format(chat.updated))
+                            .font(DS.Font.micro.monospacedDigit()).foregroundStyle(p.textFaint)
+                        Button("Open") { nav.open(chat: chat.id) }
                             .buttonStyle(OutlineButtonStyle())
                     }
                     .padding(.horizontal, 12).padding(.vertical, 8)

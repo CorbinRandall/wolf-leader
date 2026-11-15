@@ -195,6 +195,17 @@ def get_profile(person: Optional[str] = None) -> dict:
 
 
 @mcp.tool
+def get_shared_context(project_id: Optional[int] = None, ctx: Context = None) -> dict:
+    """Context that applies to every project: projects the user marked shared, such as their
+    servers and network (what each machine is and how to connect). recall already includes it;
+    call this when no project is set or you need it again."""
+    from .shared_context import shared_context
+
+    pid = project_id or _get_active(ctx).get("project_id")
+    return {"ok": True, "shared": shared_context(exclude_project_id=pid)}
+
+
+@mcp.tool
 def list_projects() -> dict:
     """List all active projects in the hub."""
     return {"projects": hub.list_projects_hub(), "count": len(hub.list_projects_hub())}

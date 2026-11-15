@@ -13,12 +13,19 @@ final class CodexDriver: AgentDriver {
     private var turnID: String?
     private var peer: JSONRPCPeer?
     private var approvals: [String: Any] = [:]
+    /// Approvals that are a tool's own question rather than a command or file change.
+    private var toolQuestions: Set<String> = []
     private var exitReported = false
+    private let model: String?
 
-    init(executable: String, args: [String], cwd: String, mode: PermissionMode, resumeID: String?, toolsURL: String? = nil) {
+    init(executable: String, args: [String], cwd: String, mode: PermissionMode, resumeID: String?, toolsURL: String? = nil,
+         model: String? = nil, effort: String? = nil, screen: ScreenControl.Command? = nil) {
         self.executable = executable
+        self.model = model
         // Config overrides go before the subcommand (`codex -c … app-server`).
-        self.args = (toolsURL.map { WolfTools.codexArgs(url: $0) } ?? []) + args
+        let effortArgs = effort.map { ["-c", "model_reasoning_effort=\"\($0)\""] } ?? []
+        self.args = (toolsURL.map { WolfTools.codexArgs(url: $0) } ?? []) + (screen.map { ScreenControl.codexArgs($0) } ?? [])
+            + effortArgs + args
         self.cwd = cwd
         self.mode = mode
         self.threadID = resumeID
@@ -49,7 +56,7 @@ final class CodexDriver: AgentDriver {
         _ = try await peer.request("initialize", ["clientInfo": ["name": "wolf-leader", "title": "Wolf Leader", "version": "3"]])
         peer.notify("initialized")
         var settings: [String: Any] = ["cwd": cwd, "approvalPolicy": approvalPolicy, "sandbox": sandbox]
-        if let model = await usableModel(peer) { settings["model"] = model }
+        if let model { settings["model"] = model } else if let model = await usableModel(peer) { settings["model"] = model }
         if let threadID {
             do {
                 _ = try await peer.request("thread/resume", settings.merging(["threadId": threadID]) { a, _ in a })
@@ -95,11 +102,16 @@ final class CodexDriver: AgentDriver {
         return nil
     }
 
-    func send(_ text: String) async throws {
+    func send(_ text: String, attachments: [URL]) async throws {
         guard let peer, let threadID else { throw AgentError.failed("Codex isn't running.") }
+        let images = attachments.filter(Attachments.isImage)
+        let others = attachments.filter { !Attachments.isImage($0) }
+        let body = [text, Attachments.note(for: others)].compactMap { $0 }.joined(separator: "\n\n")
+        var input: [[String: Any]] = [["type": "text", "text": body]]
+        input += images.map { ["type": "localImage", "path": $0.path] }
         let result = try await peer.request("turn/start", [
             "threadId": threadID,
-            "input": [["type": "text", "text": text]],
+            "input": input,
         ])
         turnID = (result["turn"] as? [String: Any])?["id"] as? String
     }
@@ -111,6 +123,11 @@ final class CodexDriver: AgentDriver {
 
     func answer(approval id: String, allow: Bool, always: Bool) {
         guard let requestID = approvals.removeValue(forKey: id) else { return }
+        if toolQuestions.remove(id) != nil {
+            // A tool's own question (MCP elicitation) is answered accept / decline.
+            peer?.respond(requestID, result: ["action": allow ? "accept" : "decline", "content": NSNull(), "_meta": NSNull()])
+            return
+        }
         peer?.respond(requestID, result: ["decision": allow ? (always ? "acceptForSession" : "accept") : "decline"])
     }
 
@@ -195,6 +212,16 @@ final class CodexDriver: AgentDriver {
             var detail = params["reason"] as? String ?? ""
             if let cwd = params["cwd"] as? String { detail += (detail.isEmpty ? "" : "\n") + "In \(cwd)" }
             onEvent(.approval(id: key, title: title, detail: detail))
+        case "mcpServer/elicitation/request":
+            // Codex asks before it calls a tool from an MCP server it wasn't told to trust.
+            let key = UUID().uuidString
+            approvals[key] = id
+            toolQuestions.insert(key)
+            let server = params["serverName"] as? String ?? "a tool"
+            let onScreen = server == ScreenControl.server
+            let message = params["message"] as? String ?? ""
+            onEvent(.approval(id: key, title: onScreen ? "On your Mac: use the screen" : "Use \(server)",
+                              detail: message, mustAsk: onScreen))
         default:
             peer?.respondError(id, message: "Wolf Leader doesn't handle \(method) yet.")
         }

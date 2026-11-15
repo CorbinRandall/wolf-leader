@@ -206,12 +206,45 @@ struct WLStatusPill: View {
 
 /// A settings-style card: optional icon + title + subtitle header, then rows.
 /// Put `WLDivider()` between rows.
+/// Explanations longer than this hide behind an ⓘ you hover, so screens stay light.
+enum Quiet {
+    static let limit = 48
+    static func isShort(_ text: String) -> Bool { text.count <= limit }
+}
+
+/// A small ⓘ that shows its text on hover.
+struct InfoHint: View {
+    @Environment(\.palette) private var p
+    let text: String
+
+    var body: some View {
+        Image(systemName: "info.circle")
+            .font(.system(size: 11))
+            .foregroundStyle(p.textFaint)
+            .help(text)
+            .accessibilityLabel(text)
+    }
+}
+
+/// A card section. Short subtitles show under the title; long ones become a hover hint.
+/// `foldKey` makes it fold open and shut, remembering the choice; `startsOpen` is the first state.
 struct WLGroup<Content: View>: View {
     @Environment(\.palette) private var p
     var title: String? = nil
     var subtitle: String? = nil
     var icon: String? = nil
+    var foldKey: String? = nil
+    var startsOpen = true
     @ViewBuilder var content: () -> Content
+
+    @State private var openState: Bool?
+
+    private var storageKey: String? { foldKey.map { "fold.\($0)" } }
+    private var isOpen: Bool {
+        guard let storageKey else { return true }
+        if let openState { return openState }
+        return UserDefaults.standard.object(forKey: storageKey) as? Bool ?? startsOpen
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: DS.Spacing.md) {
@@ -219,18 +252,39 @@ struct WLGroup<Content: View>: View {
                 HStack(spacing: 12) {
                     if let icon { WLIconBadge(systemName: icon) }
                     VStack(alignment: .leading, spacing: 2) {
-                        if let title { Text(title).font(DS.Font.section).foregroundStyle(p.text) }
-                        if let subtitle { Text(subtitle).font(DS.Font.bodySmall).foregroundStyle(p.textMuted) }
+                        HStack(spacing: 6) {
+                            if let title { Text(title).font(DS.Font.section).foregroundStyle(p.text) }
+                            if let subtitle, !Quiet.isShort(subtitle) { InfoHint(text: subtitle) }
+                        }
+                        if let subtitle, Quiet.isShort(subtitle) { Text(subtitle).font(DS.Font.bodySmall).foregroundStyle(p.textMuted) }
+                    }
+                    if foldKey != nil {
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(p.textMuted)
+                            .rotationEffect(.degrees(isOpen ? 90 : 0))
                     }
                 }
+                .contentShape(Rectangle())
+                .onTapGesture { toggle() }
             }
-            VStack(alignment: .leading, spacing: 14) {
-                content()
+            if isOpen {
+                VStack(alignment: .leading, spacing: 14) {
+                    content()
+                }
             }
         }
-        .padding(.horizontal, 22).padding(.vertical, 18)
+        .padding(.horizontal, 22).padding(.vertical, isOpen ? 18 : 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .wlCardSurface()
+    }
+
+    private func toggle() {
+        guard let storageKey else { return }
+        let next = !isOpen
+        withAnimation(.easeInOut(duration: 0.18)) { openState = next }
+        UserDefaults.standard.set(next, forKey: storageKey)
     }
 }
 
@@ -252,8 +306,11 @@ struct WLRow<Control: View>: View {
     var body: some View {
         HStack(alignment: .center, spacing: DS.Spacing.md) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(DS.Font.body).foregroundStyle(p.text)
-                if let detail {
+                HStack(spacing: 6) {
+                    Text(title).font(DS.Font.body).foregroundStyle(p.text)
+                    if let detail, !Quiet.isShort(detail) { InfoHint(text: detail) }
+                }
+                if let detail, Quiet.isShort(detail) {
                     Text(detail)
                         .font(DS.Font.caption)
                         .foregroundStyle(p.textMuted)

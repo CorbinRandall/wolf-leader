@@ -161,6 +161,10 @@ struct HubProject: Decodable, Identifiable, Hashable {
     var owner: String?
     var ownerSource: String?
     var tags: [String]
+    /// Marked shared: its notes and memories go to every chat, whatever project it is in.
+    var shared: Bool
+    /// Everyone on the hub can see it, not just its owner.
+    var everyone: Bool
 
     var updated: Date? { HubDate.parse(updatedAt) }
     /// `slug` when the hub has one, else the numeric id (both work for agent-brief).
@@ -180,6 +184,14 @@ struct HubProject: Decodable, Identifiable, Hashable {
         updatedAt = c.str("updated_at", "last_activity", "created_at")
         owner = c.str("owner")
         ownerSource = c.str("owner_source")
+        if let raw = c.str("metadata"), let data = raw.data(using: .utf8),
+           let meta = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            shared = (meta["shared"] as? Bool) ?? false
+            everyone = (meta["everyone"] as? Bool) ?? false
+        } else {
+            shared = false
+            everyone = false
+        }
         // Tags arrive as a list or as JSON text.
         if let list = try? c.decode([String].self, forKey: HubJSONKey("tags")) {
             tags = list
@@ -1025,6 +1037,47 @@ extension HubClient {
     func updateProject(id: Int, name: String, description: String) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["name": name, "description": description])
         _ = try await data("/api/projects/\(id)", method: "PUT", body: body, timeout: 60)
+    }
+
+    /// Share (or stop sharing) a project's notes and memories with every chat.
+    func setShared(projectID: Int, _ shared: Bool) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["metadata": ["shared": shared]])
+        _ = try await data("/api/projects/\(projectID)", method: "PUT", body: body, timeout: 60)
+    }
+
+    /// Let everyone on the hub see a project (or only its owner again).
+    func setEveryone(projectID: Int, _ everyone: Bool) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["metadata": ["everyone": everyone]])
+        _ = try await data("/api/projects/\(projectID)", method: "PUT", body: body, timeout: 60)
+    }
+
+    struct AccessPerson: Identifiable, Hashable {
+        var person: String
+        var admin: Bool
+        var hub: String
+        var mcp: String
+        var id: String { person }
+    }
+
+    /// Each person's sign-in addresses. Only the hub's admin gets an answer.
+    func accessPeople() async throws -> [AccessPerson] {
+        let raw = try await data("/api/access", timeout: 30)
+        let people = ((try JSONSerialization.jsonObject(with: raw) as? [String: Any])?["people"] as? [[String: Any]]) ?? []
+        return people.compactMap { p in
+            guard let name = p["person"] as? String, let hub = p["hub"] as? String, let mcp = p["mcp"] as? String else { return nil }
+            return AccessPerson(person: name, admin: (p["admin"] as? Bool) ?? false, hub: hub, mcp: mcp)
+        }
+    }
+
+    func resetAccess(person: String) async throws {
+        let safe = person.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? person
+        _ = try await data("/api/access/\(safe)/reset", method: "POST", timeout: 30)
+    }
+
+    /// Shared projects' context as one block of text, leaving out `excluding` (the chat's own project).
+    func sharedContextText(excluding projectID: Int?) async throws -> String {
+        let raw = try await data("/api/shared-context", query: projectID.map { ["exclude": String($0)] } ?? [:], timeout: 30)
+        return ((try JSONSerialization.jsonObject(with: raw) as? [String: Any])?["text"] as? String) ?? ""
     }
 
     /// Regenerate the project's brief from its memories and sessions.

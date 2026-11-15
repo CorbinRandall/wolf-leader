@@ -51,6 +51,11 @@ struct ChatRecord: Identifiable, Codable, Hashable {
     var title: String
     var cwd: String
     var mode: PermissionMode
+    /// The model and effort level to run, as the agent names them. nil = the agent's own default.
+    var model: String?
+    var effort: String?
+    /// The device where Screen control is on for this chat (the AI may see and use that Mac). nil: off.
+    var screenControlDevice: String?
     /// The agent's own session or thread id, so a chat can be resumed after the app restarts.
     var agentSessionID: String?
     var items: [ChatItem]
@@ -86,7 +91,8 @@ enum AgentEvent {
     case thinkingDelta(id: String, String)
     case toolStarted(id: String, title: String, detail: String)
     case toolUpdated(id: String, output: String?, status: ChatItem.Status?)
-    case approval(id: String, title: String, detail: String)
+    /// `mustAsk`: a step the person approves every time, whatever the chat's mode (an AI using the screen).
+    case approval(id: String, title: String, detail: String, mustAsk: Bool = false)
     case note(String)
     case turnFinished(error: String?)
     case exited(String?)
@@ -97,7 +103,8 @@ enum AgentEvent {
 protocol AgentDriver: AnyObject {
     var onEvent: (AgentEvent) -> Void { get set }
     func start() async throws
-    func send(_ text: String) async throws
+    /// Sends a message. Attached images go as images where the agent supports that; other files as paths.
+    func send(_ text: String, attachments: [URL]) async throws
     func interrupt()
     func answer(approval id: String, allow: Bool, always: Bool)
     func stop()

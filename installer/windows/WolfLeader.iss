@@ -72,6 +72,9 @@ Source: "{#AssetDir}wolfleader.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "install.ps1"; DestDir: "{app}\installer\windows"; Flags: ignoreversion
 Source: "..\CONFIG.md"; DestDir: "{app}\installer"; Flags: ignoreversion
 Source: "..\PROMPT.md"; DestDir: "{app}\installer"; Flags: ignoreversion
+; The chat app: a helper that runs the AI tools on this PC and shows the chat in the browser.
+Source: "{#RepoDir}ide_storage\bridge.py"; DestDir: "{app}\chat"; Flags: ignoreversion
+Source: "{#RepoDir}ide_storage\static\chat.html"; DestDir: "{app}\chat\static"; Flags: ignoreversion
 Source: "{#RepoDir}examples\*"; DestDir: "{app}\examples"; Excludes: "__pycache__,*.pyc"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#RepoDir}scripts\*"; DestDir: "{app}\scripts"; Excludes: "__pycache__,*.pyc"; Flags: ignoreversion recursesubdirs createallsubdirs
 

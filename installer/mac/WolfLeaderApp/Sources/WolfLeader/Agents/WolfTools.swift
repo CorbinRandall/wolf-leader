@@ -23,14 +23,21 @@ enum WolfTools {
     // MARK: Per agent
 
     /// Claude Code: an --mcp-config file, with the save/project tools turned off.
-    static func claudeArgs(url: String) -> [String] {
+    static func claudeArgs(url: String?, screen: ScreenControl.Command? = nil) -> [String] {
         let dir = ConfigStore.supportDir.appendingPathComponent("agents", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let file = dir.appendingPathComponent("wolf-leader-mcp.json")
-        let config: [String: Any] = ["mcpServers": [server: ["type": "http", "url": url]]]
+        var servers: [String: Any] = [:]
+        if let url { servers[server] = ["type": "http", "url": url] }
+        if let screen { servers[ScreenControl.server] = ScreenControl.claudeServer(screen) }
+        guard !servers.isEmpty else { return [] }
+        // One file per combination, so chats with and without screen control don't share one.
+        let name = [url != nil ? "hub" : nil, screen != nil ? "screen" : nil].compactMap { $0 }.joined(separator: "-")
+        let file = dir.appendingPathComponent("wolf-leader-mcp-\(name).json")
+        let config: [String: Any] = ["mcpServers": servers]
         guard let data = try? JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted]),
               (try? data.write(to: file, options: .atomic)) != nil else { return [] }
         // Wolf Leader's own tools never need asking about; the save/project ones are off.
+        guard url != nil else { return ["--mcp-config", file.path] }
         return ["--mcp-config", file.path,
                 "--allowedTools", "mcp__\(server)",
                 "--disallowedTools", blocked.map { "mcp__\(server)__\($0)" }.joined(separator: ",")]

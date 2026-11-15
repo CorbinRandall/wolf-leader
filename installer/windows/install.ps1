@@ -698,6 +698,35 @@ function Stop-BuiltInHub {
     }
 }
 
+# The chat app: a helper on this PC runs the AI tools (Claude, Codex) and shows the chat in the
+# browser. It needs a Python: the built-in hub's, or one already on this PC.
+function Invoke-Chat($Answer) {
+    $bridge = Join-Path $Root 'chat\bridge.py'
+    if (-not (Test-Path -LiteralPath $bridge)) { Skip 'chat app (not in this installer)'; return }
+    $pythonw = Join-Path $RuntimeDir 'python\pythonw.exe'
+    if (-not (Test-Path -LiteralPath $pythonw)) {
+        $found = Get-Command pythonw.exe -ErrorAction SilentlyContinue
+        if (-not $found) { $found = Get-Command pyw.exe -ErrorAction SilentlyContinue }
+        if (-not $found) { Skip 'chat app (needs Python on this PC; install Python, then run setup again)'; return }
+        $pythonw = $found.Source
+    }
+    $hub = (Get-Ini $Answer 'wolf' 'hub_url').TrimEnd('/')
+    $chatArgs = "`"$bridge`" --hub `"$hub`" --open"
+    $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'Wolf Leader.lnk'
+    if ($DryRun) { Plan "Start menu shortcut $shortcut -> $pythonw $chatArgs"; return }
+    $shell = New-Object -ComObject WScript.Shell
+    $lnk = $shell.CreateShortcut($shortcut)
+    $lnk.TargetPath = $pythonw
+    $lnk.Arguments = $chatArgs
+    $lnk.WorkingDirectory = (Join-Path $Root 'chat')
+    $lnk.WindowStyle = 7
+    $icon = Join-Path $Root 'wolfleader.ico'
+    if (Test-Path -LiteralPath $icon) { $lnk.IconLocation = $icon }
+    $lnk.Description = 'Wolf Leader: chat with your AI tools'
+    $lnk.Save()
+    Ok "Wolf Leader is in the Start menu (it opens the chat in your browser)"
+}
+
 function Invoke-LocalHub {
     Step 70 'Starting the Wolf Leader hub on this PC'
     $pythonw = Join-Path $RuntimeDir 'python\pythonw.exe'
@@ -858,6 +887,7 @@ try {
     if ($Shares) { Invoke-Shares $answer } else { Skip 'network shares (not selected)' }
     Invoke-GitIdentity
     if ($Client) { Invoke-Client $answer } else { Skip 'Cursor / Claude Code client (not selected)' }
+    if ($Client) { Invoke-Chat $answer }
     if ($Obsidian) { Invoke-Obsidian $answer } else { Skip 'Obsidian (not selected)' }
 
     if ($Mode -eq 'new' -and (Test-BuiltInHub)) {

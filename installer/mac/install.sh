@@ -898,12 +898,21 @@ EOF
         run mkdir -p "$ICONS"
         run cp "$ROOT/installer/assets/app-icon.png" "$ICONS/wolf-leader.png"
       fi
+      # The chat app: a small helper on this computer runs your AI tools (Claude, Codex) and
+      # shows the chat in your browser. Without Python it falls back to the hub's web page.
+      WL_EXEC="xdg-open $HUB_URL"
+      if [ -f "$ROOT/ide_storage/bridge.py" ] && command -v python3 >/dev/null 2>&1; then
+        run mkdir -p "$DATA_HOME/chat/static"
+        run cp "$ROOT/ide_storage/bridge.py" "$DATA_HOME/chat/bridge.py"
+        run cp "$ROOT/ide_storage/static/chat.html" "$DATA_HOME/chat/static/chat.html"
+        WL_EXEC="python3 $DATA_HOME/chat/bridge.py --hub $HUB_URL --open"
+      fi
       write_file "$APPS/wolf-leader.desktop" 644 <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=Wolf Leader
 Comment=Your projects and AI history
-Exec=xdg-open $HUB_URL
+Exec=$WL_EXEC
 Icon=wolf-leader
 Terminal=false
 Categories=Development;Office;

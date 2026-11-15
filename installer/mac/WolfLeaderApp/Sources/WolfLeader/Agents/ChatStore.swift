@@ -43,15 +43,20 @@ final class ChatStore: ObservableObject {
 
     /// A new chat. In a project, the agent works in the project's copy from the server; without
     /// one, in a scratch folder of its own until it's connected to a project.
-    func create(project: ProjectRef?, agent: AgentKind, mode: PermissionMode? = nil) -> ChatRecord {
+    func create(project: ProjectRef?, agent: AgentKind, mode: PermissionMode? = nil,
+                model: String? = nil, effort: String? = nil) -> ChatRecord {
         // New chats start the way the rules for every chat say (Full auto unless changed).
         let mode = mode ?? ChatRules.shared.defaultMode
         let now = Date()
         let id = UUID().uuidString.lowercased()
         let cwd = project.map { ProjectWorkspace.folder(slug: $0.slug).path } ?? ProjectWorkspace.looseFolder(chatID: id).path
-        let record = ChatRecord(id: id, projectID: project?.id, projectName: project?.name, projectSlug: project?.slug,
+        var record = ChatRecord(id: id, projectID: project?.id, projectName: project?.name, projectSlug: project?.slug,
                                 agentID: agent.id, title: "New chat", cwd: cwd, mode: mode, agentSessionID: nil,
                                 items: [], created: now, updated: now)
+        if ModelCatalog.supports(agent) {
+            record.model = model
+            record.effort = effort
+        }
         write(record)
         return record
     }
@@ -242,10 +247,14 @@ final class ChatSession: ObservableObject, Identifiable {
 
     /// This device, as the other devices see it.
     private var thisDevice: String { ChatSync.shared.device }
+    /// The AI has been told it has the screen tools (said once each time they're turned on, per app run).
+    private var screenToldOn = false
+    /// Approvals the person answers each time, whatever the mode (screen actions).
+    private var askEveryTime: Set<String> = []
 
-    func send(_ text: String, config: ConfigStore) {
+    func send(_ text: String, attachments: [URL] = [], config: ConfigStore) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !busy else { return }
+        guard !text.isEmpty || !attachments.isEmpty, !busy else { return }
         if let other = record.busyElsewhere(than: thisDevice) {
             append(ChatItem(id: UUID().uuidString, kind: .note,
                             text: "This chat is working on \(other) right now. Send again when it's done there."))
@@ -268,8 +277,9 @@ final class ChatSession: ObservableObject, Identifiable {
             append(ChatItem(id: UUID().uuidString, kind: .note, text: "Skills updated — reconnecting to pick them up."))
         }
         let earlier = record.items
-        append(ChatItem(id: UUID().uuidString, kind: .user, text: text))
-        if record.title == "New chat" { record.title = AgentText.oneLine(text, limit: 60) }
+        let shown = [text, attachments.isEmpty ? "" : Attachments.label(for: attachments)].filter { !$0.isEmpty }.joined(separator: "\n\n")
+        append(ChatItem(id: UUID().uuidString, kind: .user, text: shown))
+        if record.title == "New chat" { record.title = AgentText.oneLine(text.isEmpty ? shown : text, limit: 60) }
         busy = true
         claim()
         persist()
@@ -289,13 +299,17 @@ final class ChatSession: ObservableObject, Identifiable {
                     if let rules = await ChatRules.shared.contextBlock(hub: hub) { parts.append(rules) }
                     if ChatRules.shared.hubTools { parts.append(WolfTools.instructions(projectSlug: record.projectSlug)) }
                 }
+                if screenControl, !screenToldOn {
+                    parts.append(ScreenControl.instructions)
+                    screenToldOn = true
+                }
                 if record.needsHandoff == true, let handoff = WolfChatSync.handoff(earlier, agentName: record.agent?.name ?? "the agent") {
                     parts.append(handoff)
                 }
-                parts.append(text)
+                if !text.isEmpty { parts.append(text) }
                 record.contextSent = true
                 record.needsHandoff = nil
-                try await driver?.send(parts.joined(separator: "\n\n"))
+                try await driver?.send(parts.joined(separator: "\n\n"), attachments: attachments)
             } catch {
                 fail(error.localizedDescription)
             }
@@ -344,7 +358,8 @@ final class ChatSession: ObservableObject, Identifiable {
     func answer(_ itemID: String, allow: Bool, always: Bool = false) {
         guard let index = record.items.firstIndex(where: { $0.id == itemID }) else { return }
         record.items[index].status = allow ? .allowed : .denied
-        driver?.answer(approval: itemID, allow: allow, always: always)
+        // A step that asks every time can't be allowed for good.
+        driver?.answer(approval: itemID, allow: allow, always: always && !askEveryTime.contains(itemID))
     }
 
     func setMode(_ mode: PermissionMode) {
@@ -352,6 +367,36 @@ final class ChatSession: ObservableObject, Identifiable {
         record.mode = mode
         persist()
         // The mode is fixed when an agent starts, so start it again for the next message.
+        if !busy { driver?.stop(); driver = nil }
+    }
+
+    /// Pick the model and effort. Like the mode, they're fixed when the agent starts, so the
+    /// agent restarts (resuming its session) for the next message.
+    func setModel(_ model: String?, effort: String?) {
+        guard model != record.model || effort != record.effort else { return }
+        record.model = model
+        record.effort = effort
+        persist()
+        if !busy { driver?.stop(); driver = nil }
+    }
+
+    /// Screen control is on for this chat, on this Mac.
+    var screenControl: Bool { record.screenControlDevice == thisDevice }
+
+    /// Let the AI see and use this Mac in this chat, or stop. Like the mode, the tools are fixed
+    /// when the agent starts, so it restarts (resuming its session) for the next message.
+    func setScreenControl(_ on: Bool) {
+        guard on != screenControl else { return }
+        if on, ScreenControl.command == nil {
+            append(ChatItem(id: UUID().uuidString, kind: .error, text: ScreenControl.missing))
+            return
+        }
+        record.screenControlDevice = on ? thisDevice : nil
+        screenToldOn = false
+        append(ChatItem(id: UUID().uuidString, kind: .note,
+                        text: on ? "Screen control is on: \(record.agent?.name ?? "the AI") can see and use this Mac in this chat, starting with your next message."
+                                 : "Screen control is off."))
+        persist()
         if !busy { driver?.stop(); driver = nil }
     }
 
@@ -395,16 +440,18 @@ final class ChatSession: ObservableObject, Identifiable {
         if resumeID == nil, record.items.filter({ $0.kind == .user }).count > 1 { record.needsHandoff = true }
         // Wolf Leader's tools (search, recall, remember…) in the chat, unless the rules turn them off.
         let tools = WolfTools.url(hubURL: hubURL)
+        let screen = screenControl ? ScreenControl.command : nil
         let driver: AgentDriver
         switch agent.proto {
         case .claude:
-            driver = ClaudeDriver(executable: executable, cwd: record.cwd, mode: record.mode, resumeID: resumeID, toolsURL: tools)
+            driver = ClaudeDriver(executable: executable, cwd: record.cwd, mode: record.mode, resumeID: resumeID, toolsURL: tools,
+                                  model: record.model, effort: record.effort, screen: screen)
         case .codex:
             driver = CodexDriver(executable: executable, args: agent.args, cwd: record.cwd, mode: record.mode, resumeID: resumeID,
-                                 toolsURL: tools)
+                                 toolsURL: tools, model: record.model, effort: record.effort, screen: screen)
         case .acp:
             driver = AcpDriver(name: agent.name, executable: executable, args: agent.args, cwd: record.cwd, mode: record.mode,
-                               resumeID: resumeID, toolsURL: tools)
+                               resumeID: resumeID, toolsURL: tools, screen: screen)
         }
         driver.onEvent = { [weak self] event in self?.apply(event) }
         self.driver = driver
@@ -452,8 +499,9 @@ final class ChatSession: ObservableObject, Identifiable {
             guard let index = index(id, .tool) else { return }
             if let output, !output.isEmpty { record.items[index].output = output }
             if let status { record.items[index].status = status }
-        case .approval(let id, let title, let detail):
-            if ChatRules.shared.neverAsk || record.mode == .auto {
+        case .approval(let id, let title, let detail, let mustAsk):
+            if mustAsk { askEveryTime.insert(id) }
+            if !mustAsk, ChatRules.shared.neverAsk || record.mode == .auto {
                 // "Never ask": approve it for good, so the agent doesn't ask about this again.
                 append(ChatItem(id: id, kind: .approval, text: title, detail: detail, status: .allowed))
                 DispatchQueue.main.async { [weak self] in self?.driver?.answer(approval: id, allow: true, always: true) }
@@ -480,6 +528,10 @@ final class ChatSession: ObservableObject, Identifiable {
         persist()
         saveToHub()
         sendFilesToServer()
+        // Read the reply aloud, when that's turned on and this chat is on screen.
+        let lastUser = record.items.lastIndex { $0.kind == .user } ?? -1
+        let reply = record.items[(lastUser + 1)...].filter { $0.kind == .agent }.map(\.text).joined(separator: "\n\n")
+        Speaker.shared.replyFinished(chatID: record.id, text: reply)
     }
 
     /// The agent's changes go back to the project's folder on the server after every reply.

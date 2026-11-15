@@ -87,7 +87,7 @@ struct AskView: View {
                     .disabled(!canSearch)
                 }
                 .frame(maxWidth: 520)
-                Text("Search every memory, session and message. Or ask, like \u{201C}what did I save for Wolf Leader three months ago?\u{201D} Answers are quoted from your records, not written by an AI.")
+                Text("Search or ask anything across your projects.")
                     .font(DS.Font.caption)
                     .foregroundStyle(p.textFaint)
                     .multilineTextAlignment(.center)

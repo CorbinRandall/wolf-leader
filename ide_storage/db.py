@@ -10,6 +10,7 @@ Connection string: ``DATABASE_URL`` (or ``IDE_STORAGE_DATABASE_URL``).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -489,6 +490,10 @@ def connect(db_path: Any = None, *, autocommit: bool = False):
         return SqliteConnection(raw_sqlite)
     raw = psycopg.connect(database_url(), autocommit=autocommit)
     _register_vector(raw)
+    # A request from someone other than the admin sees only their own projects.
+    from ide_storage.access import apply_to_connection
+
+    apply_to_connection(raw)
     return Connection(raw)
 
 
@@ -1026,6 +1031,12 @@ def init_db() -> None:
                 cur.execute(stmt)
             for stmt in VIEWS:
                 cur.execute(stmt)
+            try:
+                from ide_storage.access import setup_database
+
+                setup_database(cur)
+            except Exception as exc:  # noqa: BLE001 - the hub must still start; members are refused instead
+                logging.getLogger(__name__).warning("Per-person access rules were not set up: %s", exc)
     finally:
         raw.close()
 

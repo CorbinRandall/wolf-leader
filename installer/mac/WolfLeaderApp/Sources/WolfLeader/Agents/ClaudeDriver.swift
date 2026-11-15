@@ -20,8 +20,16 @@ final class ClaudeDriver: AgentDriver {
 
     /// The hub's MCP address (Wolf Leader's tools in this chat), or nil for none.
     private let toolsURL: String?
+    private let model: String?
+    private let effort: String?
+    /// The screen tools, when Screen control is on for this chat.
+    private let screen: ScreenControl.Command?
 
-    init(executable: String, cwd: String, mode: PermissionMode, resumeID: String?, toolsURL: String? = nil) {
+    init(executable: String, cwd: String, mode: PermissionMode, resumeID: String?, toolsURL: String? = nil,
+         model: String? = nil, effort: String? = nil, screen: ScreenControl.Command? = nil) {
+        self.screen = screen
+        self.model = model
+        self.effort = effort
         self.executable = executable
         self.cwd = cwd
         self.mode = mode
@@ -33,7 +41,9 @@ final class ClaudeDriver: AgentDriver {
         switch mode {
         case .ask: return "default"
         case .edits: return "acceptEdits"
-        case .auto: return "bypassPermissions"
+        // With Screen control on, Claude keeps asking, so screen actions reach the person;
+        // everything else is let through here, as "Full auto" promises (see handleControl).
+        case .auto: return screen == nil ? "bypassPermissions" : "default"
         }
     }
 
@@ -41,7 +51,9 @@ final class ClaudeDriver: AgentDriver {
         var args = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
                     "--include-partial-messages", "--permission-prompt-tool", "stdio", "--permission-mode", permissionMode]
         if let resumeID { args += ["--resume", resumeID] }
-        if let toolsURL { args += WolfTools.claudeArgs(url: toolsURL) }
+        if let model { args += ["--model", model] }
+        if let effort { args += ["--effort", effort] }
+        args += WolfTools.claudeArgs(url: toolsURL, screen: screen)
         let process = JSONLineProcess(executable: executable, args: args, cwd: cwd, environment: AgentLocator.environment)
         process.onMessage = { [weak self] message in MainActor.assumeIsolated { self?.handle(message) } }
         process.onExit = { [weak self] code, tail in
@@ -57,11 +69,22 @@ final class ClaudeDriver: AgentDriver {
         process.send(["type": "control_request", "request_id": "init", "request": ["subtype": "initialize"]])
     }
 
-    func send(_ text: String) async throws {
+    func send(_ text: String, attachments: [URL]) async throws {
         guard let process, process.isRunning else { throw AgentError.failed("Claude isn't running.") }
+        var content: [[String: Any]] = []
+        var byPath: [URL] = []
+        for url in attachments {
+            if let data = Attachments.inlineData(url) {
+                content.append(["type": "image", "source": ["type": "base64", "media_type": Attachments.mimeType(url), "data": data]])
+            } else {
+                byPath.append(url)
+            }
+        }
+        let body = [text, Attachments.note(for: byPath)].compactMap { $0 }.joined(separator: "\n\n")
+        content.append(["type": "text", "text": body])
         process.send([
             "type": "user",
-            "message": ["role": "user", "content": [["type": "text", "text": text]]],
+            "message": ["role": "user", "content": content],
             "parent_tool_use_id": NSNull(),
             "session_id": "",
         ])
@@ -174,9 +197,18 @@ final class ClaudeDriver: AgentDriver {
             return
         }
         approvals[id] = request
+        let tool = request["tool_name"] as? String ?? ""
         let name = request["display_name"] as? String ?? request["tool_name"] as? String ?? "a tool"
         let input = request["input"] as? [String: Any] ?? [:]
-        onEvent(.approval(id: id, title: Self.title(name, input), detail: AgentText.describe(input)))
+        let screenAction = ScreenControl.isScreenTool(tool) && !ScreenControl.onlyLooks(tool)
+        // Looking at the screen was agreed to when Screen control was turned on. In Full auto,
+        // anything that isn't a screen action goes through without asking.
+        if ScreenControl.onlyLooks(tool) || (screen != nil && mode == .auto && !screenAction) {
+            answer(approval: id, allow: true, always: false)
+            return
+        }
+        let title = screenAction ? "On your Mac: " + Self.title(name, input) : Self.title(name, input)
+        onEvent(.approval(id: id, title: title, detail: AgentText.describe(input), mustAsk: screenAction))
     }
 
     /// "Ran ls", "Edited main.swift": the tool and its main argument in a few words.

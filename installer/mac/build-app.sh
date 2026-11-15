@@ -183,6 +183,10 @@ cat >"$CONTENTS/Info.plist" <<PLIST
 	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Wolf Leader listens when you press the microphone button, so you can talk instead of typing.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Wolf Leader turns what you say into text for your message.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Wolf Leader adds your network shares to Login Items so they reconnect when you log in.</string>
 	<key>WLGitSHA</key>

@@ -210,8 +210,9 @@ final class UpdateChecker: ObservableObject {
         let branch = self.branch
         let api = "https://api.github.com/repos/\(repo.owner)/\(repo.name)"
         do {
-            // Last commit this Mac updated to, else the commit the app was built from.
-            if let sha = Self.baseline(repo: repo, branch: branch) ?? BuildInfo.gitSHA {
+            // Count from the commit this app was built from. The saved "updated to" commit is only
+            // a fallback for builds that don't record one; it can go stale when an app is installed by hand.
+            if let sha = BuildInfo.gitSHA ?? Self.baseline(repo: repo, branch: branch) {
                 do {
                     let json = try await Self.fetchJSON("\(api)/compare/\(sha)...\(Self.pathEscape(branch))")
                     guard let dict = json as? [String: Any] else { throw UpdateError.badResponse }

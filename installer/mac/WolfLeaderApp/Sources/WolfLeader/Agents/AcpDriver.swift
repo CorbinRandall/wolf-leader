@@ -22,9 +22,11 @@ final class AcpDriver: AgentDriver {
 
     /// The hub's MCP address (Wolf Leader's tools in this chat), or nil for none.
     private let toolsURL: String?
+    private let screen: ScreenControl.Command?
 
     init(name: String, executable: String, args: [String], cwd: String, mode: PermissionMode, resumeID: String?,
-         toolsURL: String? = nil) {
+         toolsURL: String? = nil, screen: ScreenControl.Command? = nil) {
+        self.screen = screen
         self.toolsURL = toolsURL
         self.name = name
         self.executable = executable
@@ -54,7 +56,7 @@ final class AcpDriver: AgentDriver {
         let capabilities = hello["agentCapabilities"] as? [String: Any]
         let canLoad = capabilities?["loadSession"] as? Bool ?? false
         // Wolf Leader's tools, for agents that can take an HTTP MCP server.
-        let servers = WolfTools.acpServers(url: toolsURL, capabilities: capabilities)
+        let servers = WolfTools.acpServers(url: toolsURL, capabilities: capabilities) + (screen.map { [ScreenControl.acpServer($0)] } ?? [])
         if let sessionID, canLoad {
             replaying = true
             defer { replaying = false }
@@ -67,10 +69,11 @@ final class AcpDriver: AgentDriver {
         onEvent(.sessionID(id))
     }
 
-    func send(_ text: String) async throws {
+    func send(_ text: String, attachments: [URL]) async throws {
         guard let peer, let sessionID else { throw AgentError.failed("\(name) isn't running.") }
         textID = UUID().uuidString
-        let result = try await peer.request("session/prompt", ["sessionId": sessionID, "prompt": [["type": "text", "text": text]]])
+        let body = [text, Attachments.note(for: attachments)].compactMap { $0 }.joined(separator: "\n\n")
+        let result = try await peer.request("session/prompt", ["sessionId": sessionID, "prompt": [["type": "text", "text": body]]])
         let reason = result["stopReason"] as? String ?? "end_turn"
         onEvent(.turnFinished(error: reason == "refusal" ? "\(name) refused to continue." : nil))
     }
@@ -140,13 +143,18 @@ final class AcpDriver: AgentDriver {
         let call = params["toolCall"] as? [String: Any] ?? [:]
         let kind = call["kind"] as? String ?? ""
         // Auto-edit lets file edits and reads through; Full auto lets everything through.
-        if mode == .auto || (mode == .edits && ["edit", "read", "search", "think", "fetch"].contains(kind)), let allow {
+        // With Screen control on, a step that isn't one of the agent's own kinds may be a screen
+        // action, so it is always put to the person.
+        let known = ["edit", "read", "search", "think", "fetch", "execute", "delete", "move"].contains(kind)
+        let mustAsk = screen != nil && !known
+        if !mustAsk, mode == .auto || (mode == .edits && ["edit", "read", "search", "think", "fetch"].contains(kind)), let allow {
             peer?.respond(id, result: ["outcome": ["outcome": "selected", "optionId": allow]])
             return
         }
         let key = UUID().uuidString
         approvals[key] = pending
-        onEvent(.approval(id: key, title: call["title"] as? String ?? "Allow this step?", detail: AgentText.describe(call["rawInput"])))
+        onEvent(.approval(id: key, title: call["title"] as? String ?? "Allow this step?", detail: AgentText.describe(call["rawInput"]),
+                          mustAsk: mustAsk))
     }
 
     private static func text(_ content: Any?) -> String? {

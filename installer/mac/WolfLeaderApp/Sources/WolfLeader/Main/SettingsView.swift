@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum SettingsTab: String, Hashable {
-    case general, rules, hub, updates, about, sidebar
+    case general, rules, hub, updates, about, sidebar, library, shares
 }
 
 struct SettingsView: View {
@@ -17,6 +17,8 @@ struct SettingsView: View {
             WLTab(id: .hub, title: "Hub", icon: "server.rack"),
             WLTab(id: .updates, title: "Updates", icon: "arrow.triangle.2.circlepath", attention: updates.needsAttention),
             WLTab(id: .sidebar, title: "Sidebar", icon: "sidebar.left"),
+            WLTab(id: .library, title: "Library", icon: "rectangle.3.group"),
+            WLTab(id: .shares, title: "Shares", icon: "externaldrive.connected.to.line.below"),
             WLTab(id: .about, title: "About", icon: "info.circle"),
         ]
     }
@@ -37,14 +39,23 @@ struct SettingsView: View {
                 ChatRulesSettings()
             case .hub:
                 SettingsHubGroup()
+                SettingsExportGroup()
+                SettingsPeopleGroup()
                 SettingsOriginalGroup()
             case .updates:
                 SettingsUpdatesGroup(runner: updates.runner)
             case .sidebar:
                 SettingsSidebarGroup()
+            case .library, .shares:
+                EmptyView()
             case .about:
                 SettingsAboutGroup()
             }
+        }
+        .onChange(of: tab) { _, picked in
+            // Library and Shares are full pages of their own; the tab is the way in.
+            if picked == .library { tab = .general; nav.open(libraryTab: nav.route.libraryTab) }
+            if picked == .shares { tab = .general; nav.open(section: .shares) }
         }
         .onAppear(perform: takePendingTab)
         .onChange(of: nav.pendingSettingsTab) { _, _ in takePendingTab() }
@@ -267,6 +278,116 @@ private struct SettingsSetupGroup: View {
 
 // MARK: - Hub
 
+/// Who can sign in to the hub. Each person has their own address; it carries their key.
+private struct SettingsPeopleGroup: View {
+    @EnvironmentObject private var store: ConfigStore
+    @Environment(\.palette) private var p
+    @State private var people: [HubClient.AccessPerson] = []
+    @State private var note: String?
+    @State private var resetting: HubClient.AccessPerson?
+
+    var body: some View {
+        // A VStack, not a Group: an empty Group has no view, so its load would never run.
+        VStack(spacing: 0) {
+            if !people.isEmpty {
+                WLGroup(title: "People", subtitle: "Each person signs in with their own address and sees only their own projects.", icon: "person.2") {
+                    ForEach(people) { person in
+                        if person.id != people.first?.id { WLDivider() }
+                        WLRow(title: person.person,
+                              detail: person.admin ? "Admin: sees everything." : "Sees their own projects, and ones marked for everyone.") {
+                            HStack(spacing: 8) {
+                                Button("Copy hub address") { copy(person.hub, "\(person.person)'s hub address copied. They paste it into Settings > Hub.") }
+                                    .buttonStyle(SecondaryButtonStyle())
+                                Button("Copy MCP address") { copy(person.mcp, "\(person.person)'s MCP address copied, for Claude Code, Codex or Cursor.") }
+                                    .buttonStyle(SecondaryButtonStyle())
+                                Button("New key") { resetting = person }.buttonStyle(OutlineButtonStyle())
+                            }
+                        }
+                    }
+                    if let note { Text(note).font(DS.Font.micro).foregroundStyle(p.textMuted) }
+                }
+            }
+        }
+        .task(id: store.config.hubURL) { await load() }
+        .confirmationDialog("Give \(resetting?.person ?? "") a new key?",
+                            isPresented: Binding(get: { resetting != nil }, set: { if !$0 { resetting = nil } })) {
+            Button("New key", role: .destructive) {
+                if let person = resetting {
+                    Task {
+                        try? await store.hub.resetAccess(person: person.person)
+                        await load()
+                        note = "\(person.person) has a new key. Send them the new addresses."
+                    }
+                }
+                resetting = nil
+            }
+            Button("Cancel", role: .cancel) { resetting = nil }
+        } message: {
+            Text("Their old addresses stop working right away, on every device and tool.")
+        }
+    }
+
+    private func load() async { people = (try? await store.hub.accessPeople()) ?? [] }
+
+    private func copy(_ text: String, _ said: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        note = said
+    }
+}
+
+/// Your data is yours: one button saves all of it to this Mac.
+private struct SettingsExportGroup: View {
+    @EnvironmentObject private var store: ConfigStore
+    @State private var working = false
+    @State private var result: (ok: Bool, text: String)?
+
+    var body: some View {
+        WLGroup(title: "Your data", subtitle: "Everything the hub holds, in files you can open anywhere.", icon: "square.and.arrow.down") {
+            WLRow(title: "Export everything",
+                  detail: result?.text ?? "One ZIP in Downloads: every project, memory, chat, your profile and skills, as readable Markdown and as exact JSON.") {
+                Button {
+                    Task { await export() }
+                } label: {
+                    HStack(spacing: 6) {
+                        if working { ProgressView().controlSize(.small) }
+                        Text(working ? "Exporting…" : "Export")
+                    }
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .disabled(working)
+            }
+        }
+    }
+
+    private func export() async {
+        working = true
+        defer { working = false }
+        do {
+            var request = URLRequest(url: try store.hub.url("/api/export.zip"), timeoutInterval: 600)
+            request.httpMethod = "GET"
+            let (file, response) = try await URLSession.shared.download(for: request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                result = (false, "The hub couldn't make the export. Update the hub and try again.")
+                return
+            }
+            let stamp = ISO8601DateFormatter().string(from: Date()).prefix(10)
+            let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+            var target = downloads.appendingPathComponent("wolf-leader-export-\(stamp).zip")
+            var n = 2
+            while FileManager.default.fileExists(atPath: target.path) {
+                target = downloads.appendingPathComponent("wolf-leader-export-\(stamp) \(n).zip")
+                n += 1
+            }
+            try FileManager.default.moveItem(at: file, to: target)
+            NSWorkspace.shared.activateFileViewerSelecting([target])
+            result = (true, "Saved \(target.lastPathComponent) to Downloads.")
+        } catch {
+            result = (false, "Export didn't finish: \(error.localizedDescription)")
+        }
+    }
+}
+
 private struct SettingsHubGroup: View {
     @EnvironmentObject private var store: ConfigStore
     @Environment(\.palette) private var p
@@ -443,132 +564,128 @@ private struct SettingsUpdatesGroup: View {
 
     private var working: Bool { updates.preparing || runner.running }
 
-    private var statusTitle: String {
+    private var phaseText: String? {
+        switch updates.appPhase {
+        case .downloading(let f): return f.map { "Downloading… \(Int($0 * 100))%" } ?? "Downloading…"
+        case .building: return "Installing the update… this can take a few minutes."
+        case .installing: return "Installing…"
+        case .relaunching(let v): return "Restarting as \(v)…"
+        case .failed(let why): return "The update didn't finish. \(why)"
+        case .idle: return nil
+        }
+    }
+
+    private var headline: String {
+        if updates.appPhase.active { return "Updating Wolf Leader" }
         switch updates.status {
         case .idle, .checking: return "Checking for updates…"
-        case .upToDate: return "Up to date"
-        case .available(let n): return "Update available · \(n) new commit\(n == 1 ? "" : "s")"
-        case .branchHead: return "Latest on \(updates.branch)"
-        case .notConfigured: return "Update checks are off"
+        case .available: return "An update is ready"
         case .failed: return "Couldn't check for updates"
+        case .notConfigured: return "Updates are off"
+        case .upToDate, .branchHead: return "Wolf Leader is up to date"
         }
     }
 
-    private var statusDetail: String {
-        var parts: [String] = []
-        switch updates.status {
-        case .branchHead: parts.append("This build doesn't record its commit.")
-        case .notConfigured: parts.append("This build has no GitHub repository set.")
-        case .failed(let why): parts.append(why)
-        default: break
-        }
-        if let checked = updates.lastChecked { parts.append("Last checked \(HubDate.format(checked))") }
-        return parts.isEmpty ? "Checks GitHub on launch and every 6 hours." : parts.joined(separator: " ")
-    }
-
-    private var statusPill: (String, WLStatusKind)? {
-        switch updates.status {
-        case .upToDate: return ("Current", .good)
-        case .available: return ("New", .warn)
-        case .failed: return ("Offline", .bad)
-        default: return nil
-        }
+    private var subline: String {
+        if let phaseText = phaseText { return phaseText }
+        var text = "Version \(BuildInfo.version)"
+        if let checked = updates.lastChecked { text += " · checked \(HubDate.format(checked))" }
+        return text
     }
 
     var body: some View {
-        WLGroup(title: "Updates", subtitle: "Keep Wolf Leader current.", icon: "arrow.triangle.2.circlepath") {
+        WLGroup(title: "Updates", icon: "arrow.triangle.2.circlepath") {
             if let done = updates.justUpdated {
-                Text(done)
-                    .font(DS.Font.caption.weight(.medium))
-                    .foregroundStyle(p.good)
+                Text(done).font(DS.Font.caption.weight(.medium)).foregroundStyle(p.good)
             }
-            WLRow(title: statusTitle, detail: statusDetail) {
-                HStack(spacing: 8) {
-                    if let pill = statusPill { WLStatusPill(text: pill.0, kind: pill.1) }
+            HStack(alignment: .center, spacing: DS.Spacing.md) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(headline).font(DS.Font.body.weight(.semibold)).foregroundStyle(p.text)
+                    Text(subline).font(DS.Font.caption)
+                        .foregroundStyle({ if case .failed = updates.appPhase { return p.bad } else { return p.textMuted } }())
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: DS.Spacing.md)
+                if updates.appPhase.active {
+                    if case .downloading(let f?) = updates.appPhase { ProgressView(value: f).frame(width: 90) }
+                    else { ProgressView().controlSize(.small) }
+                } else if updates.appUpdateAvailable {
+                    Button("Update & restart") { Task { await updates.updateApp() } }
+                        .buttonStyle(PrimaryButtonStyle())
+                        .disabled(updates.busy)
+                } else {
                     Button {
                         Task { await updates.check() }
                     } label: {
                         HStack(spacing: 6) {
                             if updates.status == .checking { ProgressView().controlSize(.small) }
-                            Text("Check now")
+                            Text("Check for updates")
                         }
                     }
                     .buttonStyle(SecondaryButtonStyle())
-                    .disabled(updates.status == .checking)
+                    .disabled(updates.status == .checking || updates.busy)
                 }
             }
-            WLDivider()
-            WLRow(title: "Branch", detail: "Which GitHub branch to follow. Pushes to it show up here as updates.") {
-                Picker("Branch", selection: Binding(
-                    get: { updates.branch },
-                    set: { updates.setBranch($0) }
-                )) {
-                    ForEach(updates.branches.isEmpty ? [updates.branch] : updates.branches, id: \.self) { name in
-                        Text(name).tag(name)
-                    }
-                }
-                .labelsHidden()
-                .frame(maxWidth: 260)
-                .disabled(working)
-                .task { await updates.loadBranches() }
-            }
-            WLDivider()
-            AppUpdateRow()
-            WLDivider()
-            DisclosureGroup("Connect my AI tools outside Wolf Leader") {
-                WLRow(title: "Cursor and Claude Code on their own",
-                      detail: "Not needed for chats in Wolf Leader. Installs the Wolf Leader rule, hooks and skills into those tools so their own chats save here too. Makes an undo point first.") {
-                    Button {
-                        Task { await updates.updateSkills() }
-                    } label: {
-                        HStack(spacing: 6) {
-                            if working { ProgressView().controlSize(.small) }
-                            Text("Connect / update")
+
+            if updates.hasUpdate, !updates.commits.isEmpty {
+                DisclosureGroup("What's new") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(updates.commits.prefix(15)) { commit in
+                            Text("• " + (commit.title.isEmpty ? "Small fixes" : commit.title))
+                                .font(DS.Font.bodySmall).foregroundStyle(p.text)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    .buttonStyle(OutlineButtonStyle())
-                    .disabled(working || updates.repo == nil)
+                    .padding(.top, 6)
+                }
+                .font(DS.Font.bodySmall)
+            }
+
+            if updates.appPhase == .building || !runner.lines.isEmpty {
+                DisclosureGroup("Show details") {
+                    SettingsLogBox(lines: runner.lines).padding(.top, 6)
+                }
+                .font(DS.Font.bodySmall)
+            }
+
+            DisclosureGroup("Advanced") {
+                VStack(alignment: .leading, spacing: 12) {
+                    WLRow(title: "Update source", detail: "The GitHub branch updates come from. Leave this on main.") {
+                        Picker("Branch", selection: Binding(
+                            get: { updates.branch },
+                            set: { updates.setBranch($0) }
+                        )) {
+                            ForEach(updates.branches.isEmpty ? [updates.branch] : updates.branches, id: \.self) { name in
+                                Text(name).tag(name)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: 220)
+                        .disabled(working)
+                        .task { await updates.loadBranches() }
+                    }
+                    WLRow(title: "Reinstall this version", detail: "Rebuilds the app from the update source. Settings, chats and projects stay.") {
+                        Button("Reinstall") { Task { await updates.updateApp() } }
+                            .buttonStyle(OutlineButtonStyle(tint: p.textMuted))
+                            .disabled(updates.busy || updates.repo == nil)
+                    }
+                    WLRow(title: "Connect AI tools outside Wolf Leader",
+                          detail: "Not needed for chats in Wolf Leader. Installs the Wolf Leader rule, hooks and skills into Cursor and Claude Code so their own chats save here too.") {
+                        Button("Connect / update") { Task { await updates.updateSkills() } }
+                            .buttonStyle(OutlineButtonStyle())
+                            .disabled(working || updates.repo == nil)
+                    }
+                    if let note = updates.updateNote {
+                        Text(note).font(DS.Font.caption.weight(.medium)).foregroundStyle(noteColor)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let sha = BuildInfo.gitSHA {
+                        Text("Build \(String(sha.prefix(7))) from \(BuildInfo.branch)").font(DS.Font.micro).foregroundStyle(p.textFaint)
+                    }
                 }
                 .padding(.top, 6)
             }
             .font(DS.Font.bodySmall)
-            if let note = updates.updateNote {
-                Text(note)
-                    .font(DS.Font.caption.weight(.medium))
-                    .foregroundStyle(noteColor)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if !runner.lines.isEmpty {
-                SettingsLogBox(lines: runner.lines)
-            }
-        }
-
-        if !updates.commits.isEmpty {
-            WLGroup(title: updates.hasUpdate ? "What's new" : "Latest commit", icon: "list.bullet.rectangle") {
-                ForEach(updates.commits.prefix(25)) { commit in
-                    if commit.id != updates.commits.first?.id { WLDivider() }
-                    HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Text(commit.shortSHA)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(p.accent)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(commit.title.isEmpty ? "(no message)" : commit.title)
-                                .font(DS.Font.bodySmall)
-                                .foregroundStyle(p.text)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Text([commit.author, HubDate.format(commit.date)].filter { !$0.isEmpty }.joined(separator: " · "))
-                                .font(DS.Font.timestamp)
-                                .foregroundStyle(p.textMuted)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                }
-                if updates.commits.count > 25 {
-                    Text("and \(updates.commits.count - 25) more")
-                        .font(DS.Font.micro)
-                        .foregroundStyle(p.textMuted)
-                }
-            }
         }
     }
 
@@ -577,82 +694,6 @@ private struct SettingsUpdatesGroup: View {
         case .some(true): return p.good
         case .some(false): return p.bad
         case .none: return p.textMuted
-        }
-    }
-}
-
-/// "Update app": downloads the new version, swaps it in and reopens. No trip to GitHub.
-struct AppUpdateRow: View {
-    @EnvironmentObject private var updates: UpdateChecker
-    @Environment(\.palette) private var p
-
-    private var title: String {
-        switch updates.appPhase {
-        case .downloading(let f): return f.map { "Downloading… \(Int($0 * 100))%" } ?? "Downloading…"
-        case .building: return "Building the new app on this Mac…"
-        case .installing: return "Installing…"
-        case .relaunching(let v): return "Reopening as \(v)…"
-        case .idle, .failed: break
-        }
-        switch updates.channel {
-        case .release:
-            if updates.appUpdateAvailable, let r = updates.latestRelease { return "Version \(r.version) is available" }
-            return "App \(BuildInfo.version) · latest release"
-        case .source:
-            if case .available(let n) = updates.status { return "\(n) new commit\(n == 1 ? "" : "s") on \(updates.branch)" }
-            return "App built from \(updates.branch)"
-        }
-    }
-
-    private var detail: String {
-        if case .failed(let why) = updates.appPhase { return why }
-        if case .building = updates.appPhase { return "This takes a few minutes the first time. The log is below." }
-        switch updates.channel {
-        case .release:
-            return "Downloads the new version from GitHub, swaps it in and reopens. Settings, chats and projects stay."
-        case .source:
-            return "Downloads \(updates.branch) from GitHub, builds it here, swaps it in and reopens. Settings, chats and projects stay."
-        }
-    }
-
-    private var buttonTitle: String {
-        switch updates.channel {
-        case .release:
-            if let r = updates.latestRelease, updates.appUpdateAvailable { return "Update to \(r.version)" }
-            return "Up to date"
-        case .source:
-            return updates.appUpdateAvailable ? "Update & reopen" : "Rebuild"
-        }
-    }
-
-    /// Release builds only install a newer release; source builds can always rebuild.
-    private var canStart: Bool {
-        guard !updates.busy, updates.repo != nil else { return false }
-        return updates.channel == .source || updates.appUpdateAvailable
-    }
-
-    var body: some View {
-        WLRow(title: title, detail: detail) {
-            HStack(spacing: 8) {
-                if case .downloading(let f?) = updates.appPhase {
-                    ProgressView(value: f).frame(width: 80)
-                } else if updates.appPhase.active {
-                    ProgressView().controlSize(.small)
-                }
-                if updates.channel == .release, let page = updates.latestRelease?.page {
-                    Button("Notes") { MainLinks.open(page) }
-                        .buttonStyle(OutlineButtonStyle(tint: p.textMuted))
-                }
-                if updates.appUpdateAvailable {
-                    Button(buttonTitle) { Task { await updates.updateApp() } }
-                        .buttonStyle(PrimaryButtonStyle())
-                        .disabled(!canStart)
-                } else {
-                    Button(buttonTitle) { Task { await updates.updateApp() } }
-                        .buttonStyle(OutlineButtonStyle(tint: p.textMuted))
-                        .disabled(!canStart)
-                }
-            }
         }
     }
 }
@@ -696,16 +737,11 @@ struct SettingsLogBox: View {
 
 private struct SettingsSidebarGroup: View {
     @AppStorage("wl.sidebar.showNoProject") private var showNoProject: Bool = true
-    @AppStorage("wl.sidebar.showLibrary") private var showLibrary: Bool = true
 
     var body: some View {
         WLGroup(title: "Sidebar", subtitle: "Control what shows up in the sidebar.", icon: "sidebar.left") {
-            WLRow(title: "Show \u{201C}No project\u{201D} folder", detail: "Chats not yet connected to a project.") {
+            WLRow(title: "Show \u{201C}Loose chats\u{201D}", detail: "Chats not yet connected to a project.") {
                 Toggle("", isOn: $showNoProject).wlSwitch()
-            }
-            WLDivider()
-            WLRow(title: "Show Library section", detail: "Skills, People, Bring in, My tools, Backups, Cleanup, Snippets.") {
-                Toggle("", isOn: $showLibrary).wlSwitch()
             }
             WLDivider()
             WLRow(title: "Project order", detail: "Drag projects in the sidebar to reorder them.") {
@@ -718,7 +754,6 @@ private struct SettingsSidebarGroup: View {
             WLRow(title: "Show everything") {
                 Button("Reset") {
                     showNoProject = true
-                    showLibrary = true
                     UserDefaults.standard.removeObject(forKey: "wl.sidebar.projectOrder")
                 }
                 .buttonStyle(SecondaryButtonStyle())

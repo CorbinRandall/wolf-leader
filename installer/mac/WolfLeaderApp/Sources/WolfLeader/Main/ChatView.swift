@@ -33,6 +33,7 @@ struct ChatView: View {
         }
         .background(p.background)
         .onAppear {
+            draft = UserDefaults.standard.string(forKey: "wl.draft.\(session.record.id)") ?? ""
             composing = true
             Speaker.shared.activeChatID = session.record.id
         }
@@ -331,9 +332,8 @@ struct ChatView: View {
                 .onSubmit(send)
                 .disabled(session.busy || busyElsewhere != nil)
                 .onChange(of: draft) { _, new in
-                    // Cap large pastes to prevent the vertical TextField from blocking the main
-                    // thread while measuring height for many thousands of lines.
-                    if new.count > 20_000 { draft = String(new.prefix(20_000)) }
+                    if new.count > 20_000 { draft = String(new.prefix(20_000)); return }
+                    UserDefaults.standard.set(new, forKey: "wl.draft.\(session.record.id)")
                 }
             if session.busy {
                 Button { session.interrupt() } label: { Label("Stop", systemImage: "stop.fill") }

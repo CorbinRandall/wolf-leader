@@ -86,6 +86,7 @@ final class ProjectsModel: ObservableObject {
                 error = nil
                 if let done { notice = done }
                 await load(hub)
+                await RecentProjects.shared.reload()
             } catch { self.error = error.localizedDescription }
         }
     }

@@ -53,7 +53,7 @@ struct ChatHome: View {
     @AppStorage("wl.chat.agent") private var agentID = "claude"
     @ObservedObject var projectsModel: ProjectsModel
 
-    @State private var draft = ""
+    @AppStorage("wl.home.draft") private var draft = ""
     @State private var files: [URL] = []
     /// The model and effort for the next chat; remembered per agent.
     @State private var model: String?
@@ -285,6 +285,7 @@ struct ChatHome: View {
             if makeProject {
                 do {
                     ref = try await projects.create(name: name, owner: store.config.person, hub: store.hub)
+                    await projectsModel.reload()
                 } catch {
                     self.error = "Couldn't make the project: \(error.localizedDescription)"
                     return

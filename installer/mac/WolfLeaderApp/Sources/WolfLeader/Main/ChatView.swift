@@ -149,9 +149,9 @@ struct ChatView: View {
                     if record.items.isEmpty { emptyState }
                     ForEach(ChatSegment.build(record.items)) { segment in
                         if segment.items.count == 1 {
-                            ChatItemView(item: segment.items[0], session: session).id(segment.id)
+                            ChatItemView(item: segment.items[0], onApprove: { allow, always in session.answer(segment.items[0].id, allow: allow, always: always) }).id(segment.id)
                         } else {
-                            StepGroupView(items: segment.items, session: session).id(segment.id)
+                            StepGroupView(items: segment.items, onApprove: { id, allow, always in session.answer(id, allow: allow, always: always) }).id(segment.id)
                         }
                     }
                     if session.busy && !session.pendingApprovals {
@@ -168,7 +168,11 @@ struct ChatView: View {
                 .frame(maxWidth: .infinity)
             }
             .onChange(of: record.items.count) { _, _ in withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo("bottom") } }
-            .onChange(of: record.items.last?.text.count ?? 0) { _, _ in proxy.scrollTo("bottom") }
+            .onChange(of: record.items.last?.text.count ?? 0) { old, new in
+                // Scroll during streaming, but not on every character — only when a meaningful
+                // chunk arrives, to avoid layout thrash on long chats.
+                if new - old > 80 { proxy.scrollTo("bottom") }
+            }
             .onAppear { proxy.scrollTo("bottom") }
         }
     }
@@ -326,6 +330,11 @@ struct ChatView: View {
                 .shiftReturnNewline()
                 .onSubmit(send)
                 .disabled(session.busy || busyElsewhere != nil)
+                .onChange(of: draft) { _, new in
+                    // Cap large pastes to prevent the vertical TextField from blocking the main
+                    // thread while measuring height for many thousands of lines.
+                    if new.count > 20_000 { draft = String(new.prefix(20_000)) }
+                }
             if session.busy {
                 Button { session.interrupt() } label: { Label("Stop", systemImage: "stop.fill") }
                     .buttonStyle(SecondaryButtonStyle())
@@ -368,7 +377,8 @@ struct ChatView: View {
 private struct ChatItemView: View {
     @Environment(\.palette) private var p
     let item: ChatItem
-    @ObservedObject var session: ChatSession
+    /// Called only for approval items; avoids subscribing every row to session's publisher.
+    let onApprove: (_ allow: Bool, _ always: Bool) -> Void
     @State private var open = false
 
     var body: some View {
@@ -457,9 +467,9 @@ private struct ChatItemView: View {
             switch item.status {
             case .pending:
                 HStack(spacing: 8) {
-                    Button("Allow") { session.answer(item.id, allow: true) }.buttonStyle(PrimaryButtonStyle())
-                    Button("Always allow") { session.answer(item.id, allow: true, always: true) }.buttonStyle(OutlineButtonStyle())
-                    Button("Don't allow") { session.answer(item.id, allow: false) }.buttonStyle(OutlineButtonStyle())
+                    Button("Allow") { onApprove(true, false) }.buttonStyle(PrimaryButtonStyle())
+                    Button("Always allow") { onApprove(true, true) }.buttonStyle(OutlineButtonStyle())
+                    Button("Don't allow") { onApprove(false, false) }.buttonStyle(OutlineButtonStyle())
                 }
             case .allowed:
                 Text("Allowed").font(DS.Font.micro).foregroundStyle(p.good)
@@ -541,7 +551,7 @@ struct ChatSegment: Identifiable {
 private struct StepGroupView: View {
     @Environment(\.palette) private var p
     let items: [ChatItem]
-    @ObservedObject var session: ChatSession
+    let onApprove: (_ id: String, _ allow: Bool, _ always: Bool) -> Void
     @State private var open = false
 
     private var tools: [ChatItem] { items.filter { $0.kind == .tool } }
@@ -576,7 +586,7 @@ private struct StepGroupView: View {
             .buttonStyle(.plain)
             if open {
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(items) { ChatItemView(item: $0, session: session) }
+                    ForEach(items) { item in ChatItemView(item: item, onApprove: { allow, always in onApprove(item.id, allow, always) }) }
                 }
                 .padding(.leading, 18)
             }

@@ -49,10 +49,22 @@ enum WolfTools {
         let list = blocked.map { "\"\($0)\"" }.joined(separator: ",")
         // Codex holds MCP calls for approval on its own (even with approvals off) unless the server
         // says otherwise; Wolf Leader's tools are always fine to use.
-        return ["-c", "mcp_servers.\(server).url=\"\(url)\"",
-                "-c", "mcp_servers.\(server).disabled_tools=[\(list)]",
-                "-c", "mcp_servers.\(server).default_tools_approval_mode=\"approve\"",
-                "-c", "mcp_servers.ide-storage.enabled=false"]
+        var args = ["-c", "mcp_servers.\(server).url=\"\(url)\"",
+                    "-c", "mcp_servers.\(server).disabled_tools=[\(list)]",
+                    "-c", "mcp_servers.\(server).default_tools_approval_mode=\"approve\""]
+        // Only disable ide-storage when it's actually in the user's config. Passing enabled=false
+        // for a server that isn't configured creates an entry with no transport, which Codex
+        // then rejects with "invalid transport".
+        if codexHasServer("ide-storage") {
+            args += ["-c", "mcp_servers.ide-storage.enabled=false"]
+        }
+        return args
+    }
+
+    private static func codexHasServer(_ name: String) -> Bool {
+        let file = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/config.toml")
+        guard let text = try? String(contentsOf: file, encoding: .utf8) else { return false }
+        return text.contains("[mcp_servers.\(name)]")
     }
 
     /// Agent Client Protocol: an HTTP server in session/new, for agents that take one.

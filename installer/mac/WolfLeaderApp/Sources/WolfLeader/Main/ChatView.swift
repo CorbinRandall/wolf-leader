@@ -118,7 +118,7 @@ struct ChatView: View {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     if record.items.isEmpty { emptyState }
                     ForEach(record.items) { item in
-                        ChatItemView(item: item, session: session).id(item.id)
+                        ChatItemView(item: item, onApprove: { allow, always in session.answer(item.id, allow: allow, always: always) }).id(item.id)
                     }
                     if session.busy && !session.pendingApprovals {
                         HStack(spacing: 8) {
@@ -134,7 +134,11 @@ struct ChatView: View {
                 .frame(maxWidth: .infinity)
             }
             .onChange(of: record.items.count) { _, _ in withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo("bottom") } }
-            .onChange(of: record.items.last?.text.count ?? 0) { _, _ in proxy.scrollTo("bottom") }
+            .onChange(of: record.items.last?.text.count ?? 0) { old, new in
+                // Scroll during streaming, but not on every character — only when a meaningful
+                // chunk arrives, to avoid layout thrash on long chats.
+                if new - old > 80 { proxy.scrollTo("bottom") }
+            }
             .onAppear { proxy.scrollTo("bottom") }
         }
     }
@@ -282,6 +286,11 @@ struct ChatView: View {
                 .mainField()
                 .onSubmit(send)
                 .disabled(session.busy || busyElsewhere != nil)
+                .onChange(of: draft) { _, new in
+                    // Cap large pastes to prevent the vertical TextField from blocking the main
+                    // thread while measuring height for many thousands of lines.
+                    if new.count > 20_000 { draft = String(new.prefix(20_000)) }
+                }
             if session.busy {
                 Button { session.interrupt() } label: { Label("Stop", systemImage: "stop.fill") }
                     .buttonStyle(SecondaryButtonStyle())
@@ -313,7 +322,8 @@ struct ChatView: View {
 private struct ChatItemView: View {
     @Environment(\.palette) private var p
     let item: ChatItem
-    @ObservedObject var session: ChatSession
+    /// Called only for approval items; avoids subscribing every row to session's publisher.
+    let onApprove: (_ allow: Bool, _ always: Bool) -> Void
     @State private var open = false
 
     var body: some View {
@@ -402,9 +412,9 @@ private struct ChatItemView: View {
             switch item.status {
             case .pending:
                 HStack(spacing: 8) {
-                    Button("Allow") { session.answer(item.id, allow: true) }.buttonStyle(PrimaryButtonStyle())
-                    Button("Always allow") { session.answer(item.id, allow: true, always: true) }.buttonStyle(OutlineButtonStyle())
-                    Button("Don't allow") { session.answer(item.id, allow: false) }.buttonStyle(OutlineButtonStyle())
+                    Button("Allow") { onApprove(true, false) }.buttonStyle(PrimaryButtonStyle())
+                    Button("Always allow") { onApprove(true, true) }.buttonStyle(OutlineButtonStyle())
+                    Button("Don't allow") { onApprove(false, false) }.buttonStyle(OutlineButtonStyle())
                 }
             case .allowed:
                 Text("Allowed").font(DS.Font.micro).foregroundStyle(p.good)

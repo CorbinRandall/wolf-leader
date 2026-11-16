@@ -270,16 +270,7 @@ struct ChatView: View {
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: 8) {
-        AttachmentTray(files: $files)
-        HStack(alignment: .bottom, spacing: 10) {
-            snippetMenu
-            AttachButton(files: $files)
-                .disabled((session.busy && !session.awaitingInput) || busyElsewhere != nil)
-            ScreenButton(files: $files)
-                .disabled((session.busy && !session.awaitingInput) || busyElsewhere != nil)
-            MicButton(id: session.record.id, draft: $draft)
-                .disabled((session.busy && !session.awaitingInput) || busyElsewhere != nil)
-            ReadAloudButton()
+            AttachmentTray(files: $files)
             // Grows as you type, up to half the column so the reply stays readable, then scrolls.
             GrowingComposer(text: $draft,
                             placeholder: "Message \(agent?.name ?? "the agent")…",
@@ -289,6 +280,7 @@ struct ChatView: View {
                             disabled: (session.busy && !session.awaitingInput) || busyElsewhere != nil,
                             onSubmit: send,
                             height: $composerHeight)
+                .frame(maxWidth: .infinity)
                 .frame(height: composerHeight)
                 .onChange(of: draft) { _, new in
                     saveTask?.cancel()
@@ -299,19 +291,28 @@ struct ChatView: View {
                         }
                     }
                 }
-                .disabled((session.busy && !session.awaitingInput) || busyElsewhere != nil)
-                .layoutPriority(1)
-            if session.busy && !session.awaitingInput {
-                Button { session.interrupt() } label: { Label("Stop", systemImage: "stop.fill") }
-                    .buttonStyle(SecondaryButtonStyle())
-                    .keyboardShortcut(".", modifiers: .command)
-            } else {
-                Button("Send", action: send)
-                    .buttonStyle(PrimaryButtonStyle())
-                    .keyboardShortcut(.return, modifiers: .command)
-                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && files.isEmpty)
+            HStack(spacing: 10) {
+                snippetMenu
+                AttachButton(files: $files).disabled((session.busy && !session.awaitingInput) || busyElsewhere != nil)
+                ScreenButton(files: $files).disabled((session.busy && !session.awaitingInput) || busyElsewhere != nil)
+                MicButton(id: session.record.id, draft: $draft).disabled((session.busy && !session.awaitingInput) || busyElsewhere != nil)
+                ReadAloudButton()
+                Spacer(minLength: 0)
+                if session.busy && !session.awaitingInput {
+                    Button { session.interrupt() } label: { Label("Stop", systemImage: "stop.fill") }
+                        .buttonStyle(SecondaryButtonStyle())
+                        .keyboardShortcut(".", modifiers: .command)
+                        .fixedSize()
+                } else {
+                    Button("Send", action: send)
+                        .buttonStyle(PrimaryButtonStyle())
+                        .keyboardShortcut(.return, modifiers: .command)
+                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && files.isEmpty)
+                        .fixedSize()
+                }
             }
-        }
+            // One thin fixed row: icons left, Send right. Never moves as the text box grows.
+            .frame(height: 28)
         }
         .acceptsAttachments($files)
         .padding(.horizontal, DS.Spacing.lg).padding(.vertical, 12)

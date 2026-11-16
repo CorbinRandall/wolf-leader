@@ -33,9 +33,12 @@ struct ChatDeckView: View {
                         }
                         addButton(height: columnHeight).id("add")
                     }
-                    .padding(.horizontal, 10).padding(.vertical, 10)
                     .frame(height: columnHeight)
+                    .padding(.horizontal, 10).padding(.vertical, 10)
+                    // Exactly the window's height, so the deck only ever scrolls sideways.
+                    .frame(height: geo.size.height)
                 }
+                .scrollBounceBehavior(.basedOnSize, axes: .vertical)
                 .onChange(of: nav.openChatIDs) { old, new in
                     cachedGroups = buildGroups()
                     guard let last = new.last, !old.contains(last) else { return }

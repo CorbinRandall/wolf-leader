@@ -47,6 +47,8 @@ struct SidebarProjectFolders: View {
             projectGroup(for: entry)
         }
         .onMove(perform: showAll ? move : nil)
+        .onAppear { autoExpand() }
+        .onChange(of: nav.openChatIDs) { _, _ in autoExpand() }
         let hidden = orderedEntries.count - shown.count
         if hidden > 0 || (showAll && orderedEntries.count > Self.short) {
             Button(showAll ? "Show fewer" : "\(hidden) more") { showAll.toggle() }
@@ -114,6 +116,15 @@ struct SidebarProjectFolders: View {
         Button("Move to bottom") { reorder(entry.id, to: entries.count - 1) }.disabled(index == entries.count - 1)
         Divider()
         Button("Sort by recent use") { savedOrder = "" }
+    }
+
+    private func autoExpand() {
+        for entry in orderedEntries {
+            let projectChats = chats.chats(projectID: entry.id)
+            if projectChats.contains(where: { nav.openChatIDs.contains($0.id) }) {
+                expanded.insert(entry.id)
+            }
+        }
     }
 
     private func move(from source: IndexSet, to destination: Int) {

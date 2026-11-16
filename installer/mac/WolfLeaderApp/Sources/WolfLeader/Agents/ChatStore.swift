@@ -62,10 +62,21 @@ final class ChatStore: ObservableObject {
     }
 
     /// Keeps the chat on this Mac and (unless it just came from the hub) sends it to the hub.
+    /// Also updates the published `records` list so every observer sees the change.
     func write(_ record: ChatRecord, sync: Bool = true) {
         if sync { ChatSync.shared.schedulePush(record) }
         if let index = records.firstIndex(where: { $0.id == record.id }) { records[index] = record } else { records.insert(record, at: 0) }
         records.sort { $0.updated > $1.updated }
+        writeToDisk(record)
+    }
+
+    /// Writes to disk only — does NOT update `records` or fire objectWillChange.
+    /// Use this on the hot streaming path (claim renewals) to avoid re-rendering every observer.
+    func writeQuiet(_ record: ChatRecord) {
+        writeToDisk(record)
+    }
+
+    private func writeToDisk(_ record: ChatRecord) {
         do {
             try FileManager.default.createDirectory(at: Self.folder, withIntermediateDirectories: true)
             let encoder = JSONEncoder()
@@ -227,10 +238,13 @@ final class ChatSession: ObservableObject, Identifiable {
     /// What's happening before the agent starts, e.g. bringing the project in from the server.
     @Published private(set) var preparing: String?
     @Published private(set) var saveState: SaveState = .idle
+    /// Set while Claude is waiting for the user to reply to a user_prompt control request.
+    @Published private(set) var awaitingInput: Bool = false
 
     nonisolated let id: String
     private weak var store: ChatStore?
     private var driver: AgentDriver?
+    private var pendingInputID: String?
     private var hubURL = ""
     private var hub: HubClient?
     private var skillsFingerprint = ""
@@ -254,6 +268,14 @@ final class ChatSession: ObservableObject, Identifiable {
 
     func send(_ text: String, attachments: [URL] = [], config: ConfigStore) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // If Claude is waiting for a text reply to a user_prompt request, respond to that first.
+        if let promptID = pendingInputID, !text.isEmpty {
+            pendingInputID = nil
+            awaitingInput = false
+            append(ChatItem(id: UUID().uuidString, kind: .user, text: text, status: .done))
+            driver?.answerPrompt(id: promptID, text: text)
+            return
+        }
         guard !text.isEmpty || !attachments.isEmpty, !busy else { return }
         if let other = record.busyElsewhere(than: thisDevice) {
             append(ChatItem(id: UUID().uuidString, kind: .note,
@@ -475,9 +497,10 @@ final class ChatSession: ObservableObject, Identifiable {
 
     private func apply(_ event: AgentEvent) {
         // A long turn keeps its claim on the chat so other devices keep waiting.
+        // Use quiet=true: don't fire ChatStore.objectWillChange on every streaming token.
         if busy, let until = record.activeUntil, until.timeIntervalSinceNow < 5 * 60 {
             claim()
-            persist()
+            persist(quiet: true)
         }
         switch event {
         case .sessionID(let id):
@@ -508,6 +531,9 @@ final class ChatSession: ObservableObject, Identifiable {
             } else {
                 append(ChatItem(id: id, kind: .approval, text: title, detail: detail, status: .pending))
             }
+        case .awaitingInput(let id):
+            pendingInputID = id
+            awaitingInput = true
         case .note(let text):
             append(ChatItem(id: UUID().uuidString, kind: .note, text: text))
         case .turnFinished(let error):
@@ -521,6 +547,8 @@ final class ChatSession: ObservableObject, Identifiable {
     }
 
     private func finishTurn() {
+        awaitingInput = false
+        pendingInputID = nil
         busy = false
         release()
         for index in record.items.indices where record.items[index].status == .running { record.items[index].status = .done }
@@ -559,9 +587,9 @@ final class ChatSession: ObservableObject, Identifiable {
         record.items.append(item)
     }
 
-    private func persist() {
+    private func persist(quiet: Bool = false) {
         record.updated = Date()
-        store?.write(record)
+        if quiet { store?.writeQuiet(record) } else { store?.write(record) }
     }
 
     private func saveToHub() {

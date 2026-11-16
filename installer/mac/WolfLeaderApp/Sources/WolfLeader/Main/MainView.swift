@@ -100,7 +100,18 @@ struct MainView: View {
                 }
                 // Chat first: a new chat is always one click (or ⌘N) away.
                 Section {
-                    Label("New chat", systemImage: "square.and.pencil").tag(SidebarItem.newChat)
+                    Label {
+                        HStack(spacing: 6) {
+                            Text("New chat")
+                            Spacer(minLength: 0)
+                            if !nav.openChatIDs.isEmpty {
+                                MainTag(text: "\(nav.openChatIDs.count)", color: p.accent2)
+                            }
+                        }
+                    } icon: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .tag(SidebarItem.newChat)
                     Label(MainSection.ask.label, systemImage: MainSection.ask.symbol).tag(SidebarItem.section(.ask))
                 }
                 Section("Projects") {
@@ -190,14 +201,6 @@ struct MainView: View {
         }
         .environmentObject(nav)
         .environmentObject(search)
-        .sheet(isPresented: $nav.showingNewChatPanel) {
-            ChatHome(projectsModel: projectsModel)
-                .frame(minWidth: 620, minHeight: 480)
-                .environment(\.palette, p)
-                .environmentObject(store)
-                .environmentObject(nav)
-                .environmentObject(search)
-        }
         .onAppear { nav.watchSwipes() }
         .environmentObject(updates)
         .task {
@@ -231,12 +234,10 @@ struct MainView: View {
     private var detail: some View {
         switch nav.route.section {
         case .chats:
-            if !nav.openChatIDs.isEmpty {
-                ChatDeckView(projectsModel: projectsModel)
-            } else if nav.route.chatList {
+            if nav.route.chatList {
                 AllChatsView()
             } else {
-                ChatHome(projectsModel: projectsModel)
+                ChatDeckView(projectsModel: projectsModel)
             }
         case .projects:
             ProjectsView(openSettings: { nav.open(section: .settings) }, model: projectsModel)

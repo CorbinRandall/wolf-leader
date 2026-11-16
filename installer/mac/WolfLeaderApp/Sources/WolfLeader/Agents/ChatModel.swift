@@ -93,6 +93,8 @@ enum AgentEvent {
     case toolUpdated(id: String, output: String?, status: ChatItem.Status?)
     /// `mustAsk`: a step the person approves every time, whatever the chat's mode (an AI using the screen).
     case approval(id: String, title: String, detail: String, mustAsk: Bool = false)
+    /// The agent is waiting for a text reply from the user (e.g. Claude's user_prompt request).
+    case awaitingInput(id: String)
     case note(String)
     case turnFinished(error: String?)
     case exited(String?)
@@ -107,7 +109,13 @@ protocol AgentDriver: AnyObject {
     func send(_ text: String, attachments: [URL]) async throws
     func interrupt()
     func answer(approval id: String, allow: Bool, always: Bool)
+    /// Responds to a mid-turn input request (e.g. user_prompt). No-op for agents that don't use it.
+    func answerPrompt(id: String, text: String)
     func stop()
+}
+
+extension AgentDriver {
+    func answerPrompt(id: String, text: String) { }
 }
 
 enum AgentError: LocalizedError {

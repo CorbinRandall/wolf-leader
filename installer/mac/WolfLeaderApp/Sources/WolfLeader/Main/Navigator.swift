@@ -90,17 +90,15 @@ final class Navigator: ObservableObject {
     /// The new-chat page, with this project already picked (nil: no project).
     func newChat(project: ProjectRef? = nil, newProject: Bool = false) {
         pendingNewChat = NewChatRequest(project: project, newProject: newProject)
-        // While the deck is showing, pop up the new-chat sheet instead of navigating away.
-        if !openChatIDs.isEmpty {
-            showingNewChatPanel = true
-            return
+        showingNewChatPanel = true
+        if route.section != .chats || route.chatList {
+            var next = route
+            next.section = .chats
+            next.projectID = nil
+            next.chatID = nil
+            next.chatList = false
+            go(next)
         }
-        var next = route
-        next.section = .chats
-        next.projectID = nil
-        next.chatID = nil
-        next.chatList = false
-        go(next)
     }
 
     /// Every chat, grouped by project, plus chats from other AI tools to bring in.

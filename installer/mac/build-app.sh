@@ -283,7 +283,7 @@ RW="$TMP/rw.dmg"
 WIN_W=600
 WIN_H=380
 mkdir -p "$STAGE"
-ditto "$APP" "$STAGE/Wolf Leader.app"
+ditto "$APP" "$STAGE/$APP_NAME.app"
 ln -s /Applications "$STAGE/Applications"
 rm -f "$DMG"
 

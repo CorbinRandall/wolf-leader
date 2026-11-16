@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The sidebar's project list: open projects only, the ones you used last on top, each with one
-/// line saying where it is. Chats aren't listed here; a project's page is where you carry on.
+/// line saying where it is. Each project can be expanded to show its recent chats.
 struct SidebarProjectFolders: View {
     @ObservedObject var model: ProjectsModel
     @EnvironmentObject var nav: Navigator
@@ -9,6 +9,7 @@ struct SidebarProjectFolders: View {
     @ObservedObject private var chats = ChatStore.shared
     @AppStorage("wl.sidebar.projectOrder") private var savedOrder: String = ""
     @AppStorage("wl.sidebar.showAllProjects") private var showAll = false
+    @State private var expanded: Set<Int> = []
 
     /// How many projects show before "more".
     private static let short = 7
@@ -43,15 +44,41 @@ struct SidebarProjectFolders: View {
     var body: some View {
         let shown = shownEntries
         ForEach(shown) { entry in
-            row(for: entry)
+            projectGroup(for: entry)
         }
         .onMove(perform: showAll ? move : nil)
+        .onAppear { autoExpand() }
+        .onChange(of: nav.openChatIDs) { _, _ in autoExpand() }
         let hidden = orderedEntries.count - shown.count
         if hidden > 0 || (showAll && orderedEntries.count > Self.short) {
             Button(showAll ? "Show fewer" : "\(hidden) more") { showAll.toggle() }
                 .buttonStyle(.plain).font(DS.Font.caption).foregroundStyle(p.textMuted)
                 .selectionDisabled()
         }
+    }
+
+    private func projectGroup(for entry: ProjectEntry) -> some View {
+        let projectChats = chats.chats(projectID: entry.id)
+        if projectChats.isEmpty {
+            return AnyView(row(for: entry).tag(SidebarItem.project(entry.id)))
+        }
+        let isExpanded = Binding<Bool>(
+            get: { expanded.contains(entry.id) },
+            set: { v in if v { expanded.insert(entry.id) } else { expanded.remove(entry.id) } }
+        )
+        return AnyView(
+            DisclosureGroup(isExpanded: isExpanded) {
+                ForEach(projectChats.prefix(4)) { chat in
+                    Label(chat.title, systemImage: chat.agent?.symbol ?? "bubble.left")
+                        .font(DS.Font.micro)
+                        .lineLimit(1)
+                        .tag(SidebarItem.chat(chat.id))
+                }
+            } label: {
+                row(for: entry)
+            }
+            .tag(SidebarItem.project(entry.id))
+        )
     }
 
     private func row(for entry: ProjectEntry) -> some View {
@@ -72,7 +99,6 @@ struct SidebarProjectFolders: View {
             }
         }
         .padding(.vertical, 1)
-        .tag(SidebarItem.project(entry.id))
         .help(entry.name)
         .contextMenu { menu(for: entry) }
     }
@@ -90,6 +116,15 @@ struct SidebarProjectFolders: View {
         Button("Move to bottom") { reorder(entry.id, to: entries.count - 1) }.disabled(index == entries.count - 1)
         Divider()
         Button("Sort by recent use") { savedOrder = "" }
+    }
+
+    private func autoExpand() {
+        for entry in orderedEntries {
+            let projectChats = chats.chats(projectID: entry.id)
+            if projectChats.contains(where: { nav.openChatIDs.contains($0.id) }) {
+                expanded.insert(entry.id)
+            }
+        }
     }
 
     private func move(from source: IndexSet, to destination: Int) {

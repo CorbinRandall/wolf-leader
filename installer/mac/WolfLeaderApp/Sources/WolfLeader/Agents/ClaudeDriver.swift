@@ -16,6 +16,8 @@ final class ClaudeDriver: AgentDriver {
     private var messageID = ""
     private var streamed: Set<String> = []
     private var approvals: [String: [String: Any]] = [:]
+    /// Pending user_prompt requests: Claude is waiting for the user to type a text reply.
+    private var userPrompts: [String: [String: Any]] = [:]
     private var exitReported = false
 
     /// The hub's MCP address (Wolf Leader's tools in this chat), or nil for none.
@@ -109,6 +111,12 @@ final class ClaudeDriver: AgentDriver {
                        "response": ["subtype": "success", "request_id": id, "response": response]])
     }
 
+    func answerPrompt(id: String, text: String) {
+        guard userPrompts.removeValue(forKey: id) != nil else { return }
+        process?.send(["type": "control_response",
+                       "response": ["subtype": "success", "request_id": id, "response": ["result": text]]])
+    }
+
     func stop() {
         exitReported = true
         process?.terminate()
@@ -191,7 +199,17 @@ final class ClaudeDriver: AgentDriver {
 
     private func handleControl(_ message: [String: Any]) {
         guard let id = message["request_id"] as? String, let request = message["request"] as? [String: Any] else { return }
-        guard request["subtype"] as? String == "can_use_tool" else {
+        switch request["subtype"] as? String {
+        case "can_use_tool":
+            break // handled below
+        case "user_prompt":
+            // Claude needs a text reply from the user to continue the turn.
+            userPrompts[id] = request
+            let question = request["prompt"] as? String ?? request["question"] as? String ?? "Claude is waiting for your reply."
+            onEvent(.text(id: id, question))
+            onEvent(.awaitingInput(id: id))
+            return
+        default:
             process?.send(["type": "control_response",
                            "response": ["subtype": "error", "request_id": id, "error": "Not supported in Wolf Leader."]])
             return

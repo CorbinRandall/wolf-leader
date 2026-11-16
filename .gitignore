@@ -8,6 +8,8 @@ docker-compose.local.yml
 # Runtime data - your homelab memory stays private
 data/ide-work.db
 data/ide-work.db-*
+data/*.db
+data/skills/
 data/logs/
 data/*.pid
 data/deployment-mcp.db

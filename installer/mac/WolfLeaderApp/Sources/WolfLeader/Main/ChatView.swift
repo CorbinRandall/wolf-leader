@@ -249,7 +249,7 @@ struct ChatView: View {
             Label("Continue with…", systemImage: "arrow.triangle.swap").font(.system(size: 11, weight: .semibold))
         }
         .menuStyle(.borderlessButton).fixedSize()
-        .disabled(session.busy || busyElsewhere != nil)
+        .disabled((session.busy && !session.awaitingInput) || busyElsewhere != nil)
         .help("Hand this chat to another agent. It gets the conversation so far and carries on.")
     }
 
@@ -303,7 +303,7 @@ struct ChatView: View {
         }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
         .help("Insert a saved snippet")
-        .disabled(session.busy || busyElsewhere != nil)
+        .disabled((session.busy && !session.awaitingInput) || busyElsewhere != nil)
         .task(id: store.config.hubURL) { snippets = (try? await store.hub.snippets()) ?? [] }
     }
 
@@ -318,11 +318,11 @@ struct ChatView: View {
         HStack(alignment: .bottom, spacing: 10) {
             snippetMenu
             AttachButton(files: $files)
-                .disabled(session.busy || busyElsewhere != nil)
+                .disabled((session.busy && !session.awaitingInput) || busyElsewhere != nil)
             ScreenButton(files: $files)
-                .disabled(session.busy || busyElsewhere != nil)
+                .disabled((session.busy && !session.awaitingInput) || busyElsewhere != nil)
             MicButton(id: session.record.id, draft: $draft)
-                .disabled(session.busy || busyElsewhere != nil)
+                .disabled((session.busy && !session.awaitingInput) || busyElsewhere != nil)
             ReadAloudButton()
             TextField("Message \(agent?.name ?? "the agent")…", text: $draft, axis: .vertical)
                 .lineLimit(1...10)
@@ -330,12 +330,12 @@ struct ChatView: View {
                 .mainField()
                 .shiftReturnNewline()
                 .onSubmit(send)
-                .disabled(session.busy || busyElsewhere != nil)
+                .disabled((session.busy && !session.awaitingInput) || busyElsewhere != nil)
                 .onChange(of: draft) { _, new in
                     if new.count > 20_000 { draft = String(new.prefix(20_000)); return }
                     UserDefaults.standard.set(new, forKey: "wl.draft.\(session.record.id)")
                 }
-            if session.busy {
+            if session.busy && !session.awaitingInput {
                 Button { session.interrupt() } label: { Label("Stop", systemImage: "stop.fill") }
                     .buttonStyle(SecondaryButtonStyle())
                     .keyboardShortcut(".", modifiers: .command)

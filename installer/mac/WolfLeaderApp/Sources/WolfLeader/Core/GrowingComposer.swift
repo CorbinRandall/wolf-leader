@@ -19,10 +19,13 @@ struct GrowingComposer: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSScrollView()
+        let scroll = OverlayScrollView()
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
+        // Overlay scroll bar: it floats over the text, so showing it never changes the width
+        // (which used to re-wrap the text and make the box flicker on every key).
+        scroll.scrollerStyle = .overlay
         scroll.borderType = .noBorder
 
         let view = ComposerTextView()
@@ -85,11 +88,19 @@ struct GrowingComposer: NSViewRepresentable {
             layout.ensureLayout(for: container)
             let used = layout.usedRect(for: container).height + view.textContainerInset.height * 2
             let next = min(max(used, parent.minHeight), parent.maxHeight)
-            if abs(next - parent.height) > 0.5 {
+            if abs(next - parent.height) > 1 {
                 DispatchQueue.main.async { self.parent.height = next }
             }
             view.scrollRangeToVisible(view.selectedRange())
         }
+    }
+}
+
+/// Keeps the floating scroll bar even when macOS prefers always-visible ones (e.g. a mouse is plugged in).
+final class OverlayScrollView: NSScrollView {
+    override var scrollerStyle: NSScroller.Style {
+        get { .overlay }
+        set { super.scrollerStyle = .overlay }
     }
 }
 

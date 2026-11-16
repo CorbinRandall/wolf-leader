@@ -10,7 +10,8 @@ struct SidebarProjectFolders: View {
     @AppStorage("wl.sidebar.projectOrder") private var savedOrder: String = ""
     @AppStorage("wl.sidebar.projectOrderSavedAt") private var savedOrderAt: Double = 0
     @AppStorage("wl.sidebar.showAllProjects") private var showAll = false
-    @State private var expanded: Set<Int> = []
+    /// Projects start open; this holds the ones you closed.
+    @State private var collapsed: Set<Int> = []
 
     /// How many projects show before "more".
     private static let short = 7
@@ -69,8 +70,8 @@ struct SidebarProjectFolders: View {
             return AnyView(row(for: entry).tag(SidebarItem.project(entry.id)))
         }
         let isExpanded = Binding<Bool>(
-            get: { expanded.contains(entry.id) },
-            set: { v in if v { expanded.insert(entry.id) } else { expanded.remove(entry.id) } }
+            get: { !collapsed.contains(entry.id) },
+            set: { v in if v { collapsed.remove(entry.id) } else { collapsed.insert(entry.id) } }
         )
         return AnyView(
             DisclosureGroup(isExpanded: isExpanded) {
@@ -128,7 +129,7 @@ struct SidebarProjectFolders: View {
         for entry in orderedEntries {
             let projectChats = chats.chats(projectID: entry.id)
             if projectChats.contains(where: { nav.openChatIDs.contains($0.id) }) {
-                expanded.insert(entry.id)
+                collapsed.remove(entry.id)
             }
         }
     }

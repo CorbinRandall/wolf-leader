@@ -102,6 +102,10 @@ final class OverlayScrollView: NSScrollView {
         get { .overlay }
         set { super.scrollerStyle = .overlay }
     }
+
+    /// Keeping the cursor in view scrolls this box only. Without this, AppKit passes the scroll
+    /// up to every enclosing view and the whole chat page slides up, cutting off the top.
+    override func scrollToVisible(_ rect: NSRect) -> Bool { false }
 }
 
 final class ComposerTextView: NSTextView {

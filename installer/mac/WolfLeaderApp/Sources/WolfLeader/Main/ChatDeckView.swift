@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The deck: open chats as fixed-width columns, grouped by project (Chrome-style tab groups).
@@ -37,6 +38,7 @@ struct ChatDeckView: View {
                     .padding(.horizontal, 10).padding(.vertical, 10)
                     // Exactly the window's height, so the deck only ever scrolls sideways.
                     .frame(height: geo.size.height)
+                    .background(HorizontalOnlyScroll().frame(width: 0, height: 0))
                 }
                 .scrollBounceBehavior(.basedOnSize, axes: .vertical)
                 .onChange(of: nav.openChatIDs) { old, new in
@@ -256,4 +258,48 @@ struct ChatDeckView: View {
             .help("Add a column")
         }
     }
+}
+
+/// Pins the deck's scroll area so it only ever moves sideways. Placed inside the deck's content,
+/// it finds the scroll view around it, turns off up/down scrolling and the toolbar inset, and
+/// snaps it back to the top if anything (a text box keeping its cursor in view, a "scroll to
+/// latest") tries to move it vertically.
+struct HorizontalOnlyScroll: NSViewRepresentable {
+    final class Probe: NSView {
+        private var observer: NSObjectProtocol?
+        private weak var pinned: NSScrollView?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            DispatchQueue.main.async { [weak self] in self?.pin() }
+        }
+
+        private func pin() {
+            guard let scroll = enclosingScrollView, scroll !== pinned else { return }
+            pinned = scroll
+            scroll.hasVerticalScroller = false
+            scroll.verticalScrollElasticity = .none
+            scroll.automaticallyAdjustsContentInsets = false
+            scroll.contentInsets = NSEdgeInsets()
+            let clip = scroll.contentView
+            clip.postsBoundsChangedNotifications = true
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            observer = NotificationCenter.default.addObserver(
+                forName: NSView.boundsDidChangeNotification, object: clip, queue: .main
+            ) { [weak clip, weak scroll] _ in
+                guard let clip, let scroll else { return }
+                let top: CGFloat = (scroll.documentView?.isFlipped ?? true)
+                    ? 0 : max(0, (scroll.documentView?.frame.height ?? 0) - clip.bounds.height)
+                if abs(clip.bounds.origin.y - top) > 0.5 {
+                    clip.setBoundsOrigin(NSPoint(x: clip.bounds.origin.x, y: top))
+                    scroll.reflectScrolledClipView(clip)
+                }
+            }
+        }
+
+        deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
+    }
+
+    func makeNSView(context: Context) -> Probe { Probe() }
+    func updateNSView(_ view: Probe, context: Context) {}
 }

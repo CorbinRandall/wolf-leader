@@ -264,10 +264,50 @@ if [ "$NO_HUB" = 0 ]; then
   echo "  $(du -sh "$HUB" | cut -f1) in Contents/Resources/hub"
 fi
 
-# --- 5. sign (ad-hoc) ---------------------------------------------------------------------------
-echo "==> Signing (ad-hoc)"
+# --- 5. sign ------------------------------------------------------------------------------------
+# Sign every build on this Mac with the same local certificate. macOS ties permissions (Screen
+# Recording, Accessibility) to the signature, so an ad-hoc signature (new on every build) made it
+# forget them after each update. The certificate lives in its own keychain, made once, reused.
+# WL_ADHOC_SIGN=1 keeps the old ad-hoc signing (CI, or if this ever fails).
 xattr -cr "$APP"
-codesign --force --deep -s - "$APP"
+sign_stable() {
+  local dir="$HOME/Library/Application Support/WolfLeader/signing"
+  local kc="$dir/wolfleader-signing.keychain-db" pwf="$dir/keychain-password" name="Wolf Leader Local Signing"
+  mkdir -p "$dir" && chmod 700 "$dir"
+  if [ ! -f "$kc" ] || [ ! -f "$pwf" ]; then
+    rm -f "$kc"
+    local tmp; tmp=$(mktemp -d)
+    head -c 24 /dev/urandom | base64 | tr -d '/+=' > "$pwf" && chmod 600 "$pwf"
+    cat > "$tmp/c.cnf" <<CNF
+[req]
+distinguished_name=dn
+x509_extensions=ext
+prompt=no
+[dn]
+CN=$name
+[ext]
+basicConstraints=critical,CA:false
+keyUsage=critical,digitalSignature
+extendedKeyUsage=critical,codeSigning
+CNF
+    openssl req -x509 -newkey rsa:2048 -nodes -keyout "$tmp/k.pem" -out "$tmp/c.pem" -days 7300 -config "$tmp/c.cnf" >/dev/null 2>&1 || return 1
+    openssl pkcs12 -export -legacy -inkey "$tmp/k.pem" -in "$tmp/c.pem" -out "$tmp/c.p12" -passout pass:wl >/dev/null 2>&1 \
+      || openssl pkcs12 -export -inkey "$tmp/k.pem" -in "$tmp/c.pem" -out "$tmp/c.p12" -passout pass:wl >/dev/null 2>&1 || return 1
+    security create-keychain -p "$(cat "$pwf")" "$kc" >/dev/null || return 1
+    security set-keychain-settings "$kc"  # no auto-lock
+    security import "$tmp/c.p12" -k "$kc" -P wl -T /usr/bin/codesign >/dev/null || return 1
+    security set-key-partition-list -S apple-tool:,apple: -s -k "$(cat "$pwf")" "$kc" >/dev/null || return 1
+    rm -rf "$tmp"
+  fi
+  security unlock-keychain -p "$(cat "$pwf")" "$kc" || return 1
+  codesign --force --deep --keychain "$kc" -s "$name" "$APP"
+}
+if [ "${WL_ADHOC_SIGN:-0}" != 1 ] && sign_stable; then
+  echo "==> Signed with this Mac's Wolf Leader certificate"
+else
+  echo "==> Signing (ad-hoc)"
+  codesign --force --deep -s - "$APP"
+fi
 codesign --verify --deep "$APP"
 echo "  app: $APP"
 

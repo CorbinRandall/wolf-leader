@@ -208,13 +208,18 @@ struct MicButton: View {
     let id: String
     @Binding var draft: String
     @State private var pulse = false
+    @State private var sessionStart = ""
 
     var body: some View {
         let on = dictation.isListening(id)
         Button {
-            let base = draft
-            let gap = base.isEmpty || base.hasSuffix(" ") || base.hasSuffix("\n") ? "" : " "
-            dictation.toggle(id: id) { heard in draft = base + gap + heard }
+            if on {
+                dictation.stop()
+            } else {
+                sessionStart = draft
+                let gap = sessionStart.isEmpty || sessionStart.hasSuffix(" ") || sessionStart.hasSuffix("\n") ? "" : " "
+                dictation.toggle(id: id) { heard in draft = sessionStart + gap + heard }
+            }
         } label: {
             Image(systemName: on ? "mic.fill" : "mic")
                 .foregroundStyle(on ? p.bad : p.textMuted)

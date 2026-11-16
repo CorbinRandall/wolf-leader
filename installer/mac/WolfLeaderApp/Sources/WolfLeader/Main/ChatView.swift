@@ -59,15 +59,27 @@ struct ChatView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Button(action: back) {
-                HStack(spacing: 4) {
-                    Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
-                    Text(record.projectName ?? "Chats")
+            HStack {
+                Button(action: back) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
+                        Text(record.projectName ?? "Chats")
+                    }
+                    .font(DS.Font.bodySmall.weight(.medium)).foregroundStyle(p.accent)
                 }
-                .font(DS.Font.bodySmall.weight(.medium)).foregroundStyle(p.accent)
+                Spacer(minLength: 0)
+                Button(action: back) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(p.textMuted)
+                        .frame(width: 25, height: 25)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Close this chat column")
+                .accessibilityLabel("Close chat column")
             }
             .buttonStyle(.plain)
-            .keyboardShortcut(.cancelAction)
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text(record.title).font(DS.Font.section).foregroundStyle(p.text).lineLimit(1)
                 if let agent { MainTag(text: "\(agent.name) · \(agent.company)") }
@@ -345,6 +357,7 @@ struct ChatView: View {
                     .disabled((session.busy && !session.awaitingInput) || busyElsewhere != nil)
             }
             .scrollIndicators(.automatic)
+            .frame(minHeight: 32, maxHeight: 150)
             if session.busy && !session.awaitingInput {
                 Button { session.interrupt() } label: { Label("Stop", systemImage: "stop.fill") }
                     .buttonStyle(SecondaryButtonStyle())

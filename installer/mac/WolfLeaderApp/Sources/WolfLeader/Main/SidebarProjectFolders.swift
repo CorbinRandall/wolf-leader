@@ -8,6 +8,7 @@ struct SidebarProjectFolders: View {
     @Environment(\.palette) private var p
     @ObservedObject private var chats = ChatStore.shared
     @AppStorage("wl.sidebar.projectOrder") private var savedOrder: String = ""
+    @AppStorage("wl.sidebar.projectOrderSavedAt") private var savedOrderAt: Double = 0
     @AppStorage("wl.sidebar.showAllProjects") private var showAll = false
     @State private var expanded: Set<Int> = []
 
@@ -25,10 +26,15 @@ struct SidebarProjectFolders: View {
         guard !ids.isEmpty else { return activeEntries }
         var byID: [Int: ProjectEntry] = [:]
         for entry in activeEntries { byID[entry.id] = entry }
-        var result = ids.compactMap { byID[$0] }
+        // Anything new, or used since the list was last arranged by hand, goes on top (newest
+        // first). The hand-arranged order holds for everything else.
+        let savedAt = Date(timeIntervalSince1970: savedOrderAt)
         let placed = Set(ids)
-        result += activeEntries.filter { !placed.contains($0.id) }
-        return result
+        let fresh = activeEntries.filter {
+            !placed.contains($0.id) || ProjectPulse.lastUsed($0, chats: chats) > savedAt
+        }
+        let freshIDs = Set(fresh.map(\.id))
+        return fresh + ids.compactMap { byID[$0] }.filter { !freshIDs.contains($0.id) }
     }
 
     /// The short list, plus anything further down that is busy or open right now.
@@ -130,7 +136,12 @@ struct SidebarProjectFolders: View {
     private func move(from source: IndexSet, to destination: Int) {
         var entries = orderedEntries
         entries.move(fromOffsets: source, toOffset: destination)
+        saveOrder(entries)
+    }
+
+    private func saveOrder(_ entries: [ProjectEntry]) {
         savedOrder = entries.map { String($0.id) }.joined(separator: ",")
+        savedOrderAt = Date().timeIntervalSince1970
     }
 
     private func reorder(_ id: Int, to target: Int) {
@@ -138,6 +149,6 @@ struct SidebarProjectFolders: View {
         guard let from = entries.firstIndex(where: { $0.id == id }) else { return }
         let item = entries.remove(at: from)
         entries.insert(item, at: max(0, min(target, entries.count)))
-        savedOrder = entries.map { String($0.id) }.joined(separator: ",")
+        saveOrder(entries)
     }
 }

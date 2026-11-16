@@ -17,6 +17,8 @@ struct ChatView: View {
     @State private var snippets: [HubSnippet] = []
     @State private var saveTask: Task<Void, Never>?
     @FocusState private var composing: Bool
+    @State private var composerHeight: CGFloat = 22
+    @State private var columnHeight: CGFloat = 600
 
     private var record: ChatRecord { session.record }
     private var agent: AgentKind? { record.agent }
@@ -26,13 +28,19 @@ struct ChatView: View {
         VStack(spacing: 0) {
             header
             Rectangle().fill(p.border).frame(height: 1)
-            transcript
+            // Its own view so typing in the composer never re-renders the history.
+            ChatTranscript(session: session)
             if let other = busyElsewhere { elsewhereBar(other) }
             if !installed, let agent, !record.items.isEmpty, !session.busy { missingAgentBar(agent) }
             if needsSignIn, let agent { signInBar(agent) }
             composer
         }
         .background(p.background)
+        .background(GeometryReader { g in
+            Color.clear
+                .onAppear { columnHeight = g.size.height }
+                .onChange(of: g.size.height) { _, h in columnHeight = h }
+        })
         .onAppear {
             draft = UserDefaults.standard.string(forKey: "wl.draft.\(session.record.id)") ?? ""
             composing = true
@@ -119,58 +127,6 @@ struct ChatView: View {
 
     // MARK: Transcript
 
-    private var transcript: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
-                    if record.items.isEmpty { emptyState }
-                    ForEach(ChatSegment.build(record.items)) { segment in
-                        if segment.items.count == 1 {
-                            ChatItemView(item: segment.items[0], onApprove: { allow, always in session.answer(segment.items[0].id, allow: allow, always: always) }).id(segment.id)
-                        } else {
-                            StepGroupView(items: segment.items, onApprove: { id, allow, always in session.answer(id, allow: allow, always: always) }).id(segment.id)
-                        }
-                    }
-                    if session.busy && !session.pendingApprovals {
-                        HStack(spacing: 8) {
-                            ProgressView().controlSize(.small)
-                            Text(session.preparing ?? (session.connecting ? "Starting \(agent?.name ?? "the agent")…" : "Working…"))
-                                .font(DS.Font.caption).foregroundStyle(p.textMuted)
-                        }
-                    }
-                    Color.clear.frame(height: 1).id("bottom")
-                }
-                .padding(.horizontal, DS.Spacing.lg).padding(.vertical, DS.Spacing.md)
-                .frame(maxWidth: 860, alignment: .leading)
-                .frame(maxWidth: .infinity)
-            }
-            .onChange(of: record.items.count) { _, _ in withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo("bottom") } }
-            .onChange(of: record.items.last?.text.count ?? 0) { old, new in
-                // Scroll during streaming, but not on every character — only when a meaningful
-                // chunk arrives, to avoid layout thrash on long chats.
-                if new - old > 80 { proxy.scrollTo("bottom") }
-            }
-            .onAppear { proxy.scrollTo("bottom") }
-        }
-    }
-
-    private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Image(systemName: agent?.symbol ?? "bubble.left").font(.system(size: 24, weight: .semibold)).foregroundStyle(p.accent)
-            Text(record.projectName.map { "Ask \(agent?.name ?? "the agent") anything about \($0)." } ?? "Ask \(agent?.name ?? "the agent") anything.")
-                .font(DS.Font.section).foregroundStyle(p.text)
-            Text(record.projectID == nil
-                 ? "Saved after every reply. Add it to a project any time."
-                 : "Starts with this project's notes. Saved after every reply.")
-                .font(DS.Font.bodySmall).foregroundStyle(p.textMuted)
-            if !installed, let agent {
-                WLStatusPill(text: "\(agent.name) isn't set up on this Mac yet", kind: .warn)
-                Button("Set up \(agent.name)…") { nav.open(libraryTab: "tools") }
-                    .buttonStyle(PrimaryButtonStyle())
-            }
-        }
-        .padding(.vertical, DS.Spacing.lg)
-    }
 
     // MARK: Other devices and agents
 
@@ -324,14 +280,17 @@ struct ChatView: View {
             MicButton(id: session.record.id, draft: $draft)
                 .disabled((session.busy && !session.awaitingInput) || busyElsewhere != nil)
             ReadAloudButton()
-            TextField("Message \(agent?.name ?? "the agent")…", text: $draft, axis: .vertical)
-                .lineLimit(1...4)
-                .font(DS.Font.body)
-                .focused($composing)
-                .shiftReturnNewline()
-                .onSubmit(send)
+            // Grows as you type, up to half the column so the reply stays readable, then scrolls.
+            GrowingComposer(text: $draft,
+                            placeholder: "Message \(agent?.name ?? "the agent")…",
+                            font: .systemFont(ofSize: 14),
+                            maxHeight: max(60, columnHeight * 0.5),
+                            focused: true,
+                            disabled: (session.busy && !session.awaitingInput) || busyElsewhere != nil,
+                            onSubmit: send,
+                            height: $composerHeight)
+                .frame(height: composerHeight)
                 .onChange(of: draft) { _, new in
-                    if new.count > 20_000 { draft = String(new.prefix(20_000)); return }
                     saveTask?.cancel()
                     saveTask = Task {
                         try? await Task.sleep(nanoseconds: 500_000_000)
@@ -598,5 +557,71 @@ private struct StepGroupView: View {
                 .padding(.leading, 18)
             }
         }
+    }
+}
+
+/// The message history. Kept apart from the composer: it only redraws when the chat changes.
+private struct ChatTranscript: View {
+    @EnvironmentObject private var nav: Navigator
+    @Environment(\.palette) private var p
+    @ObservedObject var session: ChatSession
+
+    private var record: ChatRecord { session.record }
+    private var agent: AgentKind? { record.agent }
+    private var installed: Bool { agent.map { AgentRegistry.shared.program(for: $0) != nil } ?? false }
+
+    var body: some View { transcript }
+
+    private var transcript: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    if record.items.isEmpty { emptyState }
+                    ForEach(ChatSegment.build(record.items)) { segment in
+                        if segment.items.count == 1 {
+                            ChatItemView(item: segment.items[0], onApprove: { allow, always in session.answer(segment.items[0].id, allow: allow, always: always) }).id(segment.id)
+                        } else {
+                            StepGroupView(items: segment.items, onApprove: { id, allow, always in session.answer(id, allow: allow, always: always) }).id(segment.id)
+                        }
+                    }
+                    if session.busy && !session.pendingApprovals {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text(session.preparing ?? (session.connecting ? "Starting \(agent?.name ?? "the agent")…" : "Working…"))
+                                .font(DS.Font.caption).foregroundStyle(p.textMuted)
+                        }
+                    }
+                    Color.clear.frame(height: 1).id("bottom")
+                }
+                .padding(.horizontal, DS.Spacing.lg).padding(.vertical, DS.Spacing.md)
+                .frame(maxWidth: 860, alignment: .leading)
+                .frame(maxWidth: .infinity)
+            }
+            .onChange(of: record.items.count) { _, _ in withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo("bottom") } }
+            .onChange(of: record.items.last?.text.count ?? 0) { old, new in
+                // Scroll during streaming, but not on every character — only when a meaningful
+                // chunk arrives, to avoid layout thrash on long chats.
+                if new - old > 80 { proxy.scrollTo("bottom") }
+            }
+            .onAppear { proxy.scrollTo("bottom") }
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: agent?.symbol ?? "bubble.left").font(.system(size: 24, weight: .semibold)).foregroundStyle(p.accent)
+            Text(record.projectName.map { "Ask \(agent?.name ?? "the agent") anything about \($0)." } ?? "Ask \(agent?.name ?? "the agent") anything.")
+                .font(DS.Font.section).foregroundStyle(p.text)
+            Text(record.projectID == nil
+                 ? "Saved after every reply. Add it to a project any time."
+                 : "Starts with this project's notes. Saved after every reply.")
+                .font(DS.Font.bodySmall).foregroundStyle(p.textMuted)
+            if !installed, let agent {
+                WLStatusPill(text: "\(agent.name) isn't set up on this Mac yet", kind: .warn)
+                Button("Set up \(agent.name)…") { nav.open(libraryTab: "tools") }
+                    .buttonStyle(PrimaryButtonStyle())
+            }
+        }
+        .padding(.vertical, DS.Spacing.lg)
     }
 }

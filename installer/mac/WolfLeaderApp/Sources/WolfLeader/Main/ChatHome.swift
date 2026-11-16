@@ -53,7 +53,15 @@ struct ChatHome: View {
     @AppStorage("wl.chat.agent") private var agentID = "claude"
     @ObservedObject var projectsModel: ProjectsModel
 
-    @AppStorage("wl.home.draft") private var draft = ""
+    /// Where this column's unsent text is kept between launches. Each deck column has its own.
+    var draftKey = "wl.home.draft"
+    /// Only one column (the newest) answers a sidebar "+" request.
+    var takesPending = true
+    /// Called once this column has turned into a real chat.
+    var onStarted: (() -> Void)? = nil
+
+    /// Typing stays local: the text is only written to disk after a pause, never per keystroke.
+    @State private var draft = ""
     @State private var files: [URL] = []
     /// The model and effort for the next chat; remembered per agent.
     @State private var model: String?
@@ -102,11 +110,18 @@ struct ChatHome: View {
         }
         .background(p.background)
         .onAppear {
+            if draft.isEmpty { draft = UserDefaults.standard.string(forKey: draftKey) ?? "" }
             takePending()
             focus = .message
             agents.rescanNow()
         }
         .onChange(of: nav.pendingNewChat) { _, _ in takePending() }
+        .task(id: draft) {
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            saveDraft()
+        }
+        .onDisappear { saveDraft() }
         .task { await agents.refresh() }
         .task(id: store.config.hubURL) { await projects.load(store.hub) }
         .sheet(isPresented: $picking) {
@@ -178,8 +193,13 @@ struct ChatHome: View {
     }
 
     /// A project's + button (sidebar or project page) asked for a chat in that project.
+    private func saveDraft() {
+        if draft.isEmpty { UserDefaults.standard.removeObject(forKey: draftKey) }
+        else { UserDefaults.standard.set(draft, forKey: draftKey) }
+    }
+
     private func takePending() {
-        guard let request = nav.pendingNewChat else { return }
+        guard takesPending, let request = nav.pendingNewChat else { return }
         nav.pendingNewChat = nil
         naming = request.newProject
         project = request.project
@@ -294,10 +314,12 @@ struct ChatHome: View {
             let chat = chats.create(project: ref, agent: agent, model: model, effort: effort)
             chats.session(chat.id)?.send(text, attachments: await ScreenShare.shared.adding(to: attached), config: store)
             draft = ""
+            saveDraft()
             files = []
             newName = ""
             naming = false
             project = nil
+            onStarted?()
             nav.open(chat: chat.id)
         }
     }

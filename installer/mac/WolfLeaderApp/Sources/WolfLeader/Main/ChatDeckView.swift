@@ -28,11 +28,10 @@ struct ChatDeckView: View {
                         ForEach(cachedGroups) { group in
                             groupColumns(group, isFirstGroup: group.id == cachedGroups.first?.id, height: columnHeight)
                         }
-                        if nav.openChatIDs.isEmpty && !nav.showingNewChatPanel {
-                            emptyDeck(height: columnHeight).id("empty-deck")
-                        } else {
-                            addSlot(height: columnHeight).id("add")
+                        ForEach(nav.draftColumns, id: \.self) { id in
+                            draftColumn(id, height: columnHeight).id(id)
                         }
+                        addButton(height: columnHeight).id("add")
                     }
                     .padding(.horizontal, 10).padding(.vertical, 10)
                     .frame(height: columnHeight)
@@ -46,10 +45,9 @@ struct ChatDeckView: View {
                     }
                     withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(last, anchor: .leading) }
                 }
-                .onChange(of: nav.showingNewChatPanel) { _, showing in
-                    if showing {
-                        withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo("add", anchor: .trailing) }
-                    }
+                .onChange(of: nav.draftColumns) { old, new in
+                    guard new.count > old.count else { return }
+                    withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo("add", anchor: .trailing) }
                 }
                 .onAppear { cachedGroups = buildGroups() }
             }
@@ -213,111 +211,46 @@ struct ChatDeckView: View {
         }
     }
 
-    // MARK: Add slot
+    // MARK: Draft columns and "+"
 
-    @ViewBuilder
-    private func addSlot(height: CGFloat) -> some View {
-        let hasChats = !nav.openChatIDs.isEmpty
-        let expanded = nav.showingNewChatPanel
-        HStack(spacing: 0) {
-            if hasChats { Rectangle().fill(p.border).frame(width: 1) }
-            if expanded {
-                ZStack(alignment: .topTrailing) {
-                    ChatHome(projectsModel: projectsModel)
-                        .frame(width: colWidth, height: height)
-                    if hasChats {
-                        Button { nav.showingNewChatPanel = false } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 16))
-                                .foregroundStyle(p.textMuted)
-                                .padding(14)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Close")
-                    }
+    /// An empty composer column. Sending turns it into a real chat in the same spot.
+    private func draftColumn(_ id: UUID, height: CGFloat) -> some View {
+        let closable = nav.draftColumns.count > 1 || !nav.openChatIDs.isEmpty
+        return ZStack(alignment: .topTrailing) {
+            ChatHome(projectsModel: projectsModel,
+                     draftKey: Navigator.draftKey(id),
+                     takesPending: id == nav.draftColumns.last,
+                     onStarted: { nav.closeDraftColumn(id) })
+                .frame(width: colWidth, height: height)
+            if closable {
+                Button { nav.closeDraftColumn(id) } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(p.textMuted)
+                        .padding(14)
                 }
-            } else {
-                addButton(height: height)
+                .buttonStyle(.plain)
+                .help("Close")
             }
         }
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(p.border, lineWidth: 1))
     }
 
+    /// A thin line with a "+" that adds another empty column.
     private func addButton(height: CGFloat) -> some View {
-        let firstColumn = nav.openChatIDs.count == 1
-        return Button { nav.newChat() } label: {
-            VStack(spacing: 8) {
+        HStack(spacing: 10) {
+            Rectangle().fill(p.border).frame(width: 1, height: height)
+            Button { nav.addDraftColumn() } label: {
                 ZStack {
-                    Circle().strokeBorder(p.border, lineWidth: 1.5).frame(width: 40, height: 40)
-                    Image(systemName: "plus").font(.system(size: 16, weight: .medium)).foregroundStyle(p.textMuted)
+                    Circle().strokeBorder(p.border, lineWidth: 1.5).frame(width: 32, height: 32)
+                    Image(systemName: "plus").font(.system(size: 14, weight: .medium)).foregroundStyle(p.textMuted)
                 }
-                Text(firstColumn ? "Add column" : "New chat")
-                    .font(DS.Font.caption.weight(firstColumn ? .semibold : .regular))
-                    .foregroundStyle(firstColumn ? p.accent : p.textMuted)
-                if firstColumn {
-                    Text("beside this chat")
-                        .font(DS.Font.micro).foregroundStyle(p.textFaint)
-                        .multilineTextAlignment(.center)
-                }
-            }
-            .frame(width: 100)
-            .frame(height: height)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(firstColumn ? "Add another chat beside this column" : "New chat (⌘N)")
-    }
-
-    private func emptyDeck(height: CGFloat) -> some View {
-        VStack(spacing: 20) {
-            VStack(spacing: 7) {
-                Text("Your chats, side by side")
-                    .font(DS.Font.page).foregroundStyle(p.text)
-                Text("Each chat gets its own column. Start one now, then open more beside it.")
-                    .font(DS.Font.bodySmall).foregroundStyle(p.textMuted)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 380)
-            }
-            HStack(alignment: .top, spacing: 10) {
-                previewColumn(title: "Chat 1", symbol: "bubble.left", active: true)
-                previewColumn(title: "Chat 2", symbol: "plus", active: false)
-                previewColumn(title: "Chat 3", symbol: "plus", active: false)
-            }
-            Button { nav.newChat() } label: {
-                Label("New chat", systemImage: "plus.bubble")
-                    .font(DS.Font.bodySmall.weight(.semibold))
-                    .padding(.horizontal, 16).padding(.vertical, 9)
-                    .foregroundStyle(p.onAccent)
-                    .background(p.accent, in: Capsule())
+                .frame(width: 40, height: height)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .help("Add a column")
         }
-        .frame(width: colWidth, height: height)
-        .background(p.surface.opacity(0.45), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(p.border, style: StrokeStyle(lineWidth: 1, dash: [5, 4])))
-    }
-
-    private func previewColumn(title: String, symbol: String, active: Bool) -> some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                Image(systemName: symbol).font(.system(size: 10, weight: .semibold))
-                Text(title).font(DS.Font.micro.weight(.semibold))
-                Spacer(minLength: 0)
-            }
-            .foregroundStyle(active ? p.accent : p.textFaint)
-            .padding(.horizontal, 9).frame(height: 28)
-            Rectangle().fill(p.border).frame(height: 1)
-            VStack(alignment: .leading, spacing: 9) {
-                Capsule().fill(active ? p.accent.opacity(0.22) : p.border.opacity(0.7)).frame(width: 68, height: 6)
-                RoundedRectangle(cornerRadius: 4).fill(p.border.opacity(0.55)).frame(height: 5)
-                RoundedRectangle(cornerRadius: 4).fill(p.border.opacity(0.55)).frame(width: 58, height: 5)
-                Spacer(minLength: 0)
-                RoundedRectangle(cornerRadius: 7).fill(p.surface).frame(height: 32)
-            }
-            .padding(9)
-        }
-        .frame(width: 112, height: 132)
-        .background(p.background, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(active ? p.accent.opacity(0.55) : p.border, lineWidth: active ? 1.5 : 1))
     }
 }

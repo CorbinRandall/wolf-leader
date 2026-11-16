@@ -77,6 +77,17 @@ final class Navigator: ObservableObject {
 
     // MARK: Steps
 
+    /// Show the open-chat deck without the new-chat composer.
+    func openChatHome() {
+        showingNewChatPanel = false
+        var next = route
+        next.section = .chats
+        next.projectID = nil
+        next.chatID = nil
+        next.chatList = false
+        go(next)
+    }
+
     /// Switch sidebar section. Coming back to Projects lands on the view you left, with no project open.
     func open(section: MainSection) {
         var next = route

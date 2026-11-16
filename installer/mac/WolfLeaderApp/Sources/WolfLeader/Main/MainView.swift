@@ -33,10 +33,10 @@ enum MainSection: String, CaseIterable, Identifiable, Hashable {
 
 /// A row in the sidebar.
 enum SidebarItem: Hashable {
-    case newChat, allChats, chat(String), project(Int), projects, library
+    case chatHome, newChat, allChats, chat(String), project(Int), projects, library
     case section(MainSection)
 
-    @MainActor init(_ route: Route, openChatIDs: [String] = []) {
+    @MainActor init(_ route: Route, openChatIDs: [String] = [], showingNewChatPanel: Bool = false) {
         switch route.section {
         case .chats:
             if let id = route.chatID {
@@ -48,7 +48,7 @@ enum SidebarItem: Hashable {
                     self = ChatStore.shared.record(id)?.projectID.map { .project($0) } ?? .chat(id)
                 }
             } else {
-                self = route.chatList ? .allChats : .newChat
+                self = route.chatList ? .allChats : (showingNewChatPanel ? .newChat : .chatHome)
             }
         case .projects: self = route.projectID.map { .project($0) } ?? .projects
         case .library, .shares: self = .section(.settings)
@@ -58,6 +58,7 @@ enum SidebarItem: Hashable {
 
     @MainActor func open(in nav: Navigator) {
         switch self {
+        case .chatHome: nav.openChatHome()
         case .newChat: nav.newChat()
         case .allChats: nav.openChatList()
         case .chat(let id): nav.open(chat: id)
@@ -86,7 +87,7 @@ struct MainView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: Binding<SidebarItem?>(
-                get: { SidebarItem(nav.route, openChatIDs: nav.openChatIDs) },
+                get: { SidebarItem(nav.route, openChatIDs: nav.openChatIDs, showingNewChatPanel: nav.showingNewChatPanel) },
                 set: { if let item = $0 { item.open(in: nav) } }
             )) {
                 Section {
@@ -100,6 +101,8 @@ struct MainView: View {
                 }
                 // Chat first: a new chat is always one click (or ⌘N) away.
                 Section {
+                    Label("Home", systemImage: "house")
+                        .tag(SidebarItem.chatHome)
                     Label {
                         HStack(spacing: 6) {
                             Text("New chat")

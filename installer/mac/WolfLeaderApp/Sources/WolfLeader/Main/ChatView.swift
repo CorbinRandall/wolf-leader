@@ -58,78 +58,53 @@ struct ChatView: View {
     // MARK: Header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button(action: back) {
-                HStack(spacing: 4) {
-                    Image(systemName: "chevron.left").font(.system(size: 11, weight: .semibold))
-                    Text(record.projectName ?? "Chats")
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(record.title)
+                    .font(DS.Font.bodySmall.weight(.medium))
+                    .foregroundStyle(p.text)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+                Button(action: back) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(p.textMuted)
+                        .frame(width: 25, height: 25)
+                        .contentShape(Rectangle())
                 }
-                .font(DS.Font.bodySmall.weight(.medium)).foregroundStyle(p.accent)
+                .buttonStyle(.plain)
+                .help("Close this chat column")
+                .accessibilityLabel("Close chat column")
             }
-            .buttonStyle(.plain)
-            .keyboardShortcut(.cancelAction)
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(record.title).font(DS.Font.section).foregroundStyle(p.text).lineLimit(1)
-                if let agent { MainTag(text: "\(agent.name) · \(agent.company)") }
-                Spacer(minLength: 8)
-                continueWithMenu
-                Button {
-                    choosingProject = true
-                } label: {
-                    Label(record.projectName.map { "In \($0)" } ?? "Add to a project…",
-                          systemImage: record.projectID == nil ? "folder.badge.plus" : "folder")
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                .buttonStyle(.borderless)
-                .help(record.projectID == nil ? "Connect this chat to a project. Wolf Leader files it there." : "Move this chat to another project")
-                saveBadge
-                Button {
-                    if session.screenControl { session.setScreenControl(false) } else { confirmingScreen = true }
-                } label: {
-                    Label(session.screenControl ? "Controlling this Mac" : "Screen control",
-                          systemImage: session.screenControl ? "cursorarrow.rays" : "cursorarrow")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(session.screenControl ? p.bad : p.textMuted)
-                }
-                .buttonStyle(.borderless)
-                .disabled(session.busy)
-                .help(session.screenControl ? "\(agent?.name ?? "The AI") can see and use this Mac in this chat. Click to stop."
-                      : "Let \(agent?.name ?? "the AI") see and use this Mac in this chat")
-                ModelMenu(agent: agent, model: record.model, effort: record.effort,
-                          choose: { session.setModel($0, effort: $1) },
-                          font: .system(size: 11, weight: .semibold))
-                Menu {
-                    if rules.neverAsk {
-                        Text("Never ask is on for every chat: agents act without asking.")
-                        Button("Change in Settings > Rules…") { nav.open(settingsTab: "rules") }
-                    } else {
-                        ForEach(PermissionMode.allCases) { mode in
-                            Button { session.setMode(mode) } label: {
-                                if mode == record.mode { Label(mode.label, systemImage: "checkmark") } else { Text(mode.label) }
-                            }
-                            .help(mode.help)
-                        }
-                        Divider()
-                        Button("Rules for every chat…") { nav.open(settingsTab: "rules") }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    continueWithMenu
+                    Button { choosingProject = true } label: {
+                        Image(systemName: record.projectID == nil ? "folder.badge.plus" : "folder")
                     }
-                } label: {
-                    Label(rules.neverAsk ? "Never asks" : record.mode.label,
-                          systemImage: rules.neverAsk || record.mode == .auto ? "bolt.fill" : "hand.raised")
-                        .font(.system(size: 11, weight: .semibold))
+                    .buttonStyle(.borderless)
+                    .help(record.projectID == nil ? "Add this chat to a project" : "Move this chat to another project")
+                    saveBadge
+                    Button {
+                        if session.screenControl { session.setScreenControl(false) } else { confirmingScreen = true }
+                    } label: {
+                        Image(systemName: session.screenControl ? "cursorarrow.rays" : "cursorarrow")
+                            .foregroundStyle(session.screenControl ? p.bad : p.textMuted)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(session.busy)
+                    .help(session.screenControl ? "Stop screen control" : "Turn on screen control")
+                    ModelMenu(agent: agent, model: record.model, effort: record.effort,
+                              choose: { session.setModel($0, effort: $1) },
+                              font: .system(size: 11, weight: .semibold))
+                    permissionMenu
                 }
-                .menuStyle(.borderlessButton).fixedSize()
-                .help(rules.neverAsk ? "Every chat runs without asking (Settings > Rules)." : record.mode.help)
+                .fixedSize(horizontal: true, vertical: false)
             }
-            Text(folderLine).font(DS.Font.micro).foregroundStyle(p.textFaint).lineLimit(1).truncationMode(.middle)
-                .help(record.cwd)
+            .frame(height: 24)
         }
-        .padding(.horizontal, DS.Spacing.lg).padding(.vertical, 14)
-    }
-
-    private var folderLine: String {
-        if ProjectWorkspace.isWorkspace(record.cwd) { return "Works in \(record.projectName ?? "the project")'s folder on the server" }
-        if record.cwd.hasPrefix(ProjectWorkspace.looseRoot.path) { return "Works in a scratch folder until it's added to a project" }
-        return "Works in \(record.cwd)"
+        .padding(.horizontal, DS.Spacing.lg).padding(.vertical, 6)
     }
 
     @ViewBuilder
@@ -254,6 +229,30 @@ struct ChatView: View {
         .help("Hand this chat to another agent. It gets the conversation so far and carries on.")
     }
 
+    private var permissionMenu: some View {
+        Menu {
+            if rules.neverAsk {
+                Text("Never ask is on for every chat: agents act without asking.")
+                Button("Change in Settings > Rules…") { nav.open(settingsTab: "rules") }
+            } else {
+                ForEach(PermissionMode.allCases) { mode in
+                    Button { session.setMode(mode) } label: {
+                        if mode == record.mode { Label(mode.label, systemImage: "checkmark") } else { Text(mode.label) }
+                    }
+                    .help(mode.help)
+                }
+                Divider()
+                Button("Rules for every chat…") { nav.open(settingsTab: "rules") }
+            }
+        } label: {
+            Label(rules.neverAsk ? "Never asks" : record.mode.label,
+                  systemImage: rules.neverAsk || record.mode == .auto ? "bolt.fill" : "hand.raised")
+                .font(.system(size: 11, weight: .semibold))
+        }
+        .menuStyle(.borderlessButton).fixedSize()
+        .help(rules.neverAsk ? "Every chat runs without asking (Settings > Rules)." : record.mode.help)
+    }
+
     // MARK: Sign-in
 
     /// The agent's last error says it isn't signed in (e.g. Claude Code's "Not logged in · Please run /login").
@@ -325,26 +324,24 @@ struct ChatView: View {
             MicButton(id: session.record.id, draft: $draft)
                 .disabled((session.busy && !session.awaitingInput) || busyElsewhere != nil)
             ReadAloudButton()
-            ScrollView {
-                TextEditor(text: $draft)
-                    .font(DS.Font.body)
-                    .focused($composing)
-                    .scrollDisabled(true)
-                    .frame(minHeight: 28, maxHeight: 150)
-                    .onChange(of: draft) { _, new in
-                        if new.count > 20_000 { draft = String(new.prefix(20_000)); return }
-                        saveTask?.cancel()
-                        saveTask = Task {
-                            try? await Task.sleep(nanoseconds: 500_000_000)
-                            if !Task.isCancelled {
-                                UserDefaults.standard.set(new, forKey: "wl.draft.\(session.record.id)")
-                            }
+            TextField("Message \(agent?.name ?? "the agent")…", text: $draft, axis: .vertical)
+                .lineLimit(1...4)
+                .font(DS.Font.body)
+                .focused($composing)
+                .shiftReturnNewline()
+                .onSubmit(send)
+                .onChange(of: draft) { _, new in
+                    if new.count > 20_000 { draft = String(new.prefix(20_000)); return }
+                    saveTask?.cancel()
+                    saveTask = Task {
+                        try? await Task.sleep(nanoseconds: 500_000_000)
+                        if !Task.isCancelled {
+                            UserDefaults.standard.set(new, forKey: "wl.draft.\(session.record.id)")
                         }
                     }
-                    .onSubmit(send)
-                    .disabled((session.busy && !session.awaitingInput) || busyElsewhere != nil)
-            }
-            .scrollIndicators(.automatic)
+                }
+                .disabled((session.busy && !session.awaitingInput) || busyElsewhere != nil)
+                .layoutPriority(1)
             if session.busy && !session.awaitingInput {
                 Button { session.interrupt() } label: { Label("Stop", systemImage: "stop.fill") }
                     .buttonStyle(SecondaryButtonStyle())

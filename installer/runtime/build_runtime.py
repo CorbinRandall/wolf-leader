@@ -95,7 +95,10 @@ def main() -> int:
         shutil.rmtree(out)
     out.mkdir(parents=True)
     with tarfile.open(checked_python(args.target, args.cache)) as tar:
-        tar.extractall(out, filter="data")  # the archive's top folder is python/
+        try:
+            tar.extractall(out, filter="data")  # filter= requires Python 3.12+
+        except TypeError:
+            tar.extractall(out)  # the archive's top folder is python/
     py = python_exe(out, args.target)
     prefix = ["arch", "-x86_64"] if args.target == "mac-x86_64" and platform.machine() == "arm64" else []
 

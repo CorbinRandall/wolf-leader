@@ -39,6 +39,26 @@ final class Navigator: ObservableObject {
     @Published private(set) var openChatIDs: [String] = []
     /// True while the new-chat sheet is showing over the deck.
     @Published var showingNewChatPanel = false
+    /// Empty new-chat columns waiting at the end of the deck. Each turns into a chat when sent.
+    /// Starts with one so the deck opens on a composer; the deck's "+" adds more.
+    @Published private(set) var draftColumns: [UUID] = [Navigator.launchDraft]
+    private static let launchDraft = UUID()
+
+    func addDraftColumn() {
+        draftColumns.append(UUID())
+        showingNewChatPanel = true
+    }
+
+    func closeDraftColumn(_ id: UUID) {
+        draftColumns.removeAll { $0 == id }
+        UserDefaults.standard.removeObject(forKey: Self.draftKey(id))
+        if draftColumns.isEmpty { showingNewChatPanel = false }
+    }
+
+    /// The launch column keeps the old key so its text survives relaunch; extra columns are per-session.
+    static func draftKey(_ id: UUID) -> String {
+        id == launchDraft ? "wl.home.draft" : "wl.home.draft.\(id.uuidString)"
+    }
 
     private var backStack: [Route] = []
     private var forwardStack: [Route] = []
@@ -101,6 +121,7 @@ final class Navigator: ObservableObject {
     /// The new-chat page, with this project already picked (nil: no project).
     func newChat(project: ProjectRef? = nil, newProject: Bool = false) {
         pendingNewChat = NewChatRequest(project: project, newProject: newProject)
+        if draftColumns.isEmpty { draftColumns.append(UUID()) }
         showingNewChatPanel = true
         if route.section != .chats || route.chatList {
             var next = route

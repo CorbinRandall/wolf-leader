@@ -206,6 +206,15 @@ enum AppSwap {
         for item in items where item.lastPathComponent.hasPrefix("work-") {
             try? fm.removeItem(at: item)
         }
+        // Keep only the two newest copies of the app from before an update.
+        let backups = ((try? fm.contentsOfDirectory(at: backupsDir, includingPropertiesForKeys: [.creationDateKey])) ?? [])
+            .filter { $0.pathExtension == "app" }
+            .sorted {
+                let a = (try? $0.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+                let b = (try? $1.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+                return a > b
+            }
+        for old in backups.dropFirst(2) { try? fm.removeItem(at: old) }
     }
 
     private static func timestamp() -> String {

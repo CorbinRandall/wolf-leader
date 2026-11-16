@@ -237,6 +237,15 @@ final class UpdateChecker: ObservableObject {
         if channel == .release { await checkRelease(repo) } else { latestRelease = nil }
     }
 
+    /// The newest release's version number ("3.3.2"), if GitHub answers.
+    static func latestReleaseVersion(_ repo: GitHubRepo) async -> String? {
+        let api = "https://api.github.com/repos/\(repo.owner)/\(repo.name)/releases/latest"
+        guard let json = try? await fetchJSON(api) as? [String: Any],
+              var tag = json["tag_name"] as? String else { return nil }
+        if tag.hasPrefix("v") || tag.hasPrefix("V") { tag.removeFirst() }
+        return tag
+    }
+
     private func checkRelease(_ repo: GitHubRepo) async {
         let api = "https://api.github.com/repos/\(repo.owner)/\(repo.name)/releases/latest"
         guard let json = try? await Self.fetchJSON(api) as? [String: Any],
@@ -557,7 +566,10 @@ final class UpdateChecker: ObservableObject {
             try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
             var args = ["--app-only", "--no-hub"]
             if BuildInfo.isDev { args.append("--dev") }
-            var env = ["WL_GIT_BRANCH": branch, "WL_VERSION": BuildInfo.version]
+            // Label the build with the newest release number, not the one being replaced (which
+            // left source-built apps stuck showing an old version forever).
+            let latest = await Self.latestReleaseVersion(repo) ?? BuildInfo.version
+            var env = ["WL_GIT_BRANCH": branch, "WL_VERSION": latest]
             if let web = repo.web?.absoluteString { env["WL_REPO_URL"] = web }
             if let head { env["WL_GIT_SHA"] = head }
             if BuildInfo.isDev { env["WL_DEV_HUB_URL"] = BuildInfo.devHubURL }

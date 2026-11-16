@@ -219,6 +219,19 @@ def export_content() -> dict[str, Any]:
     return {"exported": written, "removed": removed, "content_dir": str(CONTENT_DIR)}
 
 
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """Kill a build and every process it started."""
+    try:
+        if os.name != "nt":
+            import signal
+
+            os.killpg(proc.pid, signal.SIGKILL)
+        else:
+            proc.kill()
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
 def build_static() -> dict[str, Any]:
     """`next build` (static export) -> wiki/out, atomically swapped in."""
     if not wiki_enabled():
@@ -231,9 +244,21 @@ def build_static() -> dict[str, Any]:
     with _build_lock:
         t0 = time.time()
         env = {**os.environ, "NEXT_TELEMETRY_DISABLED": "1", "CI": "1"}
-        proc = subprocess.run(
-            [npm, "run", "build"], cwd=str(WIKI_DIR), capture_output=True, text=True, timeout=BUILD_TIMEOUT, env=env
+        # Own process group, so a timeout kills npm *and* the `next build` it spawned.
+        # Killing only npm left `next build` orphaned: it held Next's build lock
+        # ("Another next build process is already running") and piled up as zombies.
+        proc = subprocess.Popen(
+            [npm, "run", "build"], cwd=str(WIKI_DIR), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, env=env, start_new_session=(os.name != "nt"),
         )
+        try:
+            stdout, stderr = proc.communicate(timeout=BUILD_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            _kill_tree(proc)
+            stdout, stderr = proc.communicate()
+            return {"built": False, "error": f"wiki build timed out after {BUILD_TIMEOUT}s",
+                    "seconds": round(time.time() - t0, 1)}
+        proc = subprocess.CompletedProcess(proc.args, proc.returncode, stdout, stderr)
         if proc.returncode != 0:
             return {"built": False, "error": (proc.stderr or proc.stdout)[-4000:], "seconds": round(time.time() - t0, 1)}
         return {"built": True, "seconds": round(time.time() - t0, 1), "out": str(OUT_DIR)}

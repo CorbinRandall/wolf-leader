@@ -64,6 +64,7 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    init: true  # reap orphaned child processes (wiki builds, git) instead of leaving zombies
 
   # Nightly pg_dump into the share so a plain file backup exists next to pgdata.
   backup:

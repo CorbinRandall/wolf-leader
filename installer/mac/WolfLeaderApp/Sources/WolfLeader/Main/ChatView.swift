@@ -15,6 +15,7 @@ struct ChatView: View {
     @State private var choosingProject = false
     @State private var confirmingScreen = false
     @State private var snippets: [HubSnippet] = []
+    @State private var saveTask: Task<Void, Never>?
     @FocusState private var composing: Bool
 
     private var record: ChatRecord { session.record }
@@ -324,17 +325,26 @@ struct ChatView: View {
             MicButton(id: session.record.id, draft: $draft)
                 .disabled((session.busy && !session.awaitingInput) || busyElsewhere != nil)
             ReadAloudButton()
-            TextField("Message \(agent?.name ?? "the agent")…", text: $draft, axis: .vertical)
-                .lineLimit(1...10)
-                .focused($composing)
-                .mainField()
-                .shiftReturnNewline()
-                .onSubmit(send)
-                .disabled((session.busy && !session.awaitingInput) || busyElsewhere != nil)
-                .onChange(of: draft) { _, new in
-                    if new.count > 20_000 { draft = String(new.prefix(20_000)); return }
-                    UserDefaults.standard.set(new, forKey: "wl.draft.\(session.record.id)")
-                }
+            ScrollView {
+                TextEditor(text: $draft)
+                    .font(DS.Font.body)
+                    .focused($composing)
+                    .scrollDisabled(true)
+                    .frame(minHeight: 28, maxHeight: 150)
+                    .onChange(of: draft) { _, new in
+                        if new.count > 20_000 { draft = String(new.prefix(20_000)); return }
+                        saveTask?.cancel()
+                        saveTask = Task {
+                            try? await Task.sleep(nanoseconds: 500_000_000)
+                            if !Task.isCancelled {
+                                UserDefaults.standard.set(new, forKey: "wl.draft.\(session.record.id)")
+                            }
+                        }
+                    }
+                    .onSubmit(send)
+                    .disabled((session.busy && !session.awaitingInput) || busyElsewhere != nil)
+            }
+            .scrollIndicators(.automatic)
             if session.busy && !session.awaitingInput {
                 Button { session.interrupt() } label: { Label("Stop", systemImage: "stop.fill") }
                     .buttonStyle(SecondaryButtonStyle())

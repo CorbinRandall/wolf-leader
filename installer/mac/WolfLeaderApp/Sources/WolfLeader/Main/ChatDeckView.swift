@@ -15,6 +15,7 @@ struct ChatDeckView: View {
     private let groupHeaderHeight: CGFloat = 26
 
     @State private var collapsedGroups: Set<String> = []
+    @State private var cachedGroups: [ChatGroup] = []
 
     private static let groupPalette: [Color] = [.blue, .green, .orange, .purple, .pink, .teal, .cyan, .indigo]
 
@@ -22,16 +23,17 @@ struct ChatDeckView: View {
         GeometryReader { geo in
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: true) {
-                    HStack(spacing: 0) {
-                        let gs = chatGroups
-                        ForEach(gs) { group in
-                            groupColumns(group, isFirstGroup: group.id == gs.first?.id)
+                    HStack(alignment: .top, spacing: 10) {
+                        ForEach(cachedGroups) { group in
+                            groupColumns(group, isFirstGroup: group.id == cachedGroups.first?.id)
                         }
                         addSlot.id("add")
                     }
+                    .padding(.horizontal, 10).padding(.vertical, 10)
                     .frame(minHeight: geo.size.height)
                 }
                 .onChange(of: nav.openChatIDs) { old, new in
+                    cachedGroups = buildGroups()
                     guard let last = new.last, !old.contains(last) else { return }
                     // Auto-expand the group if the new chat lands in a collapsed one.
                     if let pid = chats.record(last)?.projectID {
@@ -44,6 +46,7 @@ struct ChatDeckView: View {
                         withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo("add", anchor: .trailing) }
                     }
                 }
+                .onAppear { cachedGroups = buildGroups() }
             }
         }
     }
@@ -58,7 +61,7 @@ struct ChatDeckView: View {
         let colorIndex: Int
     }
 
-    private var chatGroups: [ChatGroup] {
+    private func buildGroups() -> [ChatGroup] {
         var result: [ChatGroup] = []
         var colorCounter = 0
         for id in nav.openChatIDs {
@@ -88,26 +91,21 @@ struct ChatDeckView: View {
     @ViewBuilder
     private func groupColumns(_ group: ChatGroup, isFirstGroup: Bool) -> some View {
         if group.projectID == nil {
-            // No-project chats: flat columns, no group chrome.
-            ForEach(Array(group.chatIDs.enumerated()), id: \.element) { index, id in
-                chatColumn(id: id, leftBorder: !(isFirstGroup && index == 0)).id(id)
+            ForEach(group.chatIDs, id: \.self) { id in
+                chatColumn(id: id).id(id)
             }
         } else if collapsedGroups.contains(group.id) {
-            collapsedGroupColumn(group, leftBorder: !isFirstGroup)
+            collapsedGroupColumn(group)
         } else {
             ForEach(Array(group.chatIDs.enumerated()), id: \.element) { index, id in
-                let isFirstInGroup = index == 0
-                groupedChatColumn(id: id, group: group,
-                                   isFirstInGroup: isFirstInGroup,
-                                   leftBorder: !(isFirstGroup && isFirstInGroup))
-                    .id(id)
+                groupedChatColumn(id: id, group: group, isFirstInGroup: index == 0).id(id)
             }
         }
     }
 
-    // A chat column inside a project group — has a colored header strip on top.
+    // A chat column inside a project group — has a colored header strip on top and a rounded colored outline.
     @ViewBuilder
-    private func groupedChatColumn(id: String, group: ChatGroup, isFirstInGroup: Bool, leftBorder: Bool) -> some View {
+    private func groupedChatColumn(id: String, group: ChatGroup, isFirstInGroup: Bool) -> some View {
         if let session = chats.session(id) {
             let c = color(for: group)
             VStack(spacing: 0) {
@@ -137,88 +135,77 @@ struct ChatDeckView: View {
                         .padding(.horizontal, 10)
                         .frame(height: groupHeaderHeight)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(c.opacity(0.1))
-                        .overlay(Rectangle().fill(c).frame(height: 2), alignment: .top)
+                        .background(c.opacity(0.12))
                     }
                     .buttonStyle(.plain)
                     .help("Collapse \(group.projectName ?? "group")")
                 } else {
-                    // Continuation bar: same height, same tint, no label.
-                    c.opacity(0.07)
-                        .frame(height: groupHeaderHeight)
-                        .overlay(Rectangle().fill(c).frame(height: 2), alignment: .top)
+                    c.opacity(0.07).frame(height: groupHeaderHeight)
                 }
-                // The chat itself.
-                HStack(spacing: 0) {
-                    if leftBorder { Rectangle().fill(p.border).frame(width: 1) }
-                    ChatView(session: session, back: { nav.close(chatID: id) })
-                        .frame(width: colWidth)
-                }
-                .frame(maxHeight: .infinity)
+                ChatView(session: session, back: { nav.close(chatID: id) })
+                    .frame(width: colWidth)
+                    .frame(maxHeight: .infinity)
             }
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(c.opacity(0.45), lineWidth: 1.5))
         }
     }
 
     // A collapsed group: one narrow column, project name rotated vertically.
-    private func collapsedGroupColumn(_ group: ChatGroup, leftBorder: Bool) -> some View {
+    private func collapsedGroupColumn(_ group: ChatGroup) -> some View {
         let c = color(for: group)
-        return HStack(spacing: 0) {
-            if leftBorder { Rectangle().fill(p.border).frame(width: 1) }
-            VStack(spacing: 0) {
-                // Header strip with expand chevron.
-                Button {
-                    withAnimation(.easeOut(duration: 0.2)) { collapsedGroups.subtract([group.id]) }
-                } label: {
-                    HStack(spacing: 5) {
-                        Circle().fill(c).frame(width: 7, height: 7)
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(p.textMuted)
-                    }
-                    .padding(.horizontal, 10)
-                    .frame(height: groupHeaderHeight)
-                    .frame(maxWidth: .infinity)
-                    .background(c.opacity(0.1))
-                    .overlay(Rectangle().fill(c).frame(height: 2), alignment: .top)
+        return VStack(spacing: 0) {
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) { collapsedGroups.subtract([group.id]) }
+            } label: {
+                HStack(spacing: 5) {
+                    Circle().fill(c).frame(width: 7, height: 7)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(p.textMuted)
                 }
-                .buttonStyle(.plain)
-                // Body: rotated project name + chat count.
-                Button {
-                    withAnimation(.easeOut(duration: 0.2)) { collapsedGroups.subtract([group.id]) }
-                } label: {
-                    VStack(spacing: 12) {
-                        Text(group.projectName ?? "Project")
-                            .font(DS.Font.bodySmall.weight(.medium))
-                            .foregroundStyle(p.text)
-                            .lineLimit(1)
-                            .rotationEffect(.degrees(-90))
-                            .fixedSize()
-                        Text("\(group.chatIDs.count)")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(c)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Capsule().fill(c.opacity(0.15)))
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Expand \(group.projectName ?? "group")")
+                .padding(.horizontal, 10)
+                .frame(height: groupHeaderHeight)
+                .frame(maxWidth: .infinity)
+                .background(c.opacity(0.12))
             }
-            .frame(width: collapsedWidth - (leftBorder ? 1 : 0))
+            .buttonStyle(.plain)
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) { collapsedGroups.subtract([group.id]) }
+            } label: {
+                VStack(spacing: 12) {
+                    Text(group.projectName ?? "Project")
+                        .font(DS.Font.bodySmall.weight(.medium))
+                        .foregroundStyle(p.text)
+                        .lineLimit(1)
+                        .rotationEffect(.degrees(-90))
+                        .fixedSize()
+                    Text("\(group.chatIDs.count)")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(c)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Capsule().fill(c.opacity(0.15)))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Expand \(group.projectName ?? "group")")
         }
+        .frame(width: collapsedWidth)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(c.opacity(0.45), lineWidth: 1.5))
     }
 
-    // A plain column (no-project chat, or first column of first group before any project chrome).
+    // A plain (no-project) column — subtle neutral outline.
     @ViewBuilder
-    private func chatColumn(id: String, leftBorder: Bool) -> some View {
+    private func chatColumn(id: String) -> some View {
         if let session = chats.session(id) {
-            HStack(spacing: 0) {
-                if leftBorder { Rectangle().fill(p.border).frame(width: 1) }
-                ChatView(session: session, back: { nav.close(chatID: id) })
-                    .frame(width: colWidth)
-            }
+            ChatView(session: session, back: { nav.close(chatID: id) })
+                .frame(width: colWidth)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(p.border, lineWidth: 1))
         }
     }
 

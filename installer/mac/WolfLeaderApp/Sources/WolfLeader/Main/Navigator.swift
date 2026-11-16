@@ -35,6 +35,11 @@ final class Navigator: ObservableObject {
     /// A new chat asked for from somewhere else (a project's + button); the new-chat page picks it up.
     @Published var pendingNewChat: NewChatRequest?
 
+    /// Chats currently open as columns in the deck, in display order.
+    @Published private(set) var openChatIDs: [String] = []
+    /// True while the new-chat sheet is showing over the deck.
+    @Published var showingNewChatPanel = false
+
     private var backStack: [Route] = []
     private var forwardStack: [Route] = []
     private static let tabKey = "wl.projects.tab"
@@ -85,6 +90,11 @@ final class Navigator: ObservableObject {
     /// The new-chat page, with this project already picked (nil: no project).
     func newChat(project: ProjectRef? = nil, newProject: Bool = false) {
         pendingNewChat = NewChatRequest(project: project, newProject: newProject)
+        // While the deck is showing, pop up the new-chat sheet instead of navigating away.
+        if !openChatIDs.isEmpty {
+            showingNewChatPanel = true
+            return
+        }
         var next = route
         next.section = .chats
         next.projectID = nil
@@ -135,8 +145,10 @@ final class Navigator: ObservableObject {
         go(next)
     }
 
-    /// Open a chat. Every chat opens in the Chats section, so the sidebar shows it selected.
+    /// Open a chat. Adds it as a deck column; switches to the Chats section.
     func open(chat id: String, project: Int? = nil) {
+        if !openChatIDs.contains(id) { openChatIDs.append(id) }
+        showingNewChatPanel = false
         var next = route
         next.section = .chats
         next.projectID = nil
@@ -145,8 +157,22 @@ final class Navigator: ObservableObject {
         go(next)
     }
 
+    /// Close one column in the deck. Collapses back to home when the last column is closed.
+    func close(chatID id: String) {
+        openChatIDs.removeAll { $0 == id }
+        if route.chatID == id {
+            var next = route
+            next.chatID = openChatIDs.last
+            show(next)
+        }
+    }
+
     /// Leave a chat for the page it was opened from. If you came from there, that is simply "back".
     func closeChat() {
+        if let id = route.chatID, openChatIDs.contains(id) {
+            close(chatID: id)
+            return
+        }
         if let previous = backStack.last, previous.chatID == nil {
             goBack()
         } else {
@@ -201,8 +227,9 @@ final class Navigator: ObservableObject {
             swipeTravel = 0; swipeDrift = 0; swipeFired = false
         }
         guard event.phase.contains(.changed), !swipeFired else { return }
-        // The board scrolls sideways itself; do not fight it.
+        // The board and the chat deck scroll sideways themselves; do not fight them.
         if route.section == .projects, route.projectID == nil, route.projectsTab == "board" { return }
+        if route.section == .chats, !openChatIDs.isEmpty { return }
         // Sheets (a session being read, an editor) keep their own gestures.
         if event.window?.sheets.isEmpty == false || event.window?.isSheet == true { return }
         // Fingers moving right is "back", whichever way the Mac's scroll direction is set.

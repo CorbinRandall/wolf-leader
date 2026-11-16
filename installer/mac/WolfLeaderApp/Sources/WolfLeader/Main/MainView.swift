@@ -36,12 +36,17 @@ enum SidebarItem: Hashable {
     case newChat, allChats, chat(String), project(Int), projects, library
     case section(MainSection)
 
-    @MainActor init(_ route: Route) {
+    @MainActor init(_ route: Route, openChatIDs: [String] = []) {
         switch route.section {
         case .chats:
-            // A chat in a project keeps its project lit in the sidebar: that's where you are.
             if let id = route.chatID {
-                self = ChatStore.shared.record(id)?.projectID.map { .project($0) } ?? .chat(id)
+                // In deck mode, highlight the specific chat so the sub-row in the sidebar is selected.
+                // Without deck, highlight its project (the project page is the destination).
+                if !openChatIDs.isEmpty {
+                    self = .chat(id)
+                } else {
+                    self = ChatStore.shared.record(id)?.projectID.map { .project($0) } ?? .chat(id)
+                }
             } else {
                 self = route.chatList ? .allChats : .newChat
             }
@@ -81,7 +86,7 @@ struct MainView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: Binding<SidebarItem?>(
-                get: { SidebarItem(nav.route) },
+                get: { SidebarItem(nav.route, openChatIDs: nav.openChatIDs) },
                 set: { if let item = $0 { item.open(in: nav) } }
             )) {
                 Section {
@@ -185,6 +190,14 @@ struct MainView: View {
         }
         .environmentObject(nav)
         .environmentObject(search)
+        .sheet(isPresented: $nav.showingNewChatPanel) {
+            ChatHome(projectsModel: projectsModel)
+                .frame(minWidth: 620, minHeight: 480)
+                .environment(\.palette, p)
+                .environmentObject(store)
+                .environmentObject(nav)
+                .environmentObject(search)
+        }
         .onAppear { nav.watchSwipes() }
         .environmentObject(updates)
         .task {
@@ -218,8 +231,8 @@ struct MainView: View {
     private var detail: some View {
         switch nav.route.section {
         case .chats:
-            if let chatID = nav.route.chatID, let session = ChatStore.shared.session(chatID) {
-                ChatView(session: session, back: { nav.closeChat() }).id(chatID)
+            if !nav.openChatIDs.isEmpty {
+                ChatDeckView(projectsModel: projectsModel)
             } else if nav.route.chatList {
                 AllChatsView()
             } else {
